@@ -1,0 +1,103 @@
+{
+  "users": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "username": "alice",
+      "password": "secret",
+      "joinedGroups": [
+        "550e8400-e29b-41d4-a716-446655440002"
+      ],
+      "createdAt": "2026-05-09T00:00:00.000Z"
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "username": "bob",
+      "password": "secret",
+      "joinedGroups": [],
+      "createdAt": "2026-05-09T00:00:00.000Z"
+    },
+    {
+      "id": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
+      "username": "vo123",
+      "password": "password123",
+      "joinedGroups": [
+        "be901144-0c4d-48af-834c-d8ddf23c65b5"
+      ],
+      "createdAt": "2026-05-09T22:47:32.914Z"
+    }
+  ],
+  "groups": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440002",
+      "name": "Premier Picks",
+      "ownerId": "550e8400-e29b-41d4-a716-446655440001",
+      "members": [
+        "550e8400-e29b-41d4-a716-446655440001"
+      ],
+      "invites": [],
+      "createdAt": "2026-05-09T00:00:00.000Z"
+    },
+    {
+      "id": "be901144-0c4d-48af-834c-d8ddf23c65b5",
+      "name": "lettuce",
+      "ownerId": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
+      "members": [
+        "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2"
+      ],
+      "invites": [],
+      "createdAt": "2026-05-09T22:51:06.190Z"
+    }
+  ],
+  "picks": [
+    {
+      "id": "fa352e15-fe36-4264-8f73-f1749dc2d359",
+      "userId": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
+      "gameId": "550e8400-e29b-41d4-a716-446655440004",
+      "choice": "away",
+      "submittedAt": "2026-05-09T22:50:25.529Z"
+    },
+    {
+      "id": "74548ce0-f3e1-4ee7-b6e5-325106b15beb",
+      "userId": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
+      "gameId": "550e8400-e29b-41d4-a716-446655440005",
+      "choice": "home",
+      "submittedAt": "2026-05-09T22:50:29.762Z"
+    },
+    {
+      "id": "21ae3a4a-2ba6-4fbc-9eca-fc36206753a2",
+      "userId": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
+      "gameId": "550e8400-e29b-41d4-a716-446655440006",
+      "choice": "away",
+      "submittedAt": "2026-05-09T22:50:36.561Z"
+    }
+  ],
+  "games": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440004",
+      "homeTeam": "Liverpool",
+      "awayTeam": "Manchester United",
+      "date": "2026-05-15T15:00:00Z",
+      "homeProbability": 0.68,
+      "awayProbability": 0.32,
+      "result": null
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440005",
+      "homeTeam": "Arsenal",
+      "awayTeam": "Chelsea",
+      "date": "2026-05-16T18:30:00Z",
+      "homeProbability": 0.75,
+      "awayProbability": 0.25,
+      "result": null
+    },
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440006",
+      "homeTeam": "Barcelona",
+      "awayTeam": "Real Madrid",
+      "date": "2026-05-17T20:00:00Z",
+      "homeProbability": 0.55,
+      "awayProbability": 0.45,
+      "result": "away"
+    }
+  ]
+}

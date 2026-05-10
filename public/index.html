@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScoreCast</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header>
+        <div>
+          <h1>ScoreCast</h1>
+          <p>Pick football outcomes, invite friends, and climb the leaderboard.</p>
+        </div>
+        <div id="user-widget" class="hidden"></div>
+      </header>
+
+      <main>
+        <section id="auth-section">
+          <div class="card auth-card">
+            <h2>Sign in</h2>
+            <form id="login-form">
+              <label>Username</label>
+              <input id="login-username" required />
+              <label>Password</label>
+              <input id="login-password" type="password" required />
+              <button type="submit">Login</button>
+            </form>
+          </div>
+          <div class="card auth-card">
+            <h2>Register</h2>
+            <form id="register-form">
+              <label>Username</label>
+              <input id="register-username" required />
+              <label>Password</label>
+              <input id="register-password" type="password" required />
+              <button type="submit">Create account</button>
+            </form>
+          </div>
+        </section>
+
+        <section id="dashboard-section" class="hidden">
+          <div class="top-bar">
+            <button id="show-games">Upcoming Games</button>
+            <button id="show-groups">My Groups</button>
+            <button id="show-leaderboard">Leaderboards</button>
+            <span class="spacer"></span>
+            <button id="logout-button" class="secondary">Logout</button>
+          </div>
+
+          <div id="dashboard-views">
+            <div id="games-view" class="view-card">
+              <div class="view-header">
+                <h2>Upcoming Games</h2>
+                <p>Pick the likely winner and earn more points for underdog upsets.</p>
+              </div>
+              <div id="games-container"></div>
+            </div>
+
+            <div id="groups-view" class="view-card hidden">
+              <div class="view-header">
+                <h2>Groups</h2>
+                <p>Create a group, invite friends, and compare scores.</p>
+              </div>
+              <form id="group-form" class="small-form">
+                <input id="group-name" placeholder="New group name" required />
+                <button type="submit">Create group</button>
+              </form>
+              <div id="groups-container"></div>
+            </div>
+
+            <div id="leaderboard-view" class="view-card hidden">
+              <div class="view-header">
+                <h2>Leaderboards</h2>
+                <p>Overall ranking and group rankings.</p>
+              </div>
+              <div id="leaderboard-summary"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="game-row-template">
+      <div class="game-row card">
+        <div class="game-info">
+          <div class="team-row">
+            <strong class="team-name home-team"></strong>
+            <span class="prob home-prob"></span>
+          </div>
+          <div class="team-row">
+            <strong class="team-name away-team"></strong>
+            <span class="prob away-prob"></span>
+          </div>
+          <div class="game-date"></div>
+          <div class="game-result"></div>
+        </div>
+        <div class="game-actions">
+          <button class="pick-button home-pick">Pick Home</button>
+          <button class="pick-button away-pick">Pick Away</button>
+          <div class="game-forecast"></div>
+        </div>
+      </div>
+    </template>
+
+    <template id="group-card-template">
+      <div class="group-card card">
+        <div class="group-header">
+          <h3></h3>
+          <span class="group-members"></span>
+        </div>
+        <p class="group-id"></p>
+        <form class="invite-form small-form">
+          <input placeholder="Invite username" required />
+          <button type="submit">Invite</button>
+        </form>
+        <div class="invite-status"></div>
+      </div>
+    </template>
+
+    <template id="leaderboard-template">
+      <div class="leaderboard card">
+        <h3></h3>
+        <table>
+          <thead>
+            <tr><th>Rank</th><th>User</th><th>Points</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>

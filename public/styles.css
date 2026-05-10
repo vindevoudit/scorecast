@@ -1,0 +1,219 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: #101219;
+  color: #e5e7eb;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.2rem;
+}
+
+p {
+  margin: 8px 0 0;
+  color: #bfc7d7;
+}
+
+.card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 18px;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+}
+
+input,
+button,
+select {
+  width: 100%;
+  font: inherit;
+}
+
+label {
+  display: block;
+  margin-top: 14px;
+  margin-bottom: 6px;
+  color: #cbd5e1;
+}
+
+input {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+button {
+  margin-top: 16px;
+  border: none;
+  border-radius: 14px;
+  padding: 12px 16px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #334155;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+main {
+  display: grid;
+  gap: 18px;
+}
+
+.top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.view-card {
+  min-height: 260px;
+}
+
+.game-row {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 18px;
+  padding: 18px;
+  align-items: center;
+}
+
+.team-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.team-name {
+  font-size: 1rem;
+}
+
+.prob {
+  font-size: 0.95rem;
+  color: #94a3b8;
+}
+
+.game-date,
+.game-result,
+.game-forecast {
+  margin-top: 10px;
+  color: #cbd5e1;
+}
+
+.game-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.pick-button {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #1f2937;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+
+.small-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.group-card {
+  display: grid;
+  gap: 14px;
+}
+
+.group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.group-header h3 {
+  margin: 0;
+}
+
+.group-members,
+.group-id,
+.invite-status {
+  color: #cbd5e1;
+}
+
+.leaderboard {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th,
+tbody td {
+  padding: 12px 10px;
+  border-bottom: 1px solid #1f2937;
+  text-align: left;
+}
+
+thead th {
+  color: #94a3b8;
+}
+
+@media (max-width: 820px) {
+  .game-row {
+    grid-template-columns: 1fr;
+  }
+
+  .top-bar {
+    flex-direction: column;
+  }
+}

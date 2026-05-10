@@ -10,7 +10,7 @@ const { Op } = require('sequelize');
 const { User, Group, Game, Pick, GroupMember, GroupInvite, initDatabase } = require('./models');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'scorecast-demo-secret-2026';
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 function createToken(user) {
   return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });

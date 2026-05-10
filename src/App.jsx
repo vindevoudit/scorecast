@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import GameCard from './components/GameCard';
+import LeaderboardCard from './components/LeaderboardCard';
+import LoginForm from './components/LoginForm';
+import RegisterForm from './components/RegisterForm';
+import GroupCard from './components/GroupCard';
+import GroupLeaderboardCard from './components/GroupLeaderboardCard';
 
 const initialAuthData = {
   loginUsername: '',
@@ -9,23 +15,6 @@ const initialAuthData = {
 };
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function formatProbability(value) {
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatDate(dateText) {
-  const date = new Date(dateText);
-  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-}
-
-function scoreEstimate(probability) {
-  return `${100 - Math.round(probability * 100)} points if correct`;
-}
-
-function isUpcomingGame(game) {
-  return !game.result && new Date(game.date) > new Date();
-}
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('scorecastToken') || '');
@@ -273,57 +262,14 @@ function App() {
               </div>
 
               <div className="space-y-4">
-                {games.map((game) => {
-                  const upcoming = isUpcomingGame(game);
-                  const existingPick = pickMap.get(game.id);
-                  return (
-                    <div key={game.id} className="group rounded-3xl border border-slate-800 bg-slate-900/85 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.32)] transition duration-300 hover:-translate-y-1 hover:border-cyan-500/40 hover:bg-slate-900">
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap gap-3 text-xs uppercase tracking-[0.25em] text-cyan-400/80">
-                            <span>{formatDate(game.date)}</span>
-                            <span>{game.result ? 'Result' : upcoming ? 'Upcoming' : 'Closed'}</span>
-                          </div>
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            <div className="rounded-3xl bg-slate-950/70 p-4">
-                              <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Home</p>
-                              <p className="mt-3 text-xl font-semibold text-white">{game.homeTeam}</p>
-                              <p className="mt-2 text-sm text-slate-400">Win chance: {formatProbability(game.homeProbability)}</p>
-                            </div>
-                            <div className="rounded-3xl bg-slate-950/70 p-4">
-                              <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Away</p>
-                              <p className="mt-3 text-xl font-semibold text-white">{game.awayTeam}</p>
-                              <p className="mt-2 text-sm text-slate-400">Win chance: {formatProbability(game.awayProbability)}</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3 text-right">
-                          <p className="text-sm text-slate-400">Potential reward</p>
-                          <p className="text-lg font-semibold text-white">{scoreEstimate(game.homeProbability)} / {scoreEstimate(game.awayProbability)}</p>
-                          <p className="text-sm text-slate-500">Your pick: {existingPick ? (existingPick === 'home' ? game.homeTeam : game.awayTeam) : 'None'}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                        <button
-                          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 disabled:cursor-not-allowed disabled:opacity-50 ${existingPick === 'home' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:bg-cyan-500/20'}`}
-                          disabled={!upcoming}
-                          onClick={() => submitPick(game.id, 'home')}
-                        >
-                          Pick {game.homeTeam}
-                        </button>
-                        <button
-                          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 disabled:cursor-not-allowed disabled:opacity-50 ${existingPick === 'away' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-slate-700 bg-slate-950/90 text-slate-100 hover:border-slate-500 hover:bg-slate-900'}`}
-                          disabled={!upcoming}
-                          onClick={() => submitPick(game.id, 'away')}
-                        >
-                          Pick {game.awayTeam}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                {games.map((game) => (
+                    <GameCard
+                      key={game.id}
+                      game={game}
+                      existingPick={pickMap.get(game.id)}
+                      onPickSubmit={submitPick}
+                    />
+                ))}
               </div>
             </div>
 
@@ -402,32 +348,7 @@ function App() {
 
             <div className="space-y-4">
               {groups.map((group) => (
-                <div key={group.id} className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_60px_rgba(15,23,42,0.32)]">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h2 className="text-xl font-semibold text-white">{group.name}</h2>
-                      <p className="text-sm text-slate-400">{group.members.length} member{group.members.length === 1 ? '' : 's'}</p>
-                    </div>
-                    <p className="rounded-full bg-slate-950/80 px-4 py-2 text-sm text-cyan-300">{group.id}</p>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-                    <div className="rounded-3xl bg-slate-950/70 p-4">
-                      <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Members</p>
-                      <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
-                        {group.members.map((member) => {
-                          const userId = (member && typeof member === 'object' ? member.userId : member) || member;
-                          const username = (member && typeof member === 'object' ? member.username : member) || member;
-                          return (
-                            <span key={userId} className="rounded-2xl bg-slate-900/80 px-3 py-2">{username}</span>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <InviteRow groupId={group.id} onInvite={handleInvite} />
-                  </div>
-                </div>
+                <GroupCard key={group.id} group={group} onInvite={handleInvite} />
               ))}
             </div>
           </div>
@@ -436,39 +357,12 @@ function App() {
         {view === 'leaderboard' && (
           <div className="grid gap-6 lg:grid-cols-2">
             <LeaderboardCard title="Overall Leaderboard" entries={leaderboard.overall} />
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold text-white">Group Leaderboard</h2>
-                  <p className="mt-2 text-slate-400">Choose a group to see the current ranking.</p>
-                </div>
-                {groups.length > 0 ? (
-                  <select
-                    value={selectedGroupId}
-                    onChange={handleGroupSelection}
-                    className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 sm:w-auto"
-                  >
-                    {groups.map((group) => (
-                      <option key={group.id} value={group.id}>{group.name}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <p className="text-sm text-slate-500">No group membership found.</p>
-                )}
-              </div>
-              <div className="mt-6 space-y-3">
-                {leaderboard.group.length === 0 ? (
-                  <p className="rounded-3xl bg-slate-950/70 px-4 py-5 text-sm text-slate-400">No group leaderboard data yet.</p>
-                ) : (
-                  leaderboard.group.map((entry, index) => (
-                    <div key={entry.userId} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-4 transition duration-300 hover:bg-slate-900/95">
-                      <div className="text-sm text-slate-300">{index + 1}. {entry.username}</div>
-                      <div className="text-sm font-semibold text-white">{entry.points}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            <GroupLeaderboardCard
+              groups={groups}
+              selectedGroupId={selectedGroupId}
+              onGroupSelection={handleGroupSelection}
+              leaderboardGroup={leaderboard.group}
+            />
           </div>
         )}
       </section>
@@ -477,51 +371,8 @@ function App() {
 
   const authPanel = (
     <div className="grid gap-6 lg:grid-cols-2">
-      <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
-        <h2 className="text-2xl font-semibold text-white">Login</h2>
-        <p className="mt-2 text-slate-400">Use your demo account or sign in to continue.</p>
-        <form onSubmit={handleLogin} className="mt-8 space-y-5">
-          <label className="block text-sm font-semibold text-slate-300">Username</label>
-          <input
-            value={authData.loginUsername}
-            onChange={(event) => setAuthData((prev) => ({ ...prev, loginUsername: event.target.value }))}
-            className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400"
-          />
-          <label className="block text-sm font-semibold text-slate-300">Password</label>
-          <input
-            type="password"
-            value={authData.loginPassword}
-            onChange={(event) => setAuthData((prev) => ({ ...prev, loginPassword: event.target.value }))}
-            className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400"
-          />
-          <button className="w-full rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400">
-            Sign in
-          </button>
-        </form>
-      </div>
-
-      <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
-        <h2 className="text-2xl font-semibold text-white">Create an account</h2>
-        <p className="mt-2 text-slate-400">Start your own pool and invite friends instantly.</p>
-        <form onSubmit={handleRegister} className="mt-8 space-y-5">
-          <label className="block text-sm font-semibold text-slate-300">Username</label>
-          <input
-            value={authData.registerUsername}
-            onChange={(event) => setAuthData((prev) => ({ ...prev, registerUsername: event.target.value }))}
-            className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400"
-          />
-          <label className="block text-sm font-semibold text-slate-300">Password</label>
-          <input
-            type="password"
-            value={authData.registerPassword}
-            onChange={(event) => setAuthData((prev) => ({ ...prev, registerPassword: event.target.value }))}
-            className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400"
-          />
-          <button className="w-full rounded-3xl bg-slate-100 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-slate-200">
-            Register
-          </button>
-        </form>
-      </div>
+      <LoginForm authData={authData} setAuthData={setAuthData} onSubmit={handleLogin} />
+      <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
     </div>
   );
 
@@ -570,53 +421,5 @@ function App() {
   );
 }
 
-const LeaderboardCard = ({ title, entries }) => (
-  <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-    <h2 className="text-2xl font-semibold text-white">{title}</h2>
-    <p className="mt-2 text-slate-400">Top performers based on correct picks and probability scoring.</p>
-    <div className="mt-6 space-y-3">
-      {entries.length === 0 ? (
-        <p className="rounded-3xl bg-slate-950/70 px-4 py-5 text-sm text-slate-400">No leaderboard data yet.</p>
-      ) : (
-        entries.map((entry, index) => (
-          <div key={entry.userId} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-4 transition duration-300 hover:bg-slate-900/95">
-            <div className="text-sm text-slate-300">{index + 1}. {entry.username}</div>
-            <div className="text-sm font-semibold text-white">{entry.points}</div>
-          </div>
-        ))
-      )}
-    </div>
-  </div>
-);
-
-function InviteRow({ groupId, onInvite }) {
-  const [inviteName, setInviteName] = useState('');
-
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (inviteName.trim()) {
-          onInvite(groupId, inviteName.trim());
-          setInviteName('');
-        }
-      }}
-      className="space-y-3"
-    >
-      <label className="text-sm font-semibold text-slate-300">Invite a teammate</label>
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <input
-          value={inviteName}
-          onChange={(event) => setInviteName(event.target.value)}
-          placeholder="Username"
-          className="flex-1 rounded-3xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-white outline-none transition duration-200 focus:border-cyan-400"
-        />
-        <button className="rounded-3xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400" type="submit">
-          Invite
-        </button>
-      </div>
-    </form>
-  );
-}
-
 export default App;
+

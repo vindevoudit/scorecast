@@ -22,6 +22,7 @@ function App() {
   const [games, setGames] = useState([]);
   const [groups, setGroups] = useState([]);
   const [picks, setPicks] = useState([]);
+  const [pendingInvites, setPendingInvites] = useState([]);
   const [leaderboard, setLeaderboard] = useState({ overall: [], group: [] });
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [view, setView] = useState('games');
@@ -97,7 +98,9 @@ function App() {
     setLoading(true);
     try {
       const me = await request('/api/me');
-      setUser(me);
+      const { pendingInvites, ...userData } = me;
+      setUser(userData);
+      setPendingInvites(pendingInvites || []);
       await refreshGames();
       const groupData = await refreshGroups();
       const initialGroupId = selectedGroupId && groupData.some((group) => group.id === selectedGroupId)
@@ -205,6 +208,30 @@ function App() {
     }
   };
 
+  const handleAcceptInvite = async (groupId, inviteId) => {
+    try {
+      await request(`/api/groups/${groupId}/invite/${inviteId}/accept`, {
+        method: 'POST',
+      });
+      await Promise.all([loadDashboard()]);
+      showStatus('Invitation accepted!');
+    } catch (error) {
+      showStatus(error.message);
+    }
+  };
+
+  const handleDeclineInvite = async (groupId, inviteId) => {
+    try {
+      await request(`/api/groups/${groupId}/invite/${inviteId}/decline`, {
+        method: 'POST',
+      });
+      await Promise.all([loadDashboard()]);
+      showStatus('Invitation declined');
+    } catch (error) {
+      showStatus(error.message);
+    }
+  };
+
   const dashboard = (
     <div className="space-y-6">
       <section className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.55)] backdrop-blur-xl">
@@ -219,6 +246,9 @@ function App() {
             <p className="text-sm text-slate-400">Logged in as</p>
             <p className="mt-1 text-xl font-semibold text-white">{user?.username}</p>
             <p className="mt-2 text-sm text-slate-400">Joined groups: {user?.joinedGroups?.length || 0}</p>
+            {pendingInvites.length > 0 && (
+              <p className="mt-2 text-sm text-amber-300">Pending invites: {pendingInvites.length}</p>
+            )}
           </div>
         </div>
       </section>
@@ -347,6 +377,37 @@ function App() {
             </div>
 
             <div className="space-y-4">
+              {pendingInvites.length > 0 && (
+                <div className="rounded-3xl border border-amber-800/50 bg-amber-950/30 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.32)]">
+                  <h2 className="text-2xl font-semibold text-white">Pending Invitations</h2>
+                  <p className="mt-2 text-sm text-amber-200/80">You have {pendingInvites.length} pending group invitation{pendingInvites.length !== 1 ? 's' : ''}.</p>
+                  <div className="mt-4 space-y-3">
+                    {pendingInvites.map((invite) => (
+                      <div key={invite.id} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-4">
+                        <div>
+                          <p className="text-sm text-slate-300">Invited to join</p>
+                          <p className="mt-1 font-semibold text-white">{invite.groupName}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleAcceptInvite(invite.groupId, invite.id)}
+                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => handleDeclineInvite(invite.groupId, invite.id)}
+                            className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-300 transition duration-300 hover:border-slate-500 hover:bg-slate-900"
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {groups.map((group) => (
                 <GroupCard key={group.id} group={group} onInvite={handleInvite} />
               ))}

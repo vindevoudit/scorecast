@@ -54,6 +54,24 @@ async function getJoinedGroupIds(userId) {
   return memberships.map((m) => m.groupId);
 }
 
+async function getPendingInvites(userId) {
+  const user = await getUserById(userId);
+  if (!user) return [];
+
+  const invites = await GroupInvite.findAll({ where: { username: user.username } });
+  const groups = await Group.findAll({ where: { id: invites.map((i) => i.groupId) } });
+  
+  return invites.map((invite) => {
+    const group = groups.find((g) => g.id === invite.groupId);
+    return {
+      id: invite.id,
+      groupId: invite.groupId,
+      groupName: group?.name || 'Unknown Group',
+      createdAt: invite.createdAt,
+    };
+  });
+}
+
 async function getGroupsForUser(userId) {
   const memberships = await GroupMember.findAll({ where: { userId } });
   const groupIds = memberships.map((m) => m.groupId);
@@ -184,7 +202,8 @@ app.get('/api/me', authMiddleware, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const joinedGroups = await getJoinedGroupIds(user.id);
-  res.json({ id: user.id, username: user.username, joinedGroups });
+  const pendingInvites = await getPendingInvites(user.id);
+  res.json({ id: user.id, username: user.username, joinedGroups, pendingInvites });
 });
 
 app.get('/api/games', authMiddleware, async (req, res) => {
@@ -268,11 +287,69 @@ app.post('/api/groups/:groupId/invite', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'User is already a member of this group' });
     }
 
-    await GroupMember.create({ groupId: req.params.groupId, userId: invitedUser.id });
+    const existingInvite = await GroupInvite.findOne({
+      where: { groupId: req.params.groupId, username: invitedUser.username },
+    });
+    if (existingInvite) {
+      return res.status(400).json({ error: 'User has already been invited to this group' });
+    }
+
+    await GroupInvite.create({ groupId: req.params.groupId, username: invitedUser.username });
     const updatedGroup = await getGroupById(req.params.groupId);
     res.json({ success: true, group: updatedGroup });
   } catch (error) {
     res.status(500).json({ error: 'Failed to invite user' });
+  }
+});
+
+app.post('/api/groups/:groupId/invite/:inviteId/accept', authMiddleware, async (req, res) => {
+  try {
+    const invite = await GroupInvite.findByPk(req.params.inviteId);
+    if (!invite) {
+      return res.status(404).json({ error: 'Invite not found' });
+    }
+
+    const user = await getUserById(req.user.id);
+    if (!user || user.username !== invite.username) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const group = await Group.findByPk(req.params.groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const isAlreadyMember = await GroupMember.findOne({
+      where: { groupId: req.params.groupId, userId: req.user.id },
+    });
+    if (!isAlreadyMember) {
+      await GroupMember.create({ groupId: req.params.groupId, userId: req.user.id });
+    }
+
+    await GroupInvite.destroy({ where: { id: req.params.inviteId } });
+    const updatedGroup = await getGroupById(req.params.groupId);
+    res.json({ success: true, group: updatedGroup });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to accept invite' });
+  }
+});
+
+app.post('/api/groups/:groupId/invite/:inviteId/decline', authMiddleware, async (req, res) => {
+  try {
+    const invite = await GroupInvite.findByPk(req.params.inviteId);
+    if (!invite) {
+      return res.status(404).json({ error: 'Invite not found' });
+    }
+
+    const user = await getUserById(req.user.id);
+    if (!user || user.username !== invite.username) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await GroupInvite.destroy({ where: { id: req.params.inviteId } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to decline invite' });
   }
 });
 

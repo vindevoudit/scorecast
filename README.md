@@ -1,6 +1,6 @@
 # ScoreCast
 
-A football prediction web app built with React, Vite, Tailwind CSS, and an Express backend using NeDB for local persistence.
+A football prediction web app built with React, Vite, Tailwind CSS, and an Express backend using PostgreSQL for persistent data storage.
 
 ## Features
 
@@ -14,8 +14,30 @@ A football prediction web app built with React, Vite, Tailwind CSS, and an Expre
 
 - Frontend: `React`, `Vite`, `Tailwind CSS`
 - Backend: `Node.js`, `Express`
-- Persistence: `nedb-promises` with local `.db` files
+- Database: `PostgreSQL` with `Sequelize` ORM
 - Authentication: JWT tokens
+
+## Setup
+
+### Prerequisites
+- Node.js (v14+)
+- PostgreSQL database running locally or remotely
+
+### Configuration
+
+Create a `.env` file in the project root with your database credentials:
+
+```bash
+DATABASE_URL=postgres://username:password@localhost:5432/scorecast_db
+JWT_SECRET=your-secret-key-here
+PORT=3001
+```
+
+For local development with default PostgreSQL setup:
+
+```bash
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/scorecast_db
+```
 
 ## Run locally
 
@@ -25,7 +47,7 @@ A football prediction web app built with React, Vite, Tailwind CSS, and an Expre
 npm install
 ```
 
-2. Start the development server:
+2. Start the development server (runs both frontend on port 5173 and backend on port 3001):
 
 ```bash
 npm run dev
@@ -47,7 +69,7 @@ npm run build
 npm start
 ```
 
-3. Open `http://localhost:3000`
+3. Open `http://localhost:3001`
 
 ## Demo users
 
@@ -57,5 +79,6 @@ npm start
 ## Notes
 
 - Correct picks score `100 - probability*100`, so underdog picks earn more points when right.
-- Persistent data is stored in local NeDB files: `users.db`, `groups.db`, `games.db`, and `picks.db`.
+- Persistent data is stored in PostgreSQL tables managed by Sequelize ORM.
 - The backend serves the built frontend from `dist/` in production.
+- During development, Vite proxies API calls from port 5173 to the backend on port 3001.

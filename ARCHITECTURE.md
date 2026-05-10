@@ -2,14 +2,14 @@
 
 ## Overview
 ScoreCast is a football prediction web application built with:
-- `React` for the frontend UI
-- `Vite` for frontend development and bundling
-- `Tailwind CSS` for styling
-- `Node.js` and `Express` for the backend API
+- `React` for the frontend UI with componentized architecture
+- `Vite` for frontend development, bundling, and API proxying
+- `Tailwind CSS` for utility-based styling
+- `Node.js` and `Express` for the backend REST API
 - `PostgreSQL` for persistent storage with `Sequelize` ORM
-- JWT-based authentication with bearer tokens and cookies
+- JWT-based authentication via bearer tokens and cookies
 
-The app supports user registration/login, groups with invites, probability-based match picks, and leaderboards.
+The app supports user registration/login, group management with invites, probability-based match predictions, and real-time leaderboards.
 
 ## File Structure
 - `server.js` - Express backend, API routes, database initialization, auth middleware, and production static serving.
@@ -25,8 +25,16 @@ The app supports user registration/login, groups with invites, probability-based
   - `models/index.js` - Database connection, associations, and seeding logic
 - `src/` - React application source:
   - `src/main.jsx` - React app bootstrap.
-  - `src/App.jsx` - main application UI, state, API calls, and business flows.
+  - `src/App.jsx` - main application UI, state management, API integration, and business logic.
   - `src/index.css` - global CSS and Tailwind utilities.
+  - `src/components/` - Reusable React components:
+    - `GameCard.jsx` - Game display with pick submission
+    - `GroupCard.jsx` - Group display with member list and invite form
+    - `GroupLeaderboardCard.jsx` - Group leaderboard selector and display
+    - `LeaderboardCard.jsx` - Leaderboard entry list
+    - `LoginForm.jsx` - Login form component
+    - `RegisterForm.jsx` - Registration form component
+    - `InviteRow.jsx` - Invite submission form
 - `public/` - static assets and HTML template used by Vite.
 - `dist/` - production build output served by `server.js` after `npm run build`.
 
@@ -88,9 +96,9 @@ The app supports user registration/login, groups with invites, probability-based
 
 ### Technology Stack
 - `React` with functional components and hooks.
-- `Vite` for fast development server and build process.
+- `Vite` for fast development server and build process with configured API proxy.
 - `Tailwind CSS` for utility-based styling.
-- `fetch` API wrapper for backend communication.
+- `fetch` API for backend communication with Bearer token authentication.
 
 ### Application State
 - Main state values managed in `src/App.jsx`:
@@ -105,8 +113,8 @@ The app supports user registration/login, groups with invites, probability-based
 - Authentication token is persisted in `localStorage` as `scorecastToken`.
 
 ### API Integration
-- A `request(path, options)` helper sends JSON requests and injects auth headers.
-- `fetch` calls use `credentials: 'include'` for cookie support.
+- A `request(path, options)` helper sends JSON requests with Authorization headers.
+- During development, Vite's proxy redirects `/api/*` calls to the backend at `http://localhost:3000`.
 - Dashboard data is loaded after login via `/api/me`, `/api/games`, `/api/groups`, `/api/picks`, and `/api/leaderboard`.
 
 ### UI Workflows
@@ -158,21 +166,30 @@ The app supports user registration/login, groups with invites, probability-based
 - `submittedAt`
 
 ## Startup and Deployment
+
+### Development
 - Install dependencies with `npm install`.
-- Run the frontend dev server with `npm run dev`.
-- Build production assets with `npm run build`.
-- Start the production server with `npm start`.
-- `server.js` serves the built frontend from `dist/` and exposes the API endpoints.
+- Configure `.env` with PostgreSQL credentials (see README for setup).
+- Run development mode with `npm run dev` (starts both frontend dev server on 5173 and backend on 3001).
+- Vite proxy at `vite.config.js` routes `/api` calls to the backend.
+
+### Production
+- Build frontend assets with `npm run build` (outputs to `dist/`).
+- Start production server with `npm start`.
+- `server.js` serves the built frontend from `dist/` and handles all API requests.
+- Backend runs on configured PORT (default 3001).
 
 ## Current Limitations
-- Passwords are stored in plain text rather than hashed.
+- Passwords are stored in plain text rather than hashed (security risk).
 - The game result endpoint is not protected by role-based admin authorization.
-- The app relies on embedded NeDB storage, which is not suitable for production-scale deployments.
 - Frontend validation and error handling are minimal.
+- No rate limiting on API endpoints.
 
 ## Recommended Improvements
-- Add password hashing with `bcrypt` or a similar library.
-- Add RBAC or admin protection for result management endpoints.
-- Replace NeDB with a production-grade database such as PostgreSQL, MySQL, or SQLite.
-- Add stronger frontend validation for registration, group invites, and pick submission.
+- Add password hashing with `bcrypt` or similar library.
+- Implement role-based access control (RBAC) for admin operations (result management).
+- Add comprehensive frontend validation for registration, group invites, and pick submission.
+- Implement rate limiting and DDoS protection.
 - Add end-to-end tests for auth flows, picks, group membership, and leaderboard scoring.
+- Add request logging and monitoring.
+- Implement email notifications for group invites and game results.

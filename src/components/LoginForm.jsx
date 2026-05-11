@@ -2,7 +2,7 @@ function LoginForm({ authData, setAuthData, onSubmit }) {
   return (
     <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
       <h2 className="text-2xl font-semibold text-white">Login</h2>
-      <p className="mt-2 text-slate-400">Use your demo account or sign in to continue.</p>
+      <p className="mt-2 text-slate-400">Sign in to continue.</p>
       <form onSubmit={onSubmit} className="mt-8 space-y-5">
         <label className="block text-sm font-semibold text-slate-300">Username</label>
         <input

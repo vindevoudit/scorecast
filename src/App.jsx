@@ -445,16 +445,16 @@ function App() {
             <div>
               <p className="text-sm uppercase tracking-[0.35em] text-cyan-400/80">ScoreCast</p>
               <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-                Play the odds with football predictions with your friends. Join groups, make picks, and climb the leaderboards!
+                Join groups, make picks, and climb the leaderboards!
               </h1>
               <p className="mt-4 max-w-2xl text-slate-400 sm:text-lg">
-                Pick match winners, manage groups, and earn points for risky calls.
+                Pick your match winners, compete against your friends and the world, earn points for risky calls and underdog upsets, and see how you stack up on the live leaderboards. It's football prediction made social, competitive, and fun!
               </p>
             </div>
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 px-6 py-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.4)]">
               <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Predict & Win</p>
               <p className="mt-3 text-2xl font-semibold text-white">ScoreCast</p>
-              <p className="mt-2 text-sm text-slate-400">Make smart picks, earn points, dominate leaderboards.</p>
+              <p className="mt-2 text-sm text-slate-400">Pick smart, earn points, dominate leaderboards.</p>
             </div>
           </div>
 

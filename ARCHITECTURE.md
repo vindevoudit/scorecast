@@ -26,12 +26,12 @@
 
 ScoreCast is a social football-prediction web app. The product loop is:
 
-1. An admin creates fixtures with home/away probabilities (the implied odds).
-2. Users sign up, pick the winner of upcoming games, and lock in their pick before kickoff.
+1. An admin creates fixtures (individually or in bulk) with home/away probabilities (the implied odds).
+2. Users sign up, pick the winner of upcoming games, lock in their pick before kickoff (and can undo a pick before kickoff).
 3. After a game's result is set, correct picks earn `round((1 − probability) × 100)` points — picking the underdog pays more.
-4. Users compete on an overall leaderboard and inside private/public groups, send friend requests, comment on games, and collect badges for milestones.
+4. Users compete on an overall leaderboard and inside private/public groups (sortable + paginated), send friend requests, comment and react on games, customise their profile (display name, bio, deterministic avatar), search across users/groups/games, and collect badges for milestones.
 
-The codebase is mid-sized (~3k lines of JavaScript split roughly evenly between server and client). It is monorepo-style: one Express server serves both the JSON API at `/api/*` and the static React bundle for everything else.
+The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between server and client). It is monorepo-style: one Express server serves both the JSON API at `/api/*` and the static React bundle for everything else.
 
 ---
 
@@ -67,13 +67,13 @@ The codebase is mid-sized (~3k lines of JavaScript split roughly evenly between 
 └─────────────────────────┬────────────────────────────────────────────┘
                           │ Sequelize (TCP)
                           ▼
-            ┌─────────────────────────────────┐
-            │       PostgreSQL                │
-            │  users, games, picks, groups,   │
-            │  group_members, group_invites,  │
-            │  badges, friendships, comments, │
-            │  notifications                  │
-            └─────────────────────────────────┘
+            ┌─────────────────────────────────────┐
+            │       PostgreSQL                    │
+            │  users, games, picks, groups,       │
+            │  group_members, group_invites,      │
+            │  badges, friendships, comments,     │
+            │  comment_reactions, notifications   │
+            └─────────────────────────────────────┘
 ```
 
 There is **one server process**, **one database**, **no message queue**, **no cache**, **no worker**, **no CDN**. Notifications and badges are fired synchronously inside the same request that triggers them (in a `.catch(() => {})` to keep the user-facing response from failing if a side-effect errors).
@@ -105,7 +105,7 @@ Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker
 
 ```
 ScoreCast/
-├── server.js                            # Single-file Express app (~850 LOC)
+├── server.js                            # Single-file Express app (~1500 LOC)
 ├── package.json                         # All deps; npm scripts: dev, build, start, preview
 ├── db-config.js                         # Stub used by sequelize-cli (not by the app)
 ├── data.json                            # Seed: users, games, groups, picks
@@ -116,7 +116,7 @@ ScoreCast/
 │
 ├── models/                              # Sequelize models — one file per table
 │   ├── index.js                         # Sequelize init + associations + initDatabase + runMigrations + seedDatabase
-│   ├── User.js                          # bcrypt beforeCreate/beforeUpdate hooks live here
+│   ├── User.js                          # bcrypt beforeCreate/beforeUpdate hooks; displayName + bio
 │   ├── Game.js
 │   ├── Group.js                         # visibility ENUM('private'|'public')
 │   ├── GroupMember.js                   # composite PK (groupId, userId)
@@ -124,7 +124,8 @@ ScoreCast/
 │   ├── Pick.js                          # unique (userId, gameId)
 │   ├── Badge.js                         # unique (userId, slug)
 │   ├── Friendship.js                    # pending|accepted; unique pair via functional index in runMigrations
-│   ├── Comment.js                       # indexed by gameId
+│   ├── Comment.js                       # indexed by gameId; editedAt (Tier 8)
+│   ├── CommentReaction.js               # unique (commentId, userId, emoji); indexed by commentId (Tier 8)
 │   └── Notification.js                  # indexed by (userId, read, createdAt)
 │
 ├── badges/
@@ -136,33 +137,35 @@ ScoreCast/
 │
 ├── src/                                 # React frontend
 │   ├── main.jsx                         # React.createRoot bootstrap
-│   ├── App.jsx                          # ~900 LOC; state, tabs, request(), all handlers
+│   ├── App.jsx                          # ~1100 LOC; state, tabs, request(), all handlers
 │   ├── index.css                        # @tailwind base/components/utilities
 │   ├── utils/
 │   │   ├── scoring.js                   # MIRROR of server's scorePick; see §8.1
 │   │   └── time.js                      # formatCountdown, useCountdown hook, timeAgo
 │   └── components/
-│       ├── GameCard.jsx                 # Pick UI, outcome badge, countdown chip, CommentThread footer
-│       ├── GroupCard.jsx                # Member grid, invite form, Public/Private badge
-│       ├── GroupLeaderboardCard.jsx
-│       ├── LeaderboardCard.jsx          # Exports LeaderboardRow (used inline by App.jsx for sidebar)
+│       ├── GameCard.jsx                 # Pick UI, outcome badge, countdown chip, undo-pick, CommentThread footer
+│       ├── GroupCard.jsx                # Member grid + Avatars, invite form, Public/Private badge, leave/transfer/delete menu
+│       ├── GroupLeaderboardCard.jsx     # Sort select + pagination + viewer-row anchor
+│       ├── LeaderboardCard.jsx          # Exports LeaderboardRow (Avatar + clickable for profile drawer)
 │       ├── InviteRow.jsx
 │       ├── LoginForm.jsx
 │       ├── RegisterForm.jsx
 │       ├── PicksHistory.jsx
 │       ├── EmptyState.jsx
 │       ├── Skeleton.jsx                 # SkeletonGameCard + SkeletonLeaderboardRow
-│       ├── ConfirmModal.jsx             # Backdrop + Esc-close, used by logout + admin deletes
-│       ├── ProfileView.jsx              # Stats grid + BadgeWall + recent picks + friend button
+│       ├── ConfirmModal.jsx             # Backdrop + Esc-close, used by logout + admin deletes + bulk confirm
+│       ├── Avatar.jsx                   # Deterministic initial-on-color circle (FNV-1a → HSL)
+│       ├── SearchBar.jsx                # Debounced /api/search, type-grouped dropdown
+│       ├── ProfileView.jsx              # Header (Avatar + displayName + username), stats, BadgeWall, recent picks, friend button, inline edit form (own profile)
 │       ├── ProfileDrawer.jsx            # Right-side drawer wrapping ProfileView
 │       ├── BadgeWall.jsx
 │       ├── FriendsList.jsx
-│       ├── CommentThread.jsx
+│       ├── CommentThread.jsx            # Comments with edit, delete, 5-emoji reactions (per-viewer state)
 │       ├── NotificationBell.jsx         # 30s polling, dropdown
 │       └── admin/
 │           ├── AdminPanel.jsx
-│           ├── GameManager.jsx
-│           └── UserManager.jsx
+│           ├── GameManager.jsx          # Per-row + bulk-select with action bar
+│           └── UserManager.jsx          # Per-row + bulk-select with action bar (self auto-skipped)
 │
 └── dist/                                # `npm run build` output, served as static by server.js
 ```
@@ -226,7 +229,7 @@ Factory in [validation/middleware.js](validation/middleware.js). Runs `schema.sa
 ```
 On success it **replaces `req.body` with the parsed (sanitized, defaulted) value** so handlers can trust it. All input mutations from zod (`.trim()`, `.toLowerCase()`, coercions) take effect here.
 
-Schemas live in [validation/schemas.js](validation/schemas.js): `registerSchema`, `loginSchema`, `createGroupSchema` (with optional `visibility`), `inviteSchema`, `pickSchema`, `resultSchema`, `friendRequestSchema`, `visibilitySchema`, `commentSchema`, `createGameSchema`, `updateGameSchema`, `roleSchema`.
+Schemas live in [validation/schemas.js](validation/schemas.js): `registerSchema`, `loginSchema`, `createGroupSchema` (with optional `visibility`), `inviteSchema`, `pickSchema`, `resultSchema`, `friendRequestSchema`, `visibilitySchema`, `commentSchema`, `createGameSchema`, `updateGameSchema`, `roleSchema`, `transferOwnerSchema`, `editProfileSchema`, `reactionSchema` (emoji ∈ `ALLOWED_EMOJIS`), `bulkGameSchema`, `bulkUserSchema`.
 
 #### Rate limiting
 Two limiters from `express-rate-limit`, both configured `standardHeaders: true, legacyHeaders: false`:
@@ -242,18 +245,19 @@ In-memory store, so a server restart wipes the counters. Acceptable for a single
 
 Routes are registered in [server.js](server.js) in roughly this order:
 1. Auth: `POST /api/register`, `POST /api/login`
-2. Identity: `GET /api/me`
+2. Identity: `GET /api/me`, `PUT /api/me` (displayName + bio edit)
 3. Games: `GET /api/games`
-4. Groups (in order): `GET /api/groups`, **`GET /api/groups/discover`** (must come before `/:groupId`), `GET /api/groups/:groupId`, `POST /api/groups`, invite endpoints, `POST /api/groups/:groupId/join`, `POST /api/groups/:groupId/visibility`
-5. Picks: `POST /api/picks`, `GET /api/picks`
-6. Leaderboard: `GET /api/leaderboard`
-7. Game admin: `POST /api/games/:gameId/result`
-8. Profiles: `GET /api/users/:username/profile`
-9. Friends: `POST /api/friends/request`, `/accept`, `/decline`, `DELETE`, `GET /api/friends`
-10. Comments: `GET/POST /api/games/:gameId/comments`, `DELETE /api/comments/:id`
-11. Notifications: `GET /api/notifications`, `POST /:id/read`, `POST /read-all`
-12. Admin: `POST/PUT/DELETE /api/admin/games`, `GET/POST/DELETE /api/admin/users/...`
-13. Catch-all: `app.get('*')` → `dist/index.html`
+4. Groups (in order): `GET /api/groups`, **`GET /api/groups/discover`** (must come before `/:groupId`), `GET /api/groups/:groupId`, `POST /api/groups`, invite endpoints, `POST /api/groups/:groupId/join`, `POST /api/groups/:groupId/leave`, `POST /api/groups/:groupId/transfer`, `DELETE /api/groups/:groupId`, `POST /api/groups/:groupId/visibility`
+5. Picks: `POST /api/picks`, `GET /api/picks`, **`DELETE /api/picks/:id`** (Tier 8 — undo pick)
+6. Search: `GET /api/search?q=&type=` (Tier 8)
+7. Leaderboard: `GET /api/leaderboard?groupId=&orderBy=&offset=&limit=` (sort + pagination in Tier 8)
+8. Game admin: `POST /api/games/:gameId/result`
+9. Profiles: `GET /api/users/:username/profile`
+10. Friends: `POST /api/friends/request`, `/accept`, `/decline`, `DELETE`, `GET /api/friends`
+11. Comments: `GET/POST /api/games/:gameId/comments`, `PUT /api/comments/:id` (edit), `DELETE /api/comments/:id`, `POST /api/comments/:id/reactions`, `DELETE /api/comments/:id/reactions/:emoji`
+12. Notifications: `GET /api/notifications`, `POST /:id/read`, `POST /read-all`
+13. Admin: `POST/PUT/DELETE /api/admin/games`, `POST /api/admin/games/bulk`, `GET/POST/DELETE /api/admin/users/...`, `POST /api/admin/users/bulk`
+14. Catch-all: `app.get('*')` → `dist/index.html`
 
 **⚠ Route ordering matters for path-param shadowing.** `/api/groups/discover` is registered before `/api/groups/:groupId` so Express doesn't match `discover` as the `:groupId` parameter. Any future sibling route under `/api/groups/*` must follow the same convention.
 
@@ -263,14 +267,17 @@ These are pure-Node helpers, not endpoints. They live inside `server.js` and are
 
 | Helper | Purpose | Called from |
 | --- | --- | --- |
-| `scorePick(pick, game)` | Authoritative scoring formula | `buildUserSummary`, `buildGroupLeaderboard`, `applyGameResult` (notification text), profile endpoint |
-| `notify(userId, type, title, body?, link?)` | Creates a `Notification` row; swallows errors | Invite, accept, friend-request, friend-accept, public-group join, badge award, game result |
+| `scorePick(pick, game)` | Authoritative scoring formula | `buildUserSummary`, `buildGroupLeaderboard`, profile endpoint, result + bulk-result hooks |
+| `notify(userId, type, title, body?, link?)` | Creates a `Notification` row; swallows errors | Invite, accept, friend-request, friend-accept, public-group join, group leave/transfer/delete, badge award, game result |
 | `awardBadge(userId, slug)` | Inserts a `Badge` row (unique-constrained); fires a `badge` notification | `evaluateBadges` only |
-| `evaluateBadges(userId, ctx?)` | Re-runs all badge unlock conditions for a user; idempotent | `POST /api/picks`, `POST /api/groups`, per-user inside the result hook |
+| `evaluateBadges(userId, ctx?)` | Re-runs all badge unlock conditions for a user; idempotent | `POST /api/picks`, `POST /api/groups`, per-user inside the result hook (single + bulk) |
 | `getFriendshipBetween(a, b)` | Finds the single row (in either direction) | Profile endpoint, friend-request guards |
 | `friendStatusFrom(friendship, viewer, target)` | Returns `'self' \| 'none' \| 'pending-in' \| 'pending-out' \| 'friends'` | Profile endpoint |
-| `buildUserSummary()` | Overall leaderboard rows | `GET /api/leaderboard` |
-| `buildGroupLeaderboard(groupId)` | Group-scoped leaderboard rows | `GET /api/leaderboard?groupId=` |
+| `buildUserSummary()` | Overall leaderboard rows (includes displayName) | `GET /api/leaderboard` |
+| `buildGroupLeaderboard(groupId)` | Group-scoped rows (includes displayName + winRate) | `GET /api/leaderboard?groupId=` |
+| `sortLeaderboard(rows, orderBy)` | Sort by `points / winRate / username`, attach `rank` | Group leaderboard pagination path |
+| `cascadeDeleteUser(target)` | 9-step user cascade (groups owned, picks, comments, friendships, memberships, invites, then user) | `DELETE /api/admin/users/:id`, `POST /api/admin/users/bulk` |
+| `cascadeDeleteGame(game)` | Pick + comment cleanup, then game | `DELETE /api/admin/games/:id`, `POST /api/admin/games/bulk` |
 
 `notify` and `evaluateBadges` are **fire-and-forget with `.catch(() => {})`** — a failure inside them never breaks the user-facing response. The trade-off is silent failures; future maintainers may want to swap in a real logger.
 
@@ -298,10 +305,13 @@ token, user, games, groups, picks, pendingInvites,
 leaderboard, selectedGroupId, view, status, loading,
 authData, confirmingLogout, showCompleted,
 profileUsername, profile, profileLoading, profileBusy,
-friends, discoverGroups, ownProfile
+friends, discoverGroups, ownProfile,
+groupOrderBy, groupOffset                      // Tier 8.8: leaderboard sort + pagination
 ```
 
 Derived state uses `useMemo` (`pickMap`, `upcomingGames/liveGames/completedGames`, `tabs`).
+
+> **Note on `pickMap`**: it stores the **full pick object** keyed by `gameId`, not just the choice. This was changed in Tier 8.2 so `GameCard` can pass `existingPickId` to the undo-pick handler. The card derives `existingChoice = existingPick?.choice` for the visual state.
 
 `useCallback` is used for the `request` helper and `fetchProfile` — they're passed to children (`NotificationBell`, `CommentThread`) where stable references matter for `useEffect` dependencies.
 
@@ -356,12 +366,13 @@ There is **no global polling for game state** today (deferred Tier 4 feature). L
 └── (dashboard)
     ├── header card
     ├── tabs row
+    │   ├── <SearchBar>                  // Tier 8.4
     │   ├── <NotificationBell>
     │   └── logout button → <ConfirmModal>
     │
     ├── view === 'games':
-    │     <GameCard>* (with inline <CommentThread>)
-    │     sidebar: <LeaderboardRow>* (clickable → opens drawer)
+    │     <GameCard>* (Avatar in comments, undo-pick link, inline <CommentThread>)
+    │     sidebar: <LeaderboardRow>* (with Avatar, clickable → opens drawer)
     │
     ├── view === 'mypicks': <PicksHistory>
     │
@@ -370,22 +381,27 @@ There is **no global polling for game state** today (deferred Tier 4 feature). L
     │     Discover list
     │     <FriendsList>
     │     pending invites
-    │     <GroupCard>*
+    │     <GroupCard>*  (Avatar member chips + leave/transfer/delete menu)
     │
     ├── view === 'leaderboard':
-    │     <LeaderboardCard>  <GroupLeaderboardCard>
+    │     <LeaderboardCard>  <GroupLeaderboardCard>  (sort + pagination)
     │
-    ├── view === 'profile' (self): <ProfileView>
+    ├── view === 'profile' (self):
+    │     <ProfileView editable onSaveProfile> (Avatar header, displayName/bio edit form)
     │
     └── view === 'admin' (admin only): <AdminPanel>
-                                         ├── <GameManager>
-                                         └── <UserManager>
+                                         ├── <GameManager>  (checkbox column + bulk action bar)
+                                         └── <UserManager>  (checkbox column + bulk action bar)
 
 Overlays (rendered above the dashboard):
-├── <ConfirmModal>           (logout, deletions)
+├── <ConfirmModal>           (logout, deletions, bulk confirmations, group leave/delete)
 └── <ProfileDrawer>           (any leaderboard row click)
         └── <ProfileView>
+              ├── <Avatar>
               └── <BadgeWall>
+
+<CommentThread> (inside each GameCard) renders:
+  <CommentRow>* — each with <Avatar>, edit form (author only), 5-emoji reaction strip
 ```
 
 ---
@@ -436,6 +452,16 @@ ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility enum_groups_visibility NO
 CREATE UNIQUE INDEX IF NOT EXISTS friendships_pair_unique
   ON friendships (LEAST("requesterId","addresseeId"), GREATEST("requesterId","addresseeId"));
 
+-- Tier 8: profile fields on users
+ALTER TABLE users ADD COLUMN IF NOT EXISTS "displayName" VARCHAR(60);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
+
+-- Tier 8: comment edit flag
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP WITH TIME ZONE;
+
+-- Tier 8: comment_reactions table is created by sequelize.sync() because it's brand new — no ALTER needed.
+--         Its uniqueness + index come from the model definition (CommentReaction.js).
+
 -- Tier 1: data fix — re-hash any seed user whose password is still plaintext (matched against data.json)
 ```
 
@@ -458,6 +484,8 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 | `username` | STRING UNIQUE NOT NULL | Case-insensitive lookup via `iLike` |
 | `password` | STRING NOT NULL | bcrypt hash; the model's `beforeCreate`/`beforeUpdate` hooks auto-hash anything not already matching `^\$2[aby]\$` |
 | `role` | ENUM('user','admin') NOT NULL DEFAULT 'user' | Added via migration |
+| `displayName` | VARCHAR(60) NULLABLE | Tier 8. Used in place of username everywhere when set |
+| `bio` | TEXT NULLABLE | Tier 8. Length-capped at 280 by zod, no DB-level constraint |
 | `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
 
 #### `games`
@@ -529,8 +557,21 @@ Composite primary key `(groupId, userId)`. No additional columns.
 | `userId` | UUID NOT NULL → users(id) ON DELETE NO ACTION | Cleaned up in admin user-delete |
 | `body` | TEXT NOT NULL | Validation: trim, 1–500 chars |
 | `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
+| `editedAt` | TIMESTAMPTZ NULLABLE | Tier 8. Set on every successful `PUT /api/comments/:id`. Frontend renders `(edited)` in the row |
 
 **Index**: `comments_game_idx (gameId)` for fast thread fetch.
+
+#### `comment_reactions` (Tier 8)
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `commentId` | UUID NOT NULL → comments(id) ON DELETE CASCADE | |
+| `userId` | UUID NOT NULL | Cleaned up in admin user-delete (best-effort) |
+| `emoji` | STRING NOT NULL | Free-form at the DB layer, gated by `ALLOWED_EMOJIS` zod enum at the API layer |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
+
+**Unique index**: `comment_reactions_unique (commentId, userId, emoji)` — `POST /api/comments/:id/reactions` relies on the constraint for idempotency (catches the duplicate-insert error).
+**Index**: `comment_reactions_comment_idx (commentId)` for fast thread fetch.
 
 #### `notifications`
 | Column | Type | Notes |
@@ -550,10 +591,12 @@ Composite primary key `(groupId, userId)`. No additional columns.
 
 | Parent → Child | On parent delete |
 | --- | --- |
-| `games` → `picks` | App-level cleanup in `DELETE /api/admin/games/:id` (also deletes comments) |
-| `games` → `comments` | `ON DELETE CASCADE` at DB level **and** app-level (belt-and-braces) |
+| `games` → `picks` | App-level cleanup in `cascadeDeleteGame()` (single + bulk admin paths) |
+| `games` → `comments` | `ON DELETE CASCADE` at DB level **and** app-level cleanup in `cascadeDeleteGame()` (belt-and-braces) |
+| `comments` → `comment_reactions` | `ON DELETE CASCADE` at DB level + explicit `CommentReaction.destroy({where: {commentId}})` in `DELETE /api/comments/:id` |
 | `users` → `badges`, `notifications` | `ON DELETE CASCADE` at DB level |
-| `users` → `picks`, `comments`, `friendships`, `group_members`, owned `groups`, `group_invites` (by username) | **App-level cleanup only** in `DELETE /api/admin/users/:id`. The user-delete handler is the most complex deletion path in the system; see §8.9 |
+| `users` → `picks`, `comments`, `friendships`, `group_members`, owned `groups`, `group_invites` (by username) | **App-level cleanup only** in `cascadeDeleteUser()` (single + bulk admin paths). The user-delete handler is the most complex deletion path in the system; see §8.9 |
+| `groups` → `group_members`, `group_invites` | App-level cleanup in `DELETE /api/groups/:groupId` (Tier 8) |
 
 ---
 
@@ -598,11 +641,11 @@ edited (user re-submits)  ──┘
               notify(userId, 'pick-scored', ...) fires
 ```
 
-**Lock rules** (enforced in `POST /api/picks`):
-- `game.date <= now` → 400 `Picks can only be created or changed for upcoming games`
-- `game.result !== null` → same error
+**Lock rules** (enforced in `POST /api/picks` and `DELETE /api/picks/:id`):
+- `game.date <= now` → 400 `Picks can only be created or changed for upcoming games` (POST) / `Picks can only be removed before kickoff` (DELETE)
+- `game.result !== null` → same error in both directions
 
-Picks **cannot be deleted** by users today (no endpoint). Admin user-delete cascades them.
+**Pick deletion** (Tier 8.2): `DELETE /api/picks/:id` lets a user **undo** their own pick before kickoff. The frontend [GameCard.jsx](src/components/GameCard.jsx) renders an "Undo pick" link only when the game is upcoming and the user has a pick. Admin user-delete still cascades picks for departed users.
 
 ### 8.3 Groups Subsystem
 
@@ -616,6 +659,9 @@ Three primitives: **Group**, **GroupMember**, **GroupInvite**.
 | Decline invite | `POST /api/groups/:groupId/invite/:inviteId/decline` | Just deletes the invite row. |
 | Discover | `GET /api/groups/discover` | Returns up to 20 public groups the caller is **not** in, with member counts. |
 | Join (public) | `POST /api/groups/:groupId/join` | Only succeeds if `visibility='public'`. Inserts GroupMember, notifies owner. |
+| Leave (Tier 8) | `POST /api/groups/:groupId/leave` | Removes caller from `group_members`. **400 if owner** — must transfer first. Notifies owner. |
+| Transfer (Tier 8) | `POST /api/groups/:groupId/transfer` | Owner-only. Body `{newOwnerId}`. Must be a current member. Updates `groups.ownerId`. Notifies new owner. |
+| Delete (Tier 8) | `DELETE /api/groups/:groupId` | Owner-only. Cascades members + invites, then destroys the group. Notifies all (former) non-owner members. |
 | Toggle visibility | `POST /api/groups/:groupId/visibility` | Owner-only. |
 
 **Invite storage choice**: invites are keyed by username (string), not userId. This means renaming a user (not currently possible) would orphan their invites. Acceptable trade-off for now.
@@ -675,16 +721,25 @@ notify(userId, type, title, body=null, link=null)
 
 Per-game thread, rendered as a collapsible section at the bottom of every `GameCard`. Pulled lazily: the first open of a thread issues `GET /api/games/:gameId/comments` (newest first, capped at 50). New comments are appended optimistically to the local state.
 
-Authorization:
-- Post: any authenticated user.
-- Delete: author **or** any admin. The frontend hides the delete button unless `comment.userId === currentUserId`, but the server is the actual gate.
+The `GET` endpoint enriches every comment row with the Tier 8 reaction summary:
+- `editedAt` — nullable; frontend shows `(edited)` next to the timestamp when set
+- `reactionCounts: {emoji: N}` — counts across all reactors
+- `yourReactions: [emoji...]` — the *caller's* reactions only, so the UI can highlight toggled buttons
 
-No edit endpoint by design — author can delete + repost.
+Authorization:
+- **Post**: any authenticated user.
+- **Edit** (Tier 8): author only via `PUT /api/comments/:id`. Sets `editedAt = NOW`.
+- **Delete**: author **or** any admin. The frontend hides the edit/delete buttons unless `comment.userId === currentUserId`, but the server is the actual gate. Cascades comment_reactions.
+
+**Reactions** (Tier 8): a fixed palette of 5 emojis — 👍 ❤️ 😂 😮 🔥 — defined as `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [CommentThread.jsx](src/components/CommentThread.jsx). The two arrays must stay in sync.
+- `POST /api/comments/:id/reactions` is idempotent: the unique `(commentId, userId, emoji)` constraint catches duplicate inserts and the handler returns 200.
+- `DELETE /api/comments/:id/reactions/:emoji` is a no-op when no such row exists (still returns 200).
+- The frontend [CommentThread.jsx](src/components/CommentThread.jsx) optimistically updates `reactionCounts` and `yourReactions` locally, then issues the request; on failure it calls `load()` to resync.
 
 ### 8.8 Profile Subsystem
 
 `GET /api/users/:username/profile` is one of the heavier endpoints. It composes:
-- The target user's basic fields (id, username, role, joinedAt).
+- The target user's basic fields (id, username, role, `displayName`, `bio`, joinedAt).
 - All of the target's picks, joined with games to compute `totalPoints, picksMade, picksWon, picksScored, winRate`.
 - A 10-row `recentPicks` array sorted by game date descending.
 - The user's badge rows.
@@ -694,25 +749,32 @@ No edit endpoint by design — author can delete + repost.
 
 This endpoint is **not cached**. On a large dataset it would be a target for Tier 5 caching.
 
+**Profile edit** (Tier 8.5): `PUT /api/me` accepts `{displayName?, bio?}` (both nullable; empty string clears, missing key leaves the field alone). Validation via `editProfileSchema` (trim, length caps 60 / 280). The hook `save({hooks: false})` is essential here — without it Sequelize's `beforeUpdate` would try to re-hash the password.
+
+**displayName precedence**: every surface that shows a username (leaderboard rows, profile header, head-to-head string, search results) prefers `displayName` when set, falling back to `username`. Avatars however **always** hash on `username` so renaming doesn't shuffle colors.
+
 Frontend rendering: two callers.
-- **Drawer**: any leaderboard row click (overall, group, sidebar) opens `<ProfileDrawer>` with the target's username. The drawer mounts `<ProfileView>` and shows a friend-action button driven by `friendStatus`.
-- **Tab**: clicking the **Profile** tab opens a full-width `<ProfileView>` for the current user (no drawer wrapper). The `ownProfile` state is refetched whenever picks or games change (so newly-scored points appear immediately).
+- **Drawer**: any leaderboard row click (overall, group, sidebar) opens `<ProfileDrawer>` with the target's username. The drawer mounts `<ProfileView>` and shows a friend-action button driven by `friendStatus`. **Not editable**.
+- **Tab**: clicking the **Profile** tab opens a full-width `<ProfileView editable onSaveProfile>` for the current user (no drawer wrapper). The edit button reveals an inline form for `displayName` + `bio`. The `ownProfile` state is refetched whenever picks or games change (so newly-scored points appear immediately).
 
 ### 8.9 Admin Subsystem
 
-Six endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in the UI is conditionally added to the tabs array only when `user.role === 'admin'`.
+Eight endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in the UI is conditionally added to the tabs array only when `user.role === 'admin'`.
 
 **Game CRUD**:
 - `POST /api/admin/games` — body validated by `createGameSchema` including a `.refine()` that ensures `homeProbability + awayProbability` sums to 1.0 ±0.01.
 - `PUT /api/admin/games/:id` — `updateGameSchema` allows all fields optional; if **both** probabilities are sent they must sum to 1.0.
-- `DELETE /api/admin/games/:id` — cascades picks and comments before destroying the game. Doesn't preserve point totals; affected leaderboards will reflect the deletion on the next computation.
+- `DELETE /api/admin/games/:id` — uses `cascadeDeleteGame()` helper to delete picks and comments before destroying the game. Doesn't preserve point totals; affected leaderboards will reflect the deletion on the next computation.
+- `POST /api/admin/games/bulk` (Tier 8.9) — body `{ids, action, result?}`. Two actions:
+  - `action: 'delete'` — calls `cascadeDeleteGame()` per id.
+  - `action: 'setResult'` — sets `game.result` per id and runs the `pick-scored` notification + `evaluateBadges()` loop for every pick on every affected game.
 
-**Result-setting** is **not** under `/api/admin/*` — it's the original `POST /api/games/:gameId/result` from Tier 1 and remains there for backward compatibility. The Admin UI calls it for the "Home won / Away won / Clear" buttons.
+**Result-setting** is **not** under `/api/admin/*` — it's the original `POST /api/games/:gameId/result` from Tier 1 and remains there for backward compatibility. The Admin UI calls it for the per-row "Home won / Away won / Clear" buttons. Bulk uses the bulk endpoint instead.
 
 **User moderation**:
 - `GET /api/admin/users` — returns every user enriched with `picksCount` and `groupsCount` (in-memory aggregation over a single Pick + GroupMember fetch).
 - `POST /api/admin/users/:id/role` — body `{role}`. **Self-demote guard**: if `params.id === req.user.id && body.role !== 'admin'` → 400 `You cannot demote yourself`. Saves the user with `{hooks: false}` so the password isn't re-hashed.
-- `DELETE /api/admin/users/:id` — **self-delete guard** (400 same as above). Then performs cascading cleanup in a specific order (because some FKs are `ON DELETE NO ACTION`):
+- `DELETE /api/admin/users/:id` — **self-delete guard** (400 same as above). Calls `cascadeDeleteUser()` which performs cascading cleanup in a specific order (because some FKs are `ON DELETE NO ACTION`):
   1. Find groups owned by the target.
   2. Delete group_members + group_invites for those groups.
   3. Delete those groups.
@@ -722,8 +784,59 @@ Six endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in the
   7. Delete the target's group_members rows (in groups they didn't own).
   8. Delete the target's group_invites (by username string match).
   9. Destroy the user row (cascades badges + notifications via DB-level CASCADE).
+- `POST /api/admin/users/bulk` (Tier 8.9) — body `{ids, action}`. Three actions: `promote`, `demote`, `delete`. **Self-protection** is automatic: any id matching `req.user.id` is filtered out and returned in `skipped: [{id, reason: 'self'}]` rather than erroring the whole batch. Each surviving id is processed via `User.save({hooks: false})` or `cascadeDeleteUser()`.
 
-The full sequence runs **outside** a transaction in v1. A partial failure would leave dangling rows; Tier 5 should wrap this in `sequelize.transaction()`.
+The full sequence runs **outside** a transaction in v1. A partial failure would leave dangling rows; Tier 5 should wrap these (single + bulk) in `sequelize.transaction()`.
+
+### 8.10 Search Subsystem (Tier 8.4)
+
+`GET /api/search?q=&type=` is a single endpoint that returns up to 5 matches per type. Implementation in [server.js](server.js):
+- Minimum 2 characters; shorter queries short-circuit to empty arrays.
+- Uses Postgres `iLike '%term%'` for case-insensitive substring matches across `username`, `displayName`, group `name`, and game `homeTeam` / `awayTeam`.
+- Group results respect membership: returns groups where the caller is a member **or** the group is public. Private groups the caller isn't in are hidden.
+
+Frontend [SearchBar.jsx](src/components/SearchBar.jsx) lives in the dashboard header, debounces input by 250 ms, and renders a type-grouped dropdown:
+- **User result** → calls `openProfile(username)` which opens `<ProfileDrawer>`.
+- **Group result** → if member, switches to the Groups tab; if public non-member, calls the join handler and then switches tabs.
+- **Game result** → switches to the Games tab.
+
+Click-outside + Esc close behaviour follows the same pattern as `<NotificationBell>`.
+
+### 8.11 Avatar Subsystem (Tier 8.3)
+
+`<Avatar username displayName size>` is a pure presentational component in [src/components/Avatar.jsx](src/components/Avatar.jsx). It:
+- Hashes the **lowercased username** via FNV-1a → a 360° hue.
+- Renders an inline `<span>` with `hsl(hue, 55%, 35%)` background, a slightly brighter border, and the username's first letter centered.
+- Uses `displayName` for the displayed *letter* when set; the **color is always derived from `username`** so renames don't shuffle the user's color identity.
+
+The component is mounted in many places: profile header (size 64), leaderboard rows (size 28), group member chips (size 22), comment author headers (size 20). It's stateless and adds nothing to network traffic — no avatar upload story (deliberately out of scope per the roadmap).
+
+### 8.12 Leaderboard Sort + Pagination (Tier 8.8)
+
+`GET /api/leaderboard?groupId=&orderBy=&offset=&limit=` extends the v1 endpoint. The overall block is unchanged (still returns the full sorted-by-points list). The group block changes:
+
+```
+response = {
+  overall: [...],          // unchanged
+  group:  [{userId, username, displayName, points, winRate, rank}],   // current page only
+  groupMeta: {
+    rows, total, viewerRow, orderBy, offset, limit
+  }
+}
+```
+
+- `orderBy` ∈ `points` (default) / `winRate` / `username`. Implementation in `sortLeaderboard()` (see §5.5 helper table).
+- `offset` + `limit` (capped at 50) slice the sorted set.
+- `viewerRow` is the caller's full row from the sorted set, included even when offset/limit excludes them — so the UI can always show "your position".
+
+Frontend [GroupLeaderboardCard.jsx](src/components/GroupLeaderboardCard.jsx) renders a sort `<select>`, Prev/Next buttons (no infinite scroll), and a separate `Your position` block when the viewer isn't on the current page.
+
+### 8.13 Bulk Admin Endpoints (Tier 8.9)
+
+Single-item and bulk admin paths share helpers — see §8.9. The bulk endpoints add:
+- **Idempotent self-skipping** (only on user bulk actions): the caller's own id is silently filtered before the loop and returned in `skipped`. Game bulk has no self-protection because games are not user-owned.
+- **Per-action loop**: there is no transaction wrapping the batch; a partial failure leaves earlier-affected rows committed and later rows untouched. The endpoint returns the affected list so the frontend can resync the table even on partial success.
+- **Set-result side effects**: the bulk-game `setResult` path runs the full notification + badge eval loop per game per pick, just like the single-game version. For a large batch on a popular fixture this can produce many notification rows; future Tier 7 work should consider batching/deduplication.
 
 ---
 
@@ -966,10 +1079,14 @@ Or in one go: `npm start` (= `vite build && node server.js`).
 
 1. **Route shadowing**: `/api/groups/discover` must stay registered before `/api/groups/:groupId`. Same for any future `/api/groups/<literal>` routes.
 2. **Scoring duplication**: edits to `scorePick` in [server.js](server.js) must be mirrored in [src/utils/scoring.js](src/utils/scoring.js) (and vice versa) in the same commit.
-3. **Migration idempotency**: every statement in `runMigrations()` must be safely re-runnable. Tests: `runMigrations()` should work both on a brand-new DB and on a DB that already has the change applied.
-4. **Notification side-effects on result-set**: when modifying `POST /api/games/:gameId/result` or any endpoint that resolves picks, you must keep the `notify` + `evaluateBadges` loop intact, otherwise users stop getting feedback.
-5. **Self-protection guards**: the admin self-demote/self-delete checks compare on `req.user.id` (UUID string from the JWT). If you ever change how `req.user` is shaped, audit these checks.
-6. **`saveUser({hooks: false})`** is intentional in `runMigrations()` and the role-update endpoint — without it, Sequelize's `beforeUpdate` hook would attempt to re-hash an already-hashed password.
+3. **Migration idempotency**: every statement in `runMigrations()` must be safely re-runnable. Tests: `runMigrations()` should work both on a brand-new DB and on a DB that already has the change applied. **Brand-new tables** (added since Tier 8: `comment_reactions`) don't need an entry in `runMigrations()` — `sequelize.sync({alter:false})` creates them.
+4. **Notification side-effects on result-set**: when modifying `POST /api/games/:gameId/result`, `POST /api/admin/games/bulk` (setResult action), or any endpoint that resolves picks, you must keep the `notify` + `evaluateBadges` loop intact, otherwise users stop getting feedback.
+5. **Self-protection guards**: the admin self-demote/self-delete checks compare on `req.user.id` (UUID string from the JWT). The bulk-user endpoint additionally **silently filters** self out (no error). If you ever change how `req.user` is shaped, audit both paths.
+6. **`save({hooks: false})`** is intentional in `runMigrations()`, the role-update endpoint, `PUT /api/me`, and bulk role flips — without it, Sequelize's `beforeUpdate` hook would attempt to re-hash an already-hashed password.
+7. **`pickMap` shape**: the frontend `pickMap` in [App.jsx](src/App.jsx) stores **full pick objects** (Tier 8.2), not just the `choice` string. Consumers in [GameCard.jsx](src/components/GameCard.jsx) destructure to `existingChoice` and `existingPickId`. Don't revert to the simpler shape — the undo-pick UX needs the id.
+8. **Avatar color stability**: [Avatar.jsx](src/components/Avatar.jsx) hashes on **lowercased `username`**, never `displayName`. If you change this, every existing user's avatar color flips on next render.
+9. **Comment reaction emoji palette**: `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [src/components/CommentThread.jsx](src/components/CommentThread.jsx) must stay in sync. Adding an emoji to one without the other yields either a 400 (server rejects) or a stuck UI button (client allows but server rejects on send).
+10. **Leaderboard `viewerRow`**: when consuming `GET /api/leaderboard`, the group block's `groupMeta.viewerRow` is the **sorted-row including rank**, not the raw user. The frontend uses it to render the "Your position" anchor when the page window excludes the viewer.
 
 ### 11.5 Backup / Restore
 
@@ -981,34 +1098,44 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 
 | Area | Issue | Tier |
 | --- | --- | --- |
-| CORS | `origin: true` — accept-all | 5 |
+| CORS | `origin: true` — accept-all | 6 |
 | Migrations | Hand-rolled SQL in `runMigrations()`; no down-migrations | 5 |
 | Leaderboard | Real-time computation; no caching | 5 |
 | Logging | `console.*` only; no structured logger | 5 |
 | Tests | No automated tests at all | 5 |
-| Transactions | Multi-step deletes (user) run outside a transaction | 5 |
-| External data | No football API integration; admin enters games manually | 4 (deferred) |
-| Live scores | No live score display; no auto-poll | 4 (deferred) |
-| Leagues / seasons | Single global game pool; no `league` / `season` fields | 4 (deferred) |
-| Pick types | Only winner picks; no spread / over-under / score prediction | 4 (deferred) |
-| Streaks | Deferred — concurrent kickoffs make "consecutive correct" ambiguous | 3 (deferred) |
-| Real-time | No WebSocket; everything is HTTP polling at 30 s | — |
-| Audit log | No record of admin actions | 5 |
-| Password reset | No flow | — |
+| Transactions | Multi-step deletes (user, game, bulk admin) run outside a transaction | 5 |
+| External data | No football API integration; admin enters games manually | 4b (deferred) |
+| Live scores | No live score display; no auto-poll | 4b (deferred) |
+| Leagues / seasons | Single global game pool; no `league` / `season` fields | 4b (deferred) |
+| Pick types | Only winner picks; no spread / over-under / score prediction | 4b (deferred) |
+| Streaks | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits after 4b adds season ordering) | 4b |
+| Real-time | No WebSocket; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time | 7 |
+| Audit log | No record of admin actions (single or bulk) | 4b.6 |
+| Password reset | No flow; no account lockout; no 2FA | 6 |
+| CSRF | Not protected | 6 |
+| Profile privacy | Every authenticated user can view every profile | 8.6 |
+| Bulk batching | Bulk endpoints run their loop one-by-one with no transaction; no "fail entire batch on error" mode | 5 |
+| Notification spam | Bulk-setResult can produce many notifications in one request; no batching/dedup | 7 |
 
 ---
 
 ## 13. Roadmap
 
-The roadmap of record is in `C:\Users\vinde\.claude\plans\go-through-this-codebase-warm-cloud.md`. Summary:
+The live forward roadmap is in `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` (Tiers 4b → 9). The original tier plan lives at `C:\Users\vinde\.claude\plans\go-through-this-codebase-warm-cloud.md` for historical context.
+
+Summary:
 
 - ✅ **Tier 1** — Foundational hardening (bcrypt, RBAC, rate-limit, zod, JWT secret, unique pick index).
 - ✅ **Tier 2** — UX completions (outcome display, full leaderboards, my-picks, sections, countdown, skeletons, confirm, mobile, a11y).
 - ✅ **Tier 3** — Social/engagement (profiles, badges, friends, public groups, comments, notifications).
-- 🟡 **Tier 4** — Game-data quality. **Partially shipped**: Admin UI for game CRUD + user moderation. **Deferred**: external API integration, live scores, leagues/seasons, additional pick types.
-- ❌ **Tier 5** — Ops polish: migrations framework, leaderboard caching, logging, E2E tests.
-
-The Tier 4 admin-UI batch was scoped down on purpose; the remaining Tier 4 items are tracked separately and require external dependencies (API-Football key, new schema fields) that the team chose to defer.
+- ✅ **Tier 4a** — Admin UI for game CRUD + user moderation.
+- 🟡 **Tier 4b** — Game-data quality remainder: external API integration, live scores, leagues/seasons, additional pick types, streaks, audit log. **All deferred** (requires API-Football key + schema additions).
+- ❌ **Tier 5** — Ops & reliability: migrations framework, leaderboard caching, transactions, structured logging, E2E tests, HTTP compression.
+- ❌ **Tier 6** — Security hardening for production: CORS, CSRF, password reset, account lockout, helmet, refresh tokens, 2FA.
+- ❌ **Tier 7** — Real-time & engagement: scheduler-driven notifications, WebSocket/SSE, web push, email, prefs.
+- ✅ **Tier 8** (minus 8.6) — User capabilities: group lifecycle (leave/transfer/delete), pick deletion, avatars, search, profile bio + displayName, comment edit + reactions, leaderboard sort + pagination, bulk admin actions.
+- ❌ **Tier 8.6** — Profile privacy (parked; small isolated change).
+- ❌ **Tier 9** — DX: TypeScript, OpenAPI, CI, Docker, code-splitting, Storybook.
 
 ---
 

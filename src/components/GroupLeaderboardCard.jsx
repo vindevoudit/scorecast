@@ -1,4 +1,7 @@
-function GroupLeaderboardCard({ groups, selectedGroupId, onGroupSelection, leaderboardGroup }) {
+import { LeaderboardRow } from './LeaderboardCard';
+import EmptyState from './EmptyState';
+
+function GroupLeaderboardCard({ groups, selectedGroupId, onGroupSelection, leaderboardGroup, currentUserId }) {
   return (
     <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -7,28 +10,36 @@ function GroupLeaderboardCard({ groups, selectedGroupId, onGroupSelection, leade
           <p className="mt-2 text-slate-400">Choose a group to see the current ranking.</p>
         </div>
         {groups.length > 0 ? (
-          <select
-            value={selectedGroupId}
-            onChange={onGroupSelection}
-            className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 sm:w-auto"
-          >
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>{group.name}</option>
-            ))}
-          </select>
+          <label className="sm:w-auto">
+            <span className="sr-only">Choose group</span>
+            <select
+              value={selectedGroupId}
+              onChange={onGroupSelection}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
+            >
+              {groups.map((group) => (
+                <option key={group.id} value={group.id}>{group.name}</option>
+              ))}
+            </select>
+          </label>
         ) : (
           <p className="text-sm text-slate-500">No group membership found.</p>
         )}
       </div>
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 max-h-96 space-y-3 overflow-y-auto pr-2">
         {leaderboardGroup.length === 0 ? (
-          <p className="rounded-3xl bg-slate-950/70 px-4 py-5 text-sm text-slate-400">No group leaderboard data yet.</p>
+          <EmptyState
+            title="No group leaderboard data yet"
+            description="Members earn points once games have results."
+          />
         ) : (
           leaderboardGroup.map((entry, index) => (
-            <div key={entry.userId} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-4 transition duration-300 hover:bg-slate-900/95">
-              <div className="text-sm text-slate-300">{index + 1}. {entry.username}</div>
-              <div className="text-sm font-semibold text-white">{entry.points}</div>
-            </div>
+            <LeaderboardRow
+              key={entry.userId}
+              entry={entry}
+              rank={index + 1}
+              isCurrentUser={entry.userId === currentUserId}
+            />
           ))
         )}
       </div>

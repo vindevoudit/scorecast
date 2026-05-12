@@ -4,11 +4,11 @@ function GroupCard({ group, onInvite }) {
   return (
     <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_60px_rgba(15,23,42,0.32)]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-white">{group.name}</h2>
+        <div className="min-w-0">
+          <h2 className="truncate text-xl font-semibold text-white">{group.name}</h2>
           <p className="text-sm text-slate-400">{group.members.length} member{group.members.length === 1 ? '' : 's'}</p>
         </div>
-        <p className="rounded-full bg-slate-950/80 px-4 py-2 text-sm text-cyan-300">{group.id}</p>
+        <p className="max-w-full truncate rounded-full bg-slate-950/80 px-4 py-2 text-xs text-cyan-300 sm:text-sm">{group.id}</p>
       </div>
 
       <div className="mt-5 space-y-3">
@@ -19,7 +19,7 @@ function GroupCard({ group, onInvite }) {
               const userId = (member && typeof member === 'object' ? member.userId : member) || member;
               const username = (member && typeof member === 'object' ? member.username : member) || member;
               return (
-                <span key={userId} className="rounded-2xl bg-slate-900/80 px-3 py-2">{username}</span>
+                <span key={userId} className="min-w-0 truncate rounded-2xl bg-slate-900/80 px-3 py-2">{username}</span>
               );
             })}
           </div>

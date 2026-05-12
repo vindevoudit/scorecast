@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import GameCard from './components/GameCard';
-import LeaderboardCard from './components/LeaderboardCard';
+import LeaderboardCard, { LeaderboardRow } from './components/LeaderboardCard';
 import LoginForm from './components/LoginForm';
 import RegisterForm from './components/RegisterForm';
 import GroupCard from './components/GroupCard';
 import GroupLeaderboardCard from './components/GroupLeaderboardCard';
+import PicksHistory from './components/PicksHistory';
+import ConfirmModal from './components/ConfirmModal';
+import EmptyState from './components/EmptyState';
+import { SkeletonGameCard, SkeletonLeaderboardRow } from './components/Skeleton';
 
 const initialAuthData = {
   loginUsername: '',
@@ -13,6 +17,13 @@ const initialAuthData = {
   registerPassword: '',
   groupName: '',
 };
+
+const TABS = [
+  { id: 'games', kicker: 'Games', label: 'Upcoming Matches' },
+  { id: 'mypicks', kicker: 'My Picks', label: 'Your History' },
+  { id: 'groups', kicker: 'Groups', label: 'My Groups' },
+  { id: 'leaderboard', kicker: 'Leaderboards', label: 'Rankings' },
+];
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -29,12 +40,32 @@ function App() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [authData, setAuthData] = useState(initialAuthData);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
-  const currentGroupId = useMemo(() => groups[0]?.id || '', [groups]);
   const pickMap = useMemo(
     () => new Map(picks.map((pick) => [pick.gameId, pick.choice])),
     [picks]
   );
+
+  const { upcomingGames, liveGames, completedGames } = useMemo(() => {
+    const now = Date.now();
+    const upcoming = [];
+    const live = [];
+    const completed = [];
+    for (const game of games) {
+      if (game.result) {
+        completed.push(game);
+      } else if (new Date(game.date).getTime() > now) {
+        upcoming.push(game);
+      } else {
+        live.push(game);
+      }
+    }
+    return { upcomingGames: upcoming, liveGames: live, completedGames: completed };
+  }, [games]);
 
   const authHeaders = () => {
     const headers = { 'Content-Type': 'application/json' };
@@ -48,12 +79,31 @@ function App() {
     setStatus('');
   };
 
+  const handleSessionExpired = () => {
+    setToken('');
+    setUser(null);
+    setGames([]);
+    setGroups([]);
+    setPicks([]);
+    setLeaderboard({ overall: [], group: [] });
+    setPendingInvites([]);
+    setSelectedGroupId('');
+    setView('games');
+    localStorage.removeItem('scorecastToken');
+    showStatus('Session expired — please sign in again.');
+  };
+
   const request = async (path, options = {}) => {
     const response = await fetch(path, {
       credentials: 'include',
       ...options,
       headers: { ...(options.headers || {}), ...authHeaders() },
     });
+
+    if (response.status === 401 && tokenRef.current) {
+      handleSessionExpired();
+      throw new Error('Session expired');
+    }
 
     const data = await response.json();
     if (!response.ok) {
@@ -98,9 +148,9 @@ function App() {
     setLoading(true);
     try {
       const me = await request('/api/me');
-      const { pendingInvites, ...userData } = me;
+      const { pendingInvites: invites, ...userData } = me;
       setUser(userData);
-      setPendingInvites(pendingInvites || []);
+      setPendingInvites(invites || []);
       await refreshGames();
       const groupData = await refreshGroups();
       const initialGroupId = selectedGroupId && groupData.some((group) => group.id === selectedGroupId)
@@ -108,7 +158,6 @@ function App() {
         : groupData[0]?.id || '';
       setSelectedGroupId(initialGroupId);
       await Promise.all([refreshPicks(), refreshLeaderboard(initialGroupId)]);
-      setView('games');
     } finally {
       setLoading(false);
     }
@@ -117,24 +166,23 @@ function App() {
   useEffect(() => {
     if (!token) return;
     localStorage.setItem('scorecastToken', token);
-    loadDashboard().catch((error) => showStatus(error.message));
+    loadDashboard().catch((error) => {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    });
   }, [token]);
 
-  useEffect(() => {
-    if (!token) return;
-    localStorage.setItem('scorecastToken', token);
-    loadDashboard().catch((error) => showStatus(error.message));
-  }, []);
-
-  const handleLogout = () => {
+  const performLogout = () => {
     setToken('');
     setUser(null);
     setGames([]);
     setGroups([]);
     setPicks([]);
     setLeaderboard({ overall: [], group: [] });
+    setPendingInvites([]);
+    setSelectedGroupId('');
     localStorage.removeItem('scorecastToken');
     setView('games');
+    setConfirmingLogout(false);
   };
 
   const submitPick = async (gameId, choice) => {
@@ -146,7 +194,7 @@ function App() {
       await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
       await showStatus('Pick saved successfully');
     } catch (error) {
-      showStatus(error.message);
+      if (error.message !== 'Session expired') showStatus(error.message);
     }
   };
 
@@ -191,7 +239,7 @@ function App() {
       await Promise.all([refreshGroups(), refreshLeaderboard()]);
       showStatus('Group created successfully');
     } catch (error) {
-      showStatus(error.message);
+      if (error.message !== 'Session expired') showStatus(error.message);
     }
   };
 
@@ -204,7 +252,7 @@ function App() {
       await Promise.all([refreshGroups(), refreshLeaderboard()]);
       showStatus(`${username} invited successfully`);
     } catch (error) {
-      showStatus(error.message);
+      if (error.message !== 'Session expired') showStatus(error.message);
     }
   };
 
@@ -216,7 +264,7 @@ function App() {
       await Promise.all([loadDashboard()]);
       showStatus('Invitation accepted!');
     } catch (error) {
-      showStatus(error.message);
+      if (error.message !== 'Session expired') showStatus(error.message);
     }
   };
 
@@ -228,12 +276,30 @@ function App() {
       await Promise.all([loadDashboard()]);
       showStatus('Invitation declined');
     } catch (error) {
-      showStatus(error.message);
+      if (error.message !== 'Session expired') showStatus(error.message);
     }
   };
 
+  const renderGameSection = (heading, list, emptyText) => (
+    <div className="space-y-4">
+      <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">{heading}</h3>
+      {list.length === 0 ? (
+        <EmptyState title={emptyText} />
+      ) : (
+        list.map((game) => (
+          <GameCard
+            key={game.id}
+            game={game}
+            existingPick={pickMap.get(game.id)}
+            onPickSubmit={submitPick}
+          />
+        ))
+      )}
+    </div>
+  );
+
   const dashboard = (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={loading}>
       <section className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.55)] backdrop-blur-xl">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -253,25 +319,26 @@ function App() {
         </div>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-[1fr_auto]">
-        <div className="grid auto-cols-fr gap-3 sm:grid-cols-3">
-          {['games', 'groups', 'leaderboard'].map((tab) => (
+      <section className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+        <div className="-mx-1 flex flex-1 gap-3 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Dashboard sections">
+          {TABS.map((tab) => (
             <button
-              key={tab}
-              onClick={() => setView(tab)}
-              className={`rounded-3xl border px-5 py-4 text-left transition-all duration-300 ${view === tab ? 'border-cyan-400 bg-cyan-500/10 text-white shadow-[0_10px_30px_rgba(6,182,212,0.18)]' : 'border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-600 hover:bg-slate-900/95'}`}
+              key={tab.id}
+              role="tab"
+              aria-selected={view === tab.id}
+              aria-current={view === tab.id ? 'page' : undefined}
+              onClick={() => setView(tab.id)}
+              className={`min-w-[10rem] shrink-0 rounded-3xl border px-5 py-4 text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${view === tab.id ? 'border-cyan-400 bg-cyan-500/10 text-white shadow-[0_10px_30px_rgba(6,182,212,0.18)]' : 'border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-600 hover:bg-slate-900/95'}`}
             >
-              <span className="block text-sm uppercase tracking-[0.24em] text-slate-400">{tab === 'games' ? 'Games' : tab === 'groups' ? 'Groups' : 'Leaderboards'}</span>
-              <span className="mt-2 block text-lg font-semibold text-white">
-                {tab === 'games' ? 'Upcoming Matches' : tab === 'groups' ? 'My Groups' : 'Rankings'}
-              </span>
+              <span className="block text-sm uppercase tracking-[0.24em] text-slate-400">{tab.kicker}</span>
+              <span className="mt-2 block text-lg font-semibold text-white">{tab.label}</span>
             </button>
           ))}
         </div>
 
         <button
-          onClick={handleLogout}
-          className="inline-flex items-center justify-center rounded-3xl bg-slate-800 px-6 py-4 text-sm font-semibold text-cyan-300 transition duration-300 hover:bg-cyan-500/20"
+          onClick={() => setConfirmingLogout(true)}
+          className="inline-flex shrink-0 items-center justify-center rounded-3xl bg-slate-800 px-6 py-4 text-sm font-semibold text-cyan-300 transition duration-300 hover:bg-cyan-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
         >
           Logout
         </button>
@@ -280,27 +347,41 @@ function App() {
       <section className="space-y-6">
         {view === 'games' && (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold text-white">Upcoming Games</h2>
+                    <h2 className="text-2xl font-semibold text-white">Games</h2>
                     <p className="mt-2 text-slate-400">Pick winners, earn more points for underdog upsets.</p>
                   </div>
                   <span className="rounded-full bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">Future-proof picks only</span>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {games.map((game) => (
+              {liveGames.length > 0 && renderGameSection('Live now', liveGames, '')}
+
+              {renderGameSection('Upcoming', upcomingGames, 'No upcoming games yet. Check back soon.')}
+
+              {completedGames.length > 0 && (
+                <div className="space-y-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowCompleted((prev) => !prev)}
+                    className="w-full rounded-3xl border border-slate-800 bg-slate-900/60 px-5 py-4 text-left text-sm font-semibold uppercase tracking-[0.24em] text-slate-300 transition duration-200 hover:border-slate-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                    aria-expanded={showCompleted}
+                  >
+                    {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
+                  </button>
+                  {showCompleted && completedGames.map((game) => (
                     <GameCard
                       key={game.id}
                       game={game}
                       existingPick={pickMap.get(game.id)}
                       onPickSubmit={submitPick}
                     />
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -310,13 +391,19 @@ function App() {
                 <div className="mt-5 space-y-4">
                   <div className="rounded-3xl bg-slate-950/70 p-4">
                     <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">Overall</h3>
-                    <div className="mt-4 space-y-3">
-                      {leaderboard.overall.slice(0, 3).map((entry, index) => (
-                        <div key={entry.userId} className="flex items-center justify-between rounded-2xl bg-slate-900/80 px-4 py-3">
-                          <div className="text-sm text-slate-300">{index + 1}. {entry.username}</div>
-                          <div className="text-sm font-semibold text-white">{entry.points}</div>
-                        </div>
-                      ))}
+                    <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
+                      {leaderboard.overall.length === 0 ? (
+                        <p className="text-sm text-slate-400">No data yet.</p>
+                      ) : (
+                        leaderboard.overall.map((entry, index) => (
+                          <LeaderboardRow
+                            key={entry.userId}
+                            entry={entry}
+                            rank={index + 1}
+                            isCurrentUser={entry.userId === user?.id}
+                          />
+                        ))
+                      )}
                     </div>
                   </div>
                   <div className="rounded-3xl bg-slate-950/70 p-4">
@@ -326,28 +413,33 @@ function App() {
                         <p className="mt-2 text-sm text-slate-400">Select one group to view its ranking.</p>
                       </div>
                       {groups.length > 0 ? (
-                        <select
-                          value={selectedGroupId}
-                          onChange={handleGroupSelection}
-                          className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 sm:w-auto"
-                        >
-                          {groups.map((group) => (
-                            <option key={group.id} value={group.id}>{group.name}</option>
-                          ))}
-                        </select>
+                        <label className="sm:w-auto">
+                          <span className="sr-only">Choose group</span>
+                          <select
+                            value={selectedGroupId}
+                            onChange={handleGroupSelection}
+                            className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
+                          >
+                            {groups.map((group) => (
+                              <option key={group.id} value={group.id}>{group.name}</option>
+                            ))}
+                          </select>
+                        </label>
                       ) : (
                         <p className="text-sm text-slate-500">Join or create a group to see member rankings.</p>
                       )}
                     </div>
-                    <div className="mt-4 space-y-3">
+                    <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
                       {leaderboard.group.length === 0 ? (
-                        <p className="rounded-3xl bg-slate-950/70 px-4 py-5 text-sm text-slate-400">No group leaderboard data yet.</p>
+                        <p className="text-sm text-slate-400">No group leaderboard data yet.</p>
                       ) : (
-                        leaderboard.group.slice(0, 3).map((entry, index) => (
-                          <div key={entry.userId} className="flex items-center justify-between rounded-2xl bg-slate-900/80 px-4 py-3">
-                            <div className="text-sm text-slate-300">{index + 1}. {entry.username}</div>
-                            <div className="text-sm font-semibold text-white">{entry.points}</div>
-                          </div>
+                        leaderboard.group.map((entry, index) => (
+                          <LeaderboardRow
+                            key={entry.userId}
+                            entry={entry}
+                            rank={index + 1}
+                            isCurrentUser={entry.userId === user?.id}
+                          />
                         ))
                       )}
                     </div>
@@ -358,19 +450,25 @@ function App() {
           </div>
         )}
 
+        {view === 'mypicks' && (
+          <PicksHistory picks={picks} games={games} />
+        )}
+
         {view === 'groups' && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
               <h2 className="text-2xl font-semibold text-white">Create a new group</h2>
               <p className="mt-2 text-slate-400">Invite friends and compare scores in your private pool.</p>
               <form onSubmit={handleCreateGroup} className="mt-6 space-y-4">
+                <label htmlFor="group-name" className="sr-only">Group name</label>
                 <input
+                  id="group-name"
                   value={authData.groupName}
                   onChange={(event) => setAuthData((prev) => ({ ...prev, groupName: event.target.value }))}
                   placeholder="Group name"
-                  className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400"
+                  className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
                 />
-                <button type="submit" className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400">
+                <button type="submit" className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
                   Create group
                 </button>
               </form>
@@ -383,21 +481,21 @@ function App() {
                   <p className="mt-2 text-sm text-amber-200/80">You have {pendingInvites.length} pending group invitation{pendingInvites.length !== 1 ? 's' : ''}.</p>
                   <div className="mt-4 space-y-3">
                     {pendingInvites.map((invite) => (
-                      <div key={invite.id} className="flex items-center justify-between rounded-3xl bg-slate-950/70 px-4 py-4">
-                        <div>
+                      <div key={invite.id} className="flex flex-col gap-3 rounded-3xl bg-slate-950/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
                           <p className="text-sm text-slate-300">Invited to join</p>
-                          <p className="mt-1 font-semibold text-white">{invite.groupName}</p>
+                          <p className="mt-1 truncate font-semibold text-white">{invite.groupName}</p>
                         </div>
                         <div className="flex gap-2">
                           <button
                             onClick={() => handleAcceptInvite(invite.groupId, invite.id)}
-                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400"
+                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                           >
                             Accept
                           </button>
                           <button
                             onClick={() => handleDeclineInvite(invite.groupId, invite.id)}
-                            className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-300 transition duration-300 hover:border-slate-500 hover:bg-slate-900"
+                            className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-300 transition duration-300 hover:border-slate-500 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                           >
                             Decline
                           </button>
@@ -408,25 +506,47 @@ function App() {
                 </div>
               )}
 
-              {groups.map((group) => (
-                <GroupCard key={group.id} group={group} onInvite={handleInvite} />
-              ))}
+              {groups.length === 0 ? (
+                <EmptyState
+                  title="No groups yet"
+                  description="Create your first group on the left, or accept an invite when one arrives."
+                />
+              ) : (
+                groups.map((group) => (
+                  <GroupCard key={group.id} group={group} onInvite={handleInvite} />
+                ))
+              )}
             </div>
           </div>
         )}
 
         {view === 'leaderboard' && (
           <div className="grid gap-6 lg:grid-cols-2">
-            <LeaderboardCard title="Overall Leaderboard" entries={leaderboard.overall} />
+            <LeaderboardCard
+              title="Overall Leaderboard"
+              entries={leaderboard.overall}
+              currentUserId={user?.id}
+            />
             <GroupLeaderboardCard
               groups={groups}
               selectedGroupId={selectedGroupId}
               onGroupSelection={handleGroupSelection}
               leaderboardGroup={leaderboard.group}
+              currentUserId={user?.id}
             />
           </div>
         )}
       </section>
+
+      <ConfirmModal
+        open={confirmingLogout}
+        title="Log out of ScoreCast?"
+        description="You'll need to sign back in to make picks or view your leaderboards."
+        confirmLabel="Log out"
+        cancelLabel="Stay signed in"
+        onConfirm={performLogout}
+        onCancel={() => setConfirmingLogout(false)}
+      />
     </div>
   );
 
@@ -434,6 +554,22 @@ function App() {
     <div className="grid gap-6 lg:grid-cols-2">
       <LoginForm authData={authData} setAuthData={setAuthData} onSubmit={handleLogin} />
       <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
+    </div>
+  );
+
+  const skeletonView = (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]" aria-busy="true">
+      <div className="space-y-4">
+        <SkeletonGameCard />
+        <SkeletonGameCard />
+        <SkeletonGameCard />
+      </div>
+      <div className="space-y-3 rounded-3xl border border-slate-800 bg-slate-900/85 p-6">
+        <SkeletonLeaderboardRow />
+        <SkeletonLeaderboardRow />
+        <SkeletonLeaderboardRow />
+        <SkeletonLeaderboardRow />
+      </div>
     </div>
   );
 
@@ -459,19 +595,18 @@ function App() {
           </div>
 
           {status && (
-            <div className="rounded-3xl border border-cyan-500/30 bg-slate-950/90 px-5 py-4 text-sm text-cyan-200 shadow-[0_20px_60px_rgba(6,182,212,0.12)] transition duration-300">
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-3xl border border-cyan-500/30 bg-slate-950/90 px-5 py-4 text-sm text-cyan-200 shadow-[0_20px_60px_rgba(6,182,212,0.12)] transition duration-300"
+            >
               {status}
             </div>
           )}
         </div>
 
-        {loading ? (
-          <div className="grid min-h-[40vh] place-items-center rounded-3xl border border-slate-800 bg-slate-900/85 p-10 text-slate-300 shadow-[0_20px_60px_rgba(15,23,42,0.35)]">
-            <div className="flex items-center gap-3 text-lg font-medium">
-              <div className="h-3 w-3 animate-pulse rounded-full bg-cyan-400" />
-              Loading your dashboard...
-            </div>
-          </div>
+        {loading && (!user || games.length === 0) ? (
+          skeletonView
         ) : token && user ? (
           dashboard
         ) : (
@@ -483,4 +618,3 @@ function App() {
 }
 
 export default App;
-

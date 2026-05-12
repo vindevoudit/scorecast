@@ -5,15 +5,37 @@ const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const path = require('path');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
 const { Op } = require('sequelize');
 
 const { User, Group, Game, Pick, GroupMember, GroupInvite, initDatabase } = require('./models');
+const { validate } = require('./validation/middleware');
+const {
+  registerSchema,
+  loginSchema,
+  createGroupSchema,
+  inviteSchema,
+  pickSchema,
+  resultSchema,
+} = require('./validation/schemas');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'scorecast-demo-secret-2026';
+const RAW_JWT_SECRET = process.env.JWT_SECRET;
+if (!RAW_JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET env var is required in production');
+  }
+  console.warn('[scorecast] JWT_SECRET not set — using insecure dev fallback');
+}
+const JWT_SECRET = RAW_JWT_SECRET || 'scorecast-dev-only-do-not-use';
 const PORT = process.env.PORT || 3000;
 
 function createToken(user) {
-  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign(
+    { id: user.id, username: user.username, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
 }
 
 function authMiddleware(req, res, next) {
@@ -32,6 +54,29 @@ function authMiddleware(req, res, next) {
     res.status(401).json({ error: 'Invalid token' });
   }
 }
+
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, try again later' },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many registrations from this IP, try again later' },
+});
 
 function scorePick(pick, game) {
   if (!game.result) return 0;
@@ -167,11 +212,8 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', registerLimiter, validate(registerSchema), async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
-  }
 
   const existingUser = await getUserByUsername(username);
   if (existingUser) {
@@ -186,11 +228,11 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => {
   const { username, password } = req.body;
   const user = await getUserByUsername(username);
 
-  if (!user || user.password !== password) {
+  if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
@@ -236,11 +278,8 @@ app.get('/api/groups/:groupId', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/groups', authMiddleware, async (req, res) => {
+app.post('/api/groups', authMiddleware, validate(createGroupSchema), async (req, res) => {
   const { name } = req.body;
-  if (!name) {
-    return res.status(400).json({ error: 'Group name is required' });
-  }
 
   try {
     const group = await Group.create({ name, ownerId: req.user.id });
@@ -259,7 +298,7 @@ app.post('/api/groups', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/groups/:groupId/invite', authMiddleware, async (req, res) => {
+app.post('/api/groups/:groupId/invite', authMiddleware, validate(inviteSchema), async (req, res) => {
   const { username } = req.body;
 
   try {
@@ -353,11 +392,8 @@ app.post('/api/groups/:groupId/invite/:inviteId/decline', authMiddleware, async 
   }
 });
 
-app.post('/api/picks', authMiddleware, async (req, res) => {
+app.post('/api/picks', authMiddleware, validate(pickSchema), async (req, res) => {
   const { gameId, choice } = req.body;
-  if (!gameId || !choice || !['home', 'away'].includes(choice)) {
-    return res.status(400).json({ error: 'Valid gameId and choice are required' });
-  }
 
   try {
     const game = await Game.findByPk(gameId);
@@ -409,11 +445,8 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/games/:gameId/result', authMiddleware, async (req, res) => {
+app.post('/api/games/:gameId/result', authMiddleware, requireAdmin, validate(resultSchema), async (req, res) => {
   const { result } = req.body;
-  if (result !== null && !['home', 'away'].includes(result)) {
-    return res.status(400).json({ error: 'Result must be home, away, or null' });
-  }
 
   try {
     const game = await Game.findByPk(req.params.gameId);

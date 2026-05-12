@@ -27,6 +27,9 @@ module.exports = (sequelize) => {
   }, {
     tableName: 'picks',
     timestamps: false,
+    indexes: [
+      { name: 'picks_user_game_unique', unique: true, fields: ['userId', 'gameId'] },
+    ],
   });
 
   return Pick;

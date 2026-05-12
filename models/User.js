@@ -1,4 +1,13 @@
 const { DataTypes } = require('sequelize');
+const bcrypt = require('bcryptjs');
+
+const BCRYPT_HASH_PATTERN = /^\$2[aby]\$/;
+
+async function hashPasswordIfNeeded(user) {
+  if (user.changed('password') && user.password && !BCRYPT_HASH_PATTERN.test(user.password)) {
+    user.password = await bcrypt.hash(user.password, 10);
+  }
+}
 
 module.exports = (sequelize) => {
   const User = sequelize.define('User', {
@@ -16,6 +25,11 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING,
       allowNull: false,
     },
+    role: {
+      type: DataTypes.ENUM('user', 'admin'),
+      allowNull: false,
+      defaultValue: 'user',
+    },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
@@ -24,6 +38,10 @@ module.exports = (sequelize) => {
   }, {
     tableName: 'users',
     timestamps: false,
+    hooks: {
+      beforeCreate: hashPasswordIfNeeded,
+      beforeUpdate: hashPasswordIfNeeded,
+    },
   });
 
   return User;

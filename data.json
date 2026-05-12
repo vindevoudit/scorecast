@@ -20,6 +20,7 @@
       "id": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
       "username": "vo123",
       "password": "password123",
+      "role": "admin",
       "joinedGroups": [
         "be901144-0c4d-48af-834c-d8ddf23c65b5"
       ],

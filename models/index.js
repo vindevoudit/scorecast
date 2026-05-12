@@ -1,7 +1,10 @@
 require('dotenv').config();
 const { Sequelize } = require('sequelize');
+const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
+
+const BCRYPT_HASH_PATTERN = /^\$2[aby]\$/;
 
 // Initialize Sequelize
 const sequelize = new Sequelize(process.env.DATABASE_URL || {
@@ -48,6 +51,8 @@ async function initDatabase() {
     await sequelize.sync({ alter: false });
     console.log('Database synced.');
 
+    await runMigrations();
+
     // Check if users exist
     const userCount = await User.count();
     if (userCount === 0) {
@@ -56,6 +61,45 @@ async function initDatabase() {
   } catch (error) {
     console.error('Database initialization failed:', error);
     throw error;
+  }
+}
+
+async function runMigrations() {
+  await sequelize.query(
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS role "public"."enum_users_role" NOT NULL DEFAULT 'user'`
+  );
+  await sequelize.query(
+    'CREATE UNIQUE INDEX IF NOT EXISTS picks_user_game_unique ON picks ("userId", "gameId")'
+  );
+
+  const seedFilePath = path.join(__dirname, '..', 'data.json');
+  if (!fs.existsSync(seedFilePath)) return;
+  const seed = JSON.parse(fs.readFileSync(seedFilePath, 'utf8'));
+  const seedPasswordByUsername = new Map(seed.users.map((u) => [u.username, u.password]));
+  const seedRoleByUsername = new Map(seed.users.map((u) => [u.username, u.role || 'user']));
+
+  const existingUsers = await User.findAll();
+  for (const user of existingUsers) {
+    const needsHash = user.password && !BCRYPT_HASH_PATTERN.test(user.password);
+    const seedPassword = seedPasswordByUsername.get(user.username);
+    const seedRole = seedRoleByUsername.get(user.username);
+
+    if (needsHash) {
+      if (seedPassword && user.password === seedPassword) {
+        user.password = await bcrypt.hash(seedPassword, 10);
+        console.log(`Migrated plaintext password for seed user '${user.username}'`);
+      } else {
+        console.warn(
+          `[scorecast] User '${user.username}' has a non-bcrypt password that isn't in data.json — they will need to reset it`
+        );
+      }
+    }
+    if (seedRole && user.role !== seedRole) {
+      user.role = seedRole;
+    }
+    if (user.changed()) {
+      await user.save({ hooks: false });
+    }
   }
 }
 
@@ -75,9 +119,10 @@ async function seedDatabase() {
       id: user.id,
       username: user.username,
       password: user.password,
+      role: user.role || 'user',
       createdAt: user.createdAt,
     }));
-    await User.bulkCreate(usersData, { ignoreDuplicates: true });
+    await User.bulkCreate(usersData, { ignoreDuplicates: true, individualHooks: true });
     console.log('Users seeded.');
 
     // Insert games

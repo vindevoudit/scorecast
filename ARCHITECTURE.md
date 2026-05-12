@@ -53,7 +53,8 @@ The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between 
 │                        Express server (server.js)                     │
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │ cors → bodyParser → cookieParser → express.static(dist/)      │   │
+│  │ requestId → pino-http → compression → cors → bodyParser →     │   │
+│  │ cookieParser → express.static(dist/)                          │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
@@ -62,21 +63,27 @@ The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between 
 │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │
 │                                                                       │
 │  Route handlers ─── Sequelize models ─── helper fns                  │
-│                                          (scorePick, notify,         │
-│                                           evaluateBadges, …)          │
+│                          │             (scorePick, notify,           │
+│                          │              evaluateBadges,              │
+│                          │              cascadeDelete*,              │
+│                          │              leaderboardCache, …)         │
+│  ┌──────────────────────┴──────────────────────────────────────┐   │
+│  │ lib/leaderboardCache (in-process Map, 30s TTL)              │   │
+│  └──────────────────────────────────────────────────────────────┘   │
 └─────────────────────────┬────────────────────────────────────────────┘
-                          │ Sequelize (TCP)
+                          │ Sequelize (TCP, transactional for cascades)
                           ▼
             ┌─────────────────────────────────────┐
             │       PostgreSQL                    │
             │  users, games, picks, groups,       │
             │  group_members, group_invites,      │
             │  badges, friendships, comments,     │
-            │  comment_reactions, notifications   │
+            │  comment_reactions, notifications,  │
+            │  SequelizeMeta (umzug bookkeeping)  │
             └─────────────────────────────────────┘
 ```
 
-There is **one server process**, **one database**, **no message queue**, **no cache**, **no worker**, **no CDN**. Notifications and badges are fired synchronously inside the same request that triggers them (in a `.catch(() => {})` to keep the user-facing response from failing if a side-effect errors).
+There is **one server process**, **one database**, **no message queue**, **no worker**, **no CDN**. A small in-process leaderboard cache lives in the Node heap (Tier 5.2). Notifications and badges are fired synchronously inside the same request that triggers them (in a `.catch(() => {})` to keep the user-facing response from failing if a side-effect errors), and they fire **outside** any transaction so a rollback never produces ghost messages.
 
 ---
 
@@ -90,14 +97,18 @@ There is **one server process**, **one database**, **no message queue**, **no ca
 | HTTP client | **`fetch`** (no axios) | Standard; the wrapper handles JSON + auth header + 401 |
 | State | **`useState` + `useMemo` + `useCallback`** | No Redux/Zustand/Context — App.jsx is the single state owner |
 | Backend | **Node 18+ / Express 4** | Tiny surface, no router framework, easy to read |
-| ORM | **Sequelize 6** | Predictable, supports raw SQL escape hatches; migrations are intentionally hand-rolled (see §7.3) |
+| ORM | **Sequelize 6** | Predictable, supports raw SQL escape hatches |
+| Migrations | **sequelize-cli + umzug** (Tier 5.1) | sequelize-cli for `npm run db:*` scripts; umzug for programmatic dev-boot execution. Versioned files under `migrations/`. See §7.3 |
 | DB | **PostgreSQL** | Need ENUMs, partial unique indexes, and `LEAST/GREATEST` functional indexes — all Postgres-specific |
 | Auth | **JWT (HS256) via `jsonwebtoken`** | Stateless, 7-day expiry, no session table |
 | Password hashing | **bcryptjs** (cost 10) | Pure-JS, no native build step needed on Windows |
 | Validation | **zod** | Schema-first request validation; emits structured error JSON |
 | Rate limiting | **express-rate-limit** | In-memory, per-IP; only applied to `/api/login` and `/api/register` |
+| Logging | **pino + pino-http** (Tier 5.4) | Structured JSON in prod, `pino-pretty` in dev. Every request gets `req.id` (UUID or inbound `X-Request-Id`) and a `req.log` child logger |
+| HTTP compression | **`compression`** (Tier 5.6) | Gzip middleware mounted before static + body parser; ~75% size reduction on the JS bundle |
+| Leaderboard cache | **In-memory Map** with 30 s TTL (Tier 5.2) | No Redis dependency; appropriate for the current single-process deployment. See §8.14 |
 
-Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker, no CI/CD config, no logger library (raw `console.log`/`console.warn`). These are deliberate scope decisions documented in [CLAUDE.md](CLAUDE.md).
+Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker, no CI/CD config. These are deliberate scope decisions documented in [CLAUDE.md](CLAUDE.md).
 
 ---
 
@@ -105,17 +116,40 @@ Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker
 
 ```
 ScoreCast/
-├── server.js                            # Single-file Express app (~1500 LOC)
-├── package.json                         # All deps; npm scripts: dev, build, start, preview
-├── db-config.js                         # Stub used by sequelize-cli (not by the app)
+├── server.js                            # Single-file Express app (~1550 LOC)
+├── package.json                         # All deps; npm scripts: dev, build, start, preview, db:migrate*, db:seed*
+├── db-config.js                         # Legacy stub — unused now that config/database.js exists
 ├── data.json                            # Seed: users, games, groups, picks
-├── .env.example                         # Required env vars (JWT_SECRET, DATABASE_URL, …)
+├── .env.example                         # Required env vars (JWT_SECRET, DATABASE_URL, LOG_LEVEL, MIGRATE_ON_BOOT, …)
 ├── vite.config.js                       # /api proxy → localhost:3000 in dev
 ├── tailwind.config.js
 ├── postcss.config.js
+├── .sequelizerc                         # Tier 5.1: tells sequelize-cli where config/migrations/seeders live
+│
+├── config/
+│   └── database.js                      # Tier 5.1: dev/test/production DB blocks (DATABASE_URL or local default)
+│
+├── migrations/                          # Tier 5.1: versioned schema migrations (sequelize-cli + umzug)
+│   ├── 20260513000001-add-user-role.js
+│   ├── 20260513000002-pick-unique-index.js
+│   ├── 20260513000003-group-visibility-enum.js
+│   ├── 20260513000004-friendship-pair-unique.js
+│   ├── 20260513000005-user-displayname-bio.js
+│   ├── 20260513000006-comment-edited-at.js
+│   └── 20260513000007-comment-reactions-table.js
+│
+├── seeders/                             # Tier 5.1: idempotent seeders
+│   └── 20260513000001-seed-password-backfill.js   # re-hashes any plaintext seed password matching data.json
+│
+├── lib/                                 # Process-local helpers
+│   ├── logger.js                        # Tier 5.4: pino instance (pretty in dev, JSON in prod, LOG_LEVEL env)
+│   └── leaderboardCache.js              # Tier 5.2: getOrBuild/invalidate/stats; 30s TTL in-memory Map
+│
+├── middleware/
+│   └── requestId.js                     # Tier 5.4: assigns req.id + req.log child; echoes X-Request-Id header
 │
 ├── models/                              # Sequelize models — one file per table
-│   ├── index.js                         # Sequelize init + associations + initDatabase + runMigrations + seedDatabase
+│   ├── index.js                         # Sequelize init + associations + initDatabase + umzug shim (runMigrations) + seedDatabase
 │   ├── User.js                          # bcrypt beforeCreate/beforeUpdate hooks; displayName + bio
 │   ├── Game.js
 │   ├── Group.js                         # visibility ENUM('private'|'public')
@@ -123,7 +157,7 @@ ScoreCast/
 │   ├── GroupInvite.js
 │   ├── Pick.js                          # unique (userId, gameId)
 │   ├── Badge.js                         # unique (userId, slug)
-│   ├── Friendship.js                    # pending|accepted; unique pair via functional index in runMigrations
+│   ├── Friendship.js                    # pending|accepted; unique pair via functional index
 │   ├── Comment.js                       # indexed by gameId; editedAt (Tier 8)
 │   ├── CommentReaction.js               # unique (commentId, userId, emoji); indexed by commentId (Tier 8)
 │   └── Notification.js                  # indexed by (userId, read, createdAt)
@@ -188,18 +222,35 @@ There is **no worker process**, **no cron job**, **no PM2 wrapper**. Restart = l
 For every request:
 
 ```
-1. cors({ origin: true, credentials: true })            // permissive in dev; tighten for prod
-2. bodyParser.json()                                     // parses application/json
-3. cookieParser()                                        // populates req.cookies
-4. express.static(dist/)                                 // serves built assets if path matches
-5. (per-route) rate-limit | authMiddleware | requireAdmin | validate(schema)
-6. Route handler                                         // typically async; uses Sequelize models
-7. Response: res.json({...}) or res.status(N).json({error: '...'})
+1. requestId                                             // Tier 5.4: assigns req.id (UUID or inbound X-Request-Id),
+                                                         //           attaches req.log = logger.child({reqId});
+                                                         //           sets X-Request-Id response header.
+2. pino-http                                             // Tier 5.4: one structured access-log line per request
+                                                         //           (method, url, statusCode, responseTime, reqId).
+3. compression()                                         // Tier 5.6: gzip when Accept-Encoding includes gzip
+                                                         //           and the body exceeds the default 1 KB threshold.
+4. cors({ origin: true, credentials: true })             // permissive in dev; tighten for prod (Tier 6.1)
+5. bodyParser.json()                                     // parses application/json
+6. cookieParser()                                        // populates req.cookies
+7. express.static(dist/)                                 // serves built assets if path matches
+8. (per-route) rate-limit | authMiddleware | requireAdmin | validate(schema)
+9. Route handler                                         // typically async; uses Sequelize models + req.log
+10. Response: res.json({...}) or res.status(N).json({error: '...'})
+                                                         // pino-http logs the response with the same reqId
+                                                         // and a level mapped from status (>=500 error, >=400 warn).
 ```
 
 If the URL doesn't match any `/api/*` route, the catch-all `app.get('*')` returns `dist/index.html`. **The API routes must be registered before** the catch-all (they are).
 
 ### 5.3 Middleware
+
+#### Request ID + Logger child — `requestId` (Tier 5.4)
+Defined in [middleware/requestId.js](middleware/requestId.js). Runs **before every other middleware**. For each request:
+- Reads inbound `X-Request-Id` if present and ≤200 chars; otherwise generates a UUID v4 via `crypto.randomUUID()`.
+- Assigns `req.id` and echoes it back on the response (`X-Request-Id` header).
+- Attaches `req.log = logger.child({ reqId: req.id })` — every handler uses this child logger so error lines are auto-tagged with the request ID.
+
+Then `pino-http` runs to emit a single structured access log per request (`req: {id, method, url}`, `res: {statusCode}`, `responseTime`). Its `customLogLevel` maps `>=500` → `error`, `>=400` → `warn`, else `info`.
 
 #### Authentication — `authMiddleware`
 Defined inline in [server.js](server.js). Tries both auth strategies:
@@ -276,10 +327,25 @@ These are pure-Node helpers, not endpoints. They live inside `server.js` and are
 | `buildUserSummary()` | Overall leaderboard rows (includes displayName) | `GET /api/leaderboard` |
 | `buildGroupLeaderboard(groupId)` | Group-scoped rows (includes displayName + winRate) | `GET /api/leaderboard?groupId=` |
 | `sortLeaderboard(rows, orderBy)` | Sort by `points / winRate / username`, attach `rank` | Group leaderboard pagination path |
-| `cascadeDeleteUser(target)` | 9-step user cascade (groups owned, picks, comments, friendships, memberships, invites, then user) | `DELETE /api/admin/users/:id`, `POST /api/admin/users/bulk` |
-| `cascadeDeleteGame(game)` | Pick + comment cleanup, then game | `DELETE /api/admin/games/:id`, `POST /api/admin/games/bulk` |
+| `cascadeDeleteUser(target, {transaction})` | 9-step user cascade (groups owned, picks, comments, friendships, memberships, invites, then user). Tier 5.3: accepts `{transaction}` and forwards to every internal `destroy()`. | `DELETE /api/admin/users/:id`, `POST /api/admin/users/bulk` |
+| `cascadeDeleteGame(game, {transaction})` | Pick + comment cleanup, then game. Tier 5.3: tx-aware. | `DELETE /api/admin/games/:id`, `POST /api/admin/games/bulk` |
+| `cascadeDeleteGroup(group, {transaction})` | (Tier 5.3) Members + invites + group. Extracted from the inline body of `DELETE /api/groups/:groupId`. | `DELETE /api/groups/:groupId` |
 
-`notify` and `evaluateBadges` are **fire-and-forget with `.catch(() => {})`** — a failure inside them never breaks the user-facing response. The trade-off is silent failures; future maintainers may want to swap in a real logger.
+`notify` and `evaluateBadges` are **fire-and-forget with `.catch(() => {})`** — a failure inside them never breaks the user-facing response. They also fire **outside** every cascade transaction so a rollback never produces ghost notifications. The trade-off is silent failures; the structured `req.log.warn`/`logger.warn` calls inside `notify()` and `evaluateBadges()` (Tier 5.4) at least leave a trail.
+
+#### Transactional cascades (Tier 5.3)
+
+All cascade helpers accept `{transaction}` and forward it to every internal Sequelize call. Callers wrap with:
+
+```js
+await sequelize.transaction(async (t) => {
+  await cascadeDeleteUser(target, { transaction: t });
+});
+```
+
+Per-entity transaction strategy in bulk endpoints — `POST /api/admin/users/bulk` and `POST /api/admin/games/bulk` start a **fresh transaction per iteration**, not one tx for the entire batch. Rationale: a single bad row should not roll back already-committed deletions; the existing `affected[]` / `skipped[]` response already implies per-row success. A handler-level abort on first failure still happens — but everything before the failure stays committed and orphan-free.
+
+Verified property: a mid-cascade exception leaves the parent row + all child rows intact. See §11.4 gotcha #11 for the test recipe.
 
 ---
 
@@ -425,53 +491,59 @@ If `DATABASE_URL` is set, it overrides everything else. Otherwise the local defa
 On every server boot, `initDatabase()` runs (in order):
 
 1. **`sequelize.authenticate()`** — fail fast if Postgres is unreachable.
-2. **`sequelize.sync({ alter: false })`** — creates tables that don't exist yet. Does **not** modify existing tables. `alter: false` is deliberate: we don't trust Sequelize's auto-alter logic.
-3. **`runMigrations()`** — our hand-rolled idempotent migration block (see §7.3).
-4. **`seedDatabase()`** — only runs if the `users` table is empty; populates from [data.json](data.json).
+2. **`sequelize.sync({ alter: false })`** — creates tables that don't exist yet. Does **not** modify existing tables. `alter: false` is deliberate: we don't trust Sequelize's auto-alter logic. Treat this as a dev safety net for brand-new tables; migrations are the source of truth.
+3. **`runMigrations()`** — Tier 5.1: now a thin programmatic umzug invocation against `migrations/`. In production it's a no-op unless `MIGRATE_ON_BOOT=true` (production deploys should run `npm run db:migrate` explicitly).
+4. **`seedDatabase()`** — only runs if the `users` table is empty; populates from [data.json](data.json) via `User.bulkCreate({individualHooks: true})` so the bcrypt hook fires per row.
 
-### 7.3 The `runMigrations()` Contract
+### 7.3 Migrations Framework (Tier 5.1)
 
-This is the project's poor-man's migration framework. Every schema evolution that `sync({alter:false})` can't handle goes here as **raw SQL guarded by `IF NOT EXISTS`** (or equivalent):
+Schema evolution is managed by **sequelize-cli** (CLI for engineers + production deploys) and **umzug** (programmatic API used by the dev-mode boot path). Both read from the same `migrations/` directory and share the `SequelizeMeta` bookkeeping table, so either entry point applies the same set of versioned migrations exactly once.
 
-```sql
--- Tier 1: role column on users (ENUM auto-created by sync the first time the User model loads)
-ALTER TABLE users ADD COLUMN IF NOT EXISTS role enum_users_role NOT NULL DEFAULT 'user';
-
--- Tier 1: unique pick per (user, game)
-CREATE UNIQUE INDEX IF NOT EXISTS picks_user_game_unique ON picks ("userId", "gameId");
-
--- Tier 3: groups.visibility — enum + column, both idempotent
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'enum_groups_visibility') THEN
-    CREATE TYPE "public"."enum_groups_visibility" AS ENUM ('private', 'public');
-  END IF;
-END $$;
-ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility enum_groups_visibility NOT NULL DEFAULT 'private';
-
--- Tier 3: friendship pair uniqueness (unordered)
-CREATE UNIQUE INDEX IF NOT EXISTS friendships_pair_unique
-  ON friendships (LEAST("requesterId","addresseeId"), GREATEST("requesterId","addresseeId"));
-
--- Tier 8: profile fields on users
-ALTER TABLE users ADD COLUMN IF NOT EXISTS "displayName" VARCHAR(60);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
-
--- Tier 8: comment edit flag
-ALTER TABLE comments ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP WITH TIME ZONE;
-
--- Tier 8: comment_reactions table is created by sequelize.sync() because it's brand new — no ALTER needed.
---         Its uniqueness + index come from the model definition (CommentReaction.js).
-
--- Tier 1: data fix — re-hash any seed user whose password is still plaintext (matched against data.json)
+**Layout**:
+```
+.sequelizerc                 → points sequelize-cli at the directories below
+config/database.js           → dev/test/production blocks; reads DATABASE_URL or falls back to local Postgres
+migrations/                  → versioned files (NNN-name.js), one per schema change
+seeders/                     → idempotent seeders (e.g. password backfill)
 ```
 
-**Rules for adding migrations**:
-- Every statement must be safely re-runnable. `IF NOT EXISTS`, `IF NOT EXISTS` indexes, and `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN null; END $$;` blocks for CREATE TYPE.
-- Order matters: any later migration that depends on an earlier change should be appended below it.
-- Data backfills go at the bottom and should also be idempotent (`UPDATE ... WHERE col IS NULL`).
-- Add a comment naming the Tier that introduced the change.
+**Scripts** (in [package.json](package.json)):
+| Script | Effect |
+| --- | --- |
+| `npm run db:migrate` | Apply all pending migrations |
+| `npm run db:migrate:undo` | Roll back the most recent migration |
+| `npm run db:migrate:status` | Show `up` / `down` state per migration |
+| `npm run db:seed` | Run all seeders (idempotent) |
+| `npm run db:seed:undo` | Roll back all seeders (rarely useful) |
 
-This is a Tier 5 candidate to replace with `sequelize-cli` proper, but works fine for the current scale.
+**Boot behavior**:
+- **Development** (`NODE_ENV !== 'production'`): `runMigrations()` calls `umzug.up()` so the dev server is always on the latest schema with no manual step.
+- **Production**: boot-time auto-migrate is **off** by default. Run `npm run db:migrate` as part of the deploy pipeline. Set `MIGRATE_ON_BOOT=true` to override (useful for single-node deploys where you accept the risk of a long boot pause).
+
+**Initial migration set** (all idempotent — they're no-ops against DBs that were upgraded by the old boot-time SQL):
+
+| File | Effect |
+| --- | --- |
+| `20260513000001-add-user-role.js` | ENUM `enum_users_role` + `users.role` column |
+| `20260513000002-pick-unique-index.js` | `picks_user_game_unique (userId, gameId)` |
+| `20260513000003-group-visibility-enum.js` | ENUM `enum_groups_visibility` + `groups.visibility` column |
+| `20260513000004-friendship-pair-unique.js` | Functional unique index on `LEAST/GREATEST(requesterId, addresseeId)` |
+| `20260513000005-user-displayname-bio.js` | `users.displayName VARCHAR(60)` + `users.bio TEXT` |
+| `20260513000006-comment-edited-at.js` | `comments.editedAt TIMESTAMPTZ` |
+| `20260513000007-comment-reactions-table.js` | `CREATE TABLE comment_reactions IF NOT EXISTS` (existing DBs already had it from `sync({alter:false})`) |
+
+**Seeder set**:
+| File | Effect |
+| --- | --- |
+| `seeders/20260513000001-seed-password-backfill.js` | Re-hashes any plaintext password that still matches a `data.json` entry. Skips already-bcrypt rows. |
+
+**Rules for adding new migrations**:
+- `npx sequelize-cli migration:generate --name <short-description>`, edit the generated `up` and `down`.
+- Every `up` statement should be **safely re-runnable**: `IF NOT EXISTS` for columns/indexes/tables, and `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN null; END $$;` blocks for `CREATE TYPE`. This isn't required by sequelize-cli (which tracks applied migrations in `SequelizeMeta`), but matches our existing migrations and is friendly against DBs that pre-existed the migration framework.
+- `down` paths are best-effort, intended for local rollback only. `DROP COLUMN IF EXISTS`, `DROP INDEX IF EXISTS`, etc.
+- **Never** add raw DDL back into `runMigrations()` — that function is now a thin umzug shim.
+- `migrations/` and `seeders/` are **versioned source code, not generated artifacts** — always commit them. The `.gitignore` carries a note to the same effect.
+- See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for the full how-to and examples.
 
 ### 7.4 Tables
 
@@ -784,9 +856,9 @@ Eight endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in t
   7. Delete the target's group_members rows (in groups they didn't own).
   8. Delete the target's group_invites (by username string match).
   9. Destroy the user row (cascades badges + notifications via DB-level CASCADE).
-- `POST /api/admin/users/bulk` (Tier 8.9) — body `{ids, action}`. Three actions: `promote`, `demote`, `delete`. **Self-protection** is automatic: any id matching `req.user.id` is filtered out and returned in `skipped: [{id, reason: 'self'}]` rather than erroring the whole batch. Each surviving id is processed via `User.save({hooks: false})` or `cascadeDeleteUser()`.
+- `POST /api/admin/users/bulk` (Tier 8.9) — body `{ids, action}`. Three actions: `promote`, `demote`, `delete`. **Self-protection** is automatic: any id matching `req.user.id` is filtered out and returned in `skipped: [{id, reason: 'self'}]` rather than erroring the whole batch. Each surviving id is processed via `User.save({hooks: false})` or `cascadeDeleteUser()` — the **delete** action wraps each iteration in its own transaction (Tier 5.3).
 
-The full sequence runs **outside** a transaction in v1. A partial failure would leave dangling rows; Tier 5 should wrap these (single + bulk) in `sequelize.transaction()`.
+**Transactional cascades (Tier 5.3)**: `DELETE /api/admin/users/:id`, `DELETE /api/admin/games/:id`, and `DELETE /api/groups/:groupId` each wrap their cascade helper in `sequelize.transaction(async (t) => { ... })`. A mid-cascade exception rolls back the whole helper, leaving no orphan rows. Bulk endpoints (`/api/admin/users/bulk`, `/api/admin/games/bulk`) use **one transaction per entity** rather than one tx for the whole batch — a bad row aborts the batch, but everything already committed stays orphan-free.
 
 ### 8.10 Search Subsystem (Tier 8.4)
 
@@ -837,6 +909,46 @@ Single-item and bulk admin paths share helpers — see §8.9. The bulk endpoints
 - **Idempotent self-skipping** (only on user bulk actions): the caller's own id is silently filtered before the loop and returned in `skipped`. Game bulk has no self-protection because games are not user-owned.
 - **Per-action loop**: there is no transaction wrapping the batch; a partial failure leaves earlier-affected rows committed and later rows untouched. The endpoint returns the affected list so the frontend can resync the table even on partial success.
 - **Set-result side effects**: the bulk-game `setResult` path runs the full notification + badge eval loop per game per pick, just like the single-game version. For a large batch on a popular fixture this can produce many notification rows; future Tier 7 work should consider batching/deduplication.
+
+### 8.14 Leaderboard Cache (Tier 5.2)
+
+[lib/leaderboardCache.js](lib/leaderboardCache.js) is a small in-process cache that sits in front of `buildUserSummary()` and `buildGroupLeaderboard()`. Three operations:
+
+```js
+const value = await cache.getOrBuild(key, builder);   // serve from cache or rebuild + store
+cache.invalidate(key | 'all');                         // drop one key (or everything)
+cache.stats();                                         // { size, hits, misses, keys: [{key, ageMs, ttlRemainingMs}] }
+```
+
+**Shape**: `Map<string, { value, expiresAt }>` with a 30 s TTL (matches the frontend notification poll cadence so cache misses are bounded). The cached value is the **unsorted full array** of rows — sort, slice, and `viewerRow` computation happen per request **on top of** the cached array, so one cache entry serves all `orderBy` / `offset` / `limit` combinations.
+
+**Keys**:
+- `'overall'` — the global leaderboard
+- `group:<groupId>` — per-group leaderboard
+
+**Invalidation policy** is conservative: most mutations call `cache.invalidate('all')` because picks affect the overall standings and may cross group boundaries. Group-scoped mutations (`/join`, `/leave`, accept-invite, group delete) invalidate only their `group:<id>` key.
+
+| Mutation endpoint | Invalidation |
+| --- | --- |
+| `POST /api/picks`, `DELETE /api/picks/:id` | `'all'` |
+| `POST /api/games/:gameId/result` | `'all'` |
+| `DELETE /api/admin/games/:id` | `'all'` |
+| `POST /api/admin/games/bulk` (any affected) | `'all'` |
+| `DELETE /api/admin/users/:id` | `'all'` |
+| `POST /api/admin/users/bulk` (delete only) | `'all'` |
+| `POST /api/groups/:groupId/invite/:inviteId/accept` | `group:<id>` |
+| `POST /api/groups/:groupId/join` | `group:<id>` |
+| `POST /api/groups/:groupId/leave` | `group:<id>` |
+| `DELETE /api/groups/:groupId` | `group:<id>` |
+
+**Promote / demote** (admin role change) don't invalidate — the cached rows hold username + displayName + points, not role.
+
+**Observability**: `GET /api/admin/cache-stats` (admin-only) returns the live `stats()` snapshot. Useful for verifying invalidation during development.
+
+**Limits**:
+- **Single-process only**: the cache is process-local. A multi-instance deploy would see stale reads across replicas. Today the app is single-process so this is fine; a future move to Redis would be a small interface swap (the `lib/leaderboardCache.js` module already encapsulates the storage).
+- **No background refresh**: invalidation is purely mutation-driven; expired entries are rebuilt lazily on the next read.
+- **`viewerRow` is not cached** — it's per-caller, computed downstream of the cached array.
 
 ---
 
@@ -973,12 +1085,12 @@ DELETE /api/admin/users/<bobId>
 
 ### 10.1 Error Handling
 
-- **Server**: every route handler is wrapped in `try { ... } catch (error) { res.status(500).json({error: '...'}) }`. The catch blocks log to `console.error` and return a generic message; no stack trace leaks to the client.
+- **Server**: every route handler is wrapped in `try { ... } catch (error) { res.status(500).json({error: '...'}) }`. The catch blocks call `req.log.error({err}, 'handler error')` (Tier 5.4) and return a generic message; no stack trace leaks to the client. The structured log carries `reqId`, so a 500 returned to a user can be traced back to the exact handler invocation via the response's `X-Request-Id` header.
 - **zod validation errors** are 400 with the `issues` array (path + message).
 - **Specific business errors** (e.g. duplicate friend request) are 400 with a human-readable string.
 - **Frontend**: every `request()` call site catches and routes through `showStatus(error.message)` (which displays a transient toast). The `'Session expired'` error is special-cased and not re-shown (the toast was already triggered by `handleSessionExpired`).
 
-There is **no centralized error handler middleware** on the server and **no global error boundary** on the client. Tier 5.
+There is **no centralized error handler middleware** on the server and **no global error boundary** on the client — a future Tier 5.4b item.
 
 ### 10.2 Security Posture
 
@@ -1002,12 +1114,12 @@ There is **no centralized error handler middleware** on the server and **no glob
 
 ### 10.3 Performance
 
-- **Leaderboard**: `GET /api/leaderboard` does an unbounded `SELECT * FROM users + picks + games`, then computes scores in JS. O(users × picks) per call. Fine at hundreds of users; becomes a problem in the thousands. Tier 5 caching candidate.
-- **Profile endpoint**: similar shape but bounded to a single user.
-- **N+1 risk in `getGroupsForUser`**: loops over groups fetching members + invites per group. Could be replaced with a single JOIN-style query; deferred.
+- **Leaderboard cache (Tier 5.2)**: `GET /api/leaderboard` reads through [lib/leaderboardCache.js](lib/leaderboardCache.js) — a 30 s in-process TTL Map. Sort and pagination layer on top of the cached array, so a single cache entry serves all `orderBy`/`offset`/`limit` combinations. See §8.14 for the invalidation policy. The underlying `buildUserSummary` / `buildGroupLeaderboard` are still O(users × picks) on a miss — caching just bounds the cost to once per 30 s per scope.
+- **Profile endpoint**: not cached. Similar shape to leaderboard but bounded to a single user; a Tier 5 follow-up candidate if profile views become hot.
+- **N+1 elimination (Tier 5.7)**: `getGroupsForUser` and `getGroupById` now use Sequelize `include: [{model: User}]` to batch-load member usernames in a single query. For a user in 3 groups, this dropped 12 queries to 3.
 - **No connection pooling tuning**: Sequelize default of max 5 is fine for a single Node process.
-- **No HTTP compression** is configured — Express serves uncompressed JSON. Add `compression` middleware before going to prod over the open internet.
-- **Bundle size**: the production JS bundle is ~460 KB (gzipped ~118 KB). All from React + Tailwind + business code; no obvious wins without code-splitting.
+- **HTTP compression (Tier 5.6)**: `compression` middleware mounted before static/body parsing. JS bundle compresses ~75 % on the wire; JSON responses under 1 KB are skipped (default threshold).
+- **Bundle size**: the production JS bundle is ~485 KB uncompressed, ~120 KB gzipped on the wire. All from React + Tailwind + business code; future code-splitting (Tier 9.5) could split the admin and profile-drawer trees into separate chunks.
 
 ### 10.4 Accessibility
 
@@ -1024,9 +1136,12 @@ Not yet:
 - Skeleton loading states don't announce themselves to screen readers.
 - No WCAG color-contrast audit run formally.
 
-### 10.5 Observability
+### 10.5 Observability (Tier 5.4)
 
-There is **none**. No structured logging, no metrics endpoint, no Sentry, no APM. Server-side `console.log` and `console.error` go to stdout/stderr. Frontend has no telemetry. Tier 5 candidate.
+- **Structured logging**: all backend logs go through pino via [lib/logger.js](lib/logger.js). JSON in production, `pino-pretty` colored output in development. Log level controlled by `LOG_LEVEL` env (`debug` in dev, `info` in prod by default).
+- **Request correlation**: [middleware/requestId.js](middleware/requestId.js) assigns `req.id` (UUID v4 or honored inbound `X-Request-Id`), echoes it back on the response, and attaches `req.log = logger.child({reqId})`. Every handler error log line carries the `reqId`, so a client error can be traced back to the exact request.
+- **Access log**: `pino-http` emits one structured line per request (`req`, `res`, `responseTime`). `customLogLevel` maps `>=500` to `error` and `>=400` to `warn`, so warn/error filters surface the bad requests automatically.
+- **No metrics / no APM / no Sentry**: there's no `/metrics` endpoint and no error-forwarding sink yet. The frontend has no telemetry. Sentry integration is a 5.4b follow-up.
 
 ---
 
@@ -1036,9 +1151,11 @@ There is **none**. No structured logging, no metrics endpoint, no Sentry, no APM
 
 See [.env.example](.env.example):
 - **`JWT_SECRET`** — must be set in production; generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Server refuses to start in `NODE_ENV=production` without it.
-- **`DATABASE_URL`** — Postgres connection string. Optional; defaults to `postgres://postgres:postgres@localhost/scorecast_db`.
+- **`DATABASE_URL`** — Postgres connection string. Optional; defaults to `postgres://postgres:postgres@localhost/scorecast_db` (see [config/database.js](config/database.js)).
 - **`PORT`** — defaults to 3000.
-- **`NODE_ENV`** — `development` or `production`.
+- **`NODE_ENV`** — `development` or `production`. Gates JWT_SECRET enforcement, logger format (pretty vs JSON), and migration auto-run behavior.
+- **`LOG_LEVEL`** — (Tier 5.4) pino level. Defaults to `debug` in dev and `info` in prod. Values: `fatal | error | warn | info | debug | trace | silent`.
+- **`MIGRATE_ON_BOOT`** — (Tier 5.1) `'true'` to apply pending migrations on server boot in production. Default off — production should run `npm run db:migrate` as an explicit deploy step. No effect in development (always auto-migrates).
 
 ### 11.2 Local Setup
 
@@ -1069,24 +1186,29 @@ On first boot, [data.json](data.json) is seeded into an empty `users` table. See
 ### 11.3 Production Build
 
 ```bash
-npm run build      # vite build → dist/
-node server.js     # serves dist/ + /api on the same port
+npm run db:migrate  # apply pending migrations (idempotent against existing DBs)
+npm run build       # vite build → dist/
+node server.js      # serves dist/ + /api on the same port (does NOT auto-migrate in prod)
 ```
 
-Or in one go: `npm start` (= `vite build && node server.js`).
+Or in one go: `npm start` (= `vite build && node server.js`). For production it's recommended to run `npm run db:migrate` separately before starting the server, or set `MIGRATE_ON_BOOT=true` to auto-apply on boot.
 
 ### 11.4 Common Gotchas
 
 1. **Route shadowing**: `/api/groups/discover` must stay registered before `/api/groups/:groupId`. Same for any future `/api/groups/<literal>` routes.
 2. **Scoring duplication**: edits to `scorePick` in [server.js](server.js) must be mirrored in [src/utils/scoring.js](src/utils/scoring.js) (and vice versa) in the same commit.
-3. **Migration idempotency**: every statement in `runMigrations()` must be safely re-runnable. Tests: `runMigrations()` should work both on a brand-new DB and on a DB that already has the change applied. **Brand-new tables** (added since Tier 8: `comment_reactions`) don't need an entry in `runMigrations()` — `sequelize.sync({alter:false})` creates them.
+3. **Migration framework (Tier 5.1)**: **never** add raw DDL back into `runMigrations()` — it's a thin umzug shim now. Add a new file under `migrations/` via `npx sequelize-cli migration:generate --name <name>`. Make `up` statements idempotent (`IF NOT EXISTS`, `DO $$ EXCEPTION` blocks) so they're safe to apply against DBs that pre-existed the framework.
 4. **Notification side-effects on result-set**: when modifying `POST /api/games/:gameId/result`, `POST /api/admin/games/bulk` (setResult action), or any endpoint that resolves picks, you must keep the `notify` + `evaluateBadges` loop intact, otherwise users stop getting feedback.
 5. **Self-protection guards**: the admin self-demote/self-delete checks compare on `req.user.id` (UUID string from the JWT). The bulk-user endpoint additionally **silently filters** self out (no error). If you ever change how `req.user` is shaped, audit both paths.
-6. **`save({hooks: false})`** is intentional in `runMigrations()`, the role-update endpoint, `PUT /api/me`, and bulk role flips — without it, Sequelize's `beforeUpdate` hook would attempt to re-hash an already-hashed password.
+6. **`save({hooks: false})`** is intentional in the role-update endpoint, `PUT /api/me`, the bcrypt backfill seeder, and bulk role flips — without it, Sequelize's `beforeUpdate` hook would attempt to re-hash an already-hashed password.
 7. **`pickMap` shape**: the frontend `pickMap` in [App.jsx](src/App.jsx) stores **full pick objects** (Tier 8.2), not just the `choice` string. Consumers in [GameCard.jsx](src/components/GameCard.jsx) destructure to `existingChoice` and `existingPickId`. Don't revert to the simpler shape — the undo-pick UX needs the id.
 8. **Avatar color stability**: [Avatar.jsx](src/components/Avatar.jsx) hashes on **lowercased `username`**, never `displayName`. If you change this, every existing user's avatar color flips on next render.
 9. **Comment reaction emoji palette**: `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [src/components/CommentThread.jsx](src/components/CommentThread.jsx) must stay in sync. Adding an emoji to one without the other yields either a 400 (server rejects) or a stuck UI button (client allows but server rejects on send).
 10. **Leaderboard `viewerRow`**: when consuming `GET /api/leaderboard`, the group block's `groupMeta.viewerRow` is the **sorted-row including rank**, not the raw user. The frontend uses it to render the "Your position" anchor when the page window excludes the viewer.
+11. **Leaderboard cache invalidation (Tier 5.2)**: any new endpoint that mutates picks, game results, group membership, or deletes users/games must call `leaderboardCache.invalidate('all')` (or a scoped `group:<id>` key) **before** returning, otherwise readers will see stale standings for up to 30 s. The current 11 invalidation sites are listed in §8.14.
+12. **Cascade transactions (Tier 5.3)**: `cascadeDeleteUser`, `cascadeDeleteGame`, `cascadeDeleteGroup` accept a `{transaction}` option and forward it to every internal `destroy()`. Callers wrap with `await sequelize.transaction(async (t) => { await cascadeFn(x, {transaction: t}); })`. **Don't move `notify()` calls inside the transaction** — they're synchronous Notification.create calls that should not be rolled back by a cascade failure. Keep notify calls before/after the tx block, never inside.
+13. **Logging (Tier 5.4)**: use `req.log.error({err}, 'msg')` inside handlers (never `console.*`). For boot-time code that has no request context, use the top-level `logger` from [lib/logger.js](lib/logger.js). The shape `req.log.error({err: error}, 'handler error')` is conventional and shows up structured in JSON output.
+14. **Verifying transaction rollback**: to confirm a new cascade path is genuinely atomic, monkey-patch one of the internal `destroy()` methods to throw and call the endpoint. Verify the parent row + all child rows are intact after the tx exception. See the 5.3 smoke-test recipe in the plan history.
 
 ### 11.5 Backup / Restore
 
@@ -1098,12 +1220,8 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 
 | Area | Issue | Tier |
 | --- | --- | --- |
-| CORS | `origin: true` — accept-all | 6 |
-| Migrations | Hand-rolled SQL in `runMigrations()`; no down-migrations | 5 |
-| Leaderboard | Real-time computation; no caching | 5 |
-| Logging | `console.*` only; no structured logger | 5 |
-| Tests | No automated tests at all | 5 |
-| Transactions | Multi-step deletes (user, game, bulk admin) run outside a transaction | 5 |
+| CORS | `origin: true` — accept-all | 6.1 |
+| Tests | No automated tests at all (Playwright deferred from 5.5 because it needs Docker) | 5.5 / 9.4 |
 | External data | No football API integration; admin enters games manually | 4b (deferred) |
 | Live scores | No live score display; no auto-poll | 4b (deferred) |
 | Leagues / seasons | Single global game pool; no `league` / `season` fields | 4b (deferred) |
@@ -1113,9 +1231,11 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 | Audit log | No record of admin actions (single or bulk) | 4b.6 |
 | Password reset | No flow; no account lockout; no 2FA | 6 |
 | CSRF | Not protected | 6 |
+| Helmet / security headers | Not applied | 6.5 |
 | Profile privacy | Every authenticated user can view every profile | 8.6 |
-| Bulk batching | Bulk endpoints run their loop one-by-one with no transaction; no "fail entire batch on error" mode | 5 |
 | Notification spam | Bulk-setResult can produce many notifications in one request; no batching/dedup | 7 |
+| Cache scope | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Today the app runs single-process so this is fine | future |
+| Frontend telemetry | No error boundary, no `/api/client-errors`, no Sentry | 5.4b |
 
 ---
 
@@ -1130,7 +1250,8 @@ Summary:
 - ✅ **Tier 3** — Social/engagement (profiles, badges, friends, public groups, comments, notifications).
 - ✅ **Tier 4a** — Admin UI for game CRUD + user moderation.
 - 🟡 **Tier 4b** — Game-data quality remainder: external API integration, live scores, leagues/seasons, additional pick types, streaks, audit log. **All deferred** (requires API-Football key + schema additions).
-- ❌ **Tier 5** — Ops & reliability: migrations framework, leaderboard caching, transactions, structured logging, E2E tests, HTTP compression.
+- ✅ **Tier 5 (core)** — Ops & reliability: migrations framework (5.1), leaderboard caching (5.2), transactional cascades (5.3), structured logging (5.4), N+1 elimination (5.7), HTTP compression (5.6).
+- 🟡 **Tier 5 (remainder)** — 5.5 Playwright E2E (deferred — needs Docker / Tier 9.4); 5.4b Sentry + frontend error boundary (deferred follow-up).
 - ❌ **Tier 6** — Security hardening for production: CORS, CSRF, password reset, account lockout, helmet, refresh tokens, 2FA.
 - ❌ **Tier 7** — Real-time & engagement: scheduler-driven notifications, WebSocket/SSE, web push, email, prefs.
 - ✅ **Tier 8** (minus 8.6) — User capabilities: group lifecycle (leave/transfer/delete), pick deletion, avatars, search, profile bio + displayName, comment edit + reactions, leaderboard sort + pagination, bulk admin actions.
@@ -1155,5 +1276,8 @@ Summary:
 | **Drawer** | The right-side overlay panel that shows another user's `ProfileView`. Opened by clicking any leaderboard row. |
 | **Tab** | The pseudo-routing primitive in `App.jsx`. Tabs are strings (`'games' | 'mypicks' | ...`) stored in the `view` state. |
 | **Sync** | (Tier 4, deferred) The act of pulling fixtures + results from an external football API. |
-| **Tier** | Roadmap grouping. Tiers 1–3 are shipped; Tier 4 partial; Tier 5 future. |
-| **Migration** | A statement inside `runMigrations()` that evolves the schema beyond what `sync({alter:false})` can do. Must be idempotent. |
+| **Tier** | Roadmap grouping. Tiers 1–3, 4a, 5 (core), and 8 (minus 8.6) are shipped; Tiers 4b, 6, 7, 8.6, 9 remain. |
+| **Migration** | A versioned file under `migrations/` (Tier 5.1) that evolves the schema. Applied by sequelize-cli (`npm run db:migrate`) or by umzug on dev boot. Statements should be idempotent so they're safe against DBs that pre-existed the framework. |
+| **Cascade transaction** | (Tier 5.3) A `sequelize.transaction()` block wrapping a `cascadeDeleteUser/Game/Group()` call, so a mid-cascade failure rolls back every prior `destroy()` rather than leaving orphans. |
+| **Leaderboard cache key** | `'overall'` for the global block; `group:<groupId>` per group. Invalidated on every mutation that affects standings. See §8.14. |
+| **Request ID** | A UUID v4 assigned by [middleware/requestId.js](middleware/requestId.js) on every request, attached to `req.id`, echoed in the response's `X-Request-Id` header, and included in every log line produced by `req.log`. Honored inbound `X-Request-Id` headers (≤200 chars) are reused instead of generating a new one — useful for client-side correlation. |

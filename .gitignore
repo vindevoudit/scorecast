@@ -19,6 +19,9 @@ build/
 *.db
 scorecast.db
 
+# NOTE: migrations/ and seeders/ are versioned source code (sequelize-cli + umzug).
+# They MUST be committed — do NOT add them here. See MIGRATION_GUIDE.md.
+
 # Logs
 logs/
 *.log

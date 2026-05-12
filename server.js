@@ -3,6 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
+const compression = require('compression');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -10,6 +11,10 @@ const rateLimit = require('express-rate-limit');
 const { Op } = require('sequelize');
 
 const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, sequelize, initDatabase } = require('./models');
+const logger = require('./lib/logger');
+const requestId = require('./middleware/requestId');
+const leaderboardCache = require('./lib/leaderboardCache');
+const pinoHttp = require('pino-http');
 const { validate } = require('./validation/middleware');
 const {
   registerSchema,
@@ -38,7 +43,7 @@ if (!RAW_JWT_SECRET) {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('JWT_SECRET env var is required in production');
   }
-  console.warn('[scorecast] JWT_SECRET not set — using insecure dev fallback');
+  logger.warn('JWT_SECRET not set — using insecure dev fallback');
 }
 const JWT_SECRET = RAW_JWT_SECRET || 'scorecast-dev-only-do-not-use';
 const PORT = process.env.PORT || 3000;
@@ -133,25 +138,36 @@ async function getPendingInvites(userId) {
 async function getGroupsForUser(userId) {
   const memberships = await GroupMember.findAll({ where: { userId } });
   const groupIds = memberships.map((m) => m.groupId);
+  if (groupIds.length === 0) return [];
   const groups = await Group.findAll({ where: { id: groupIds } });
 
-  return Promise.all(groups.map(async (group) => {
-    const members = await GroupMember.findAll({ where: { groupId: group.id } });
-    const memberUsers = await User.findAll({ where: { id: members.map((m) => m.userId) } });
-    const orderedMembers = members.map((m) => {
-      const user = memberUsers.find((u) => u.id === m.userId);
-      return { userId: m.userId, username: user?.username || 'Unknown' };
+  const [allMembers, allInvites] = await Promise.all([
+    GroupMember.findAll({ where: { groupId: groupIds }, include: [{ model: User }] }),
+    GroupInvite.findAll({ where: { groupId: groupIds } }),
+  ]);
+
+  const membersByGroup = new Map();
+  for (const m of allMembers) {
+    if (!membersByGroup.has(m.groupId)) membersByGroup.set(m.groupId, []);
+    membersByGroup.get(m.groupId).push({
+      userId: m.userId,
+      username: m.User?.username || 'Unknown',
     });
-    const invites = await GroupInvite.findAll({ where: { groupId: group.id } });
-    return {
-      id: group.id,
-      name: group.name,
-      ownerId: group.ownerId,
-      visibility: group.visibility,
-      members: orderedMembers,
-      invites: invites.map((i) => ({ username: i.username, createdAt: i.createdAt })),
-      createdAt: group.createdAt,
-    };
+  }
+  const invitesByGroup = new Map();
+  for (const i of allInvites) {
+    if (!invitesByGroup.has(i.groupId)) invitesByGroup.set(i.groupId, []);
+    invitesByGroup.get(i.groupId).push({ username: i.username, createdAt: i.createdAt });
+  }
+
+  return groups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    ownerId: group.ownerId,
+    visibility: group.visibility,
+    members: membersByGroup.get(group.id) || [],
+    invites: invitesByGroup.get(group.id) || [],
+    createdAt: group.createdAt,
   }));
 }
 
@@ -159,19 +175,16 @@ async function getGroupById(groupId) {
   const group = await Group.findByPk(groupId);
   if (!group) return null;
 
-  const members = await GroupMember.findAll({ where: { groupId } });
-  const memberUsers = await User.findAll({ where: { id: members.map((m) => m.userId) } });
-  const orderedMembers = members.map((m) => {
-    const user = memberUsers.find((u) => u.id === m.userId);
-    return { userId: m.userId, username: user?.username || 'Unknown' };
-  });
-  const invites = await GroupInvite.findAll({ where: { groupId } });
+  const [members, invites] = await Promise.all([
+    GroupMember.findAll({ where: { groupId }, include: [{ model: User }] }),
+    GroupInvite.findAll({ where: { groupId } }),
+  ]);
 
   return {
     id: group.id,
     name: group.name,
     ownerId: group.ownerId,
-    members: orderedMembers,
+    members: members.map((m) => ({ userId: m.userId, username: m.User?.username || 'Unknown' })),
     invites: invites.map((i) => ({ username: i.username, createdAt: i.createdAt })),
     createdAt: group.createdAt,
   };
@@ -205,7 +218,7 @@ async function notify(userId, type, title, body = null, link = null) {
   try {
     await Notification.create({ userId, type, title, body, link });
   } catch (error) {
-    console.warn('[scorecast] failed to create notification:', error.message);
+    logger.warn({ err: error, userId, notificationType: type }, 'failed to create notification');
   }
 }
 
@@ -263,7 +276,7 @@ async function evaluateBadges(userId, context = {}) {
       await awardBadge(userId, 'group-founder');
     }
   } catch (error) {
-    console.warn('[scorecast] badge evaluation failed:', error.message);
+    logger.warn({ err: error, userId }, 'badge evaluation failed');
   }
 }
 
@@ -343,6 +356,21 @@ function sortLeaderboard(rows, orderBy) {
 }
 
 const app = express();
+app.use(requestId);
+app.use(pinoHttp({
+  logger,
+  genReqId: (req) => req.id,
+  customLogLevel: (req, res, err) => {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'info';
+  },
+  serializers: {
+    req: (req) => ({ id: req.id, method: req.method, url: req.url }),
+    res: (res) => ({ statusCode: res.statusCode }),
+  },
+}));
+app.use(compression());
 app.use(cors({ origin: true, credentials: true }));
 app.use(bodyParser.json());
 app.use(cookieParser());
@@ -411,7 +439,7 @@ app.put('/api/me', authMiddleware, validate(editProfileSchema), async (req, res)
       bio: user.bio,
     });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to update profile' });
   }
 });
@@ -581,6 +609,7 @@ app.post('/api/groups/:groupId/invite/:inviteId/accept', authMiddleware, async (
         `${user.username} joined "${group.name}"`
       ).catch(() => {});
     }
+    leaderboardCache.invalidate(`group:${req.params.groupId}`);
     const updatedGroup = await getGroupById(req.params.groupId);
     res.json({ success: true, group: updatedGroup });
   } catch (error) {
@@ -635,6 +664,7 @@ app.post('/api/picks', authMiddleware, validate(pickSchema), async (req, res) =>
     }
 
     evaluateBadges(req.user.id).catch(() => {});
+    leaderboardCache.invalidate('all');
 
     res.json({ success: true });
   } catch (error) {
@@ -719,7 +749,7 @@ app.get('/api/search', authMiddleware, async (req, res) => {
 
     res.json(results);
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Search failed' });
   }
 });
@@ -739,6 +769,7 @@ app.delete('/api/picks/:id', authMiddleware, async (req, res) => {
     }
 
     await pick.destroy();
+    leaderboardCache.invalidate('all');
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete pick' });
@@ -747,12 +778,15 @@ app.delete('/api/picks/:id', authMiddleware, async (req, res) => {
 
 app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   try {
-    const overall = await buildUserSummary();
+    const overall = await leaderboardCache.getOrBuild('overall', buildUserSummary);
     const groupId = req.query.groupId;
 
     let groupBlock = { rows: [], total: 0, viewerRow: null, orderBy: 'points', offset: 0, limit: 20 };
     if (groupId) {
-      const groupRowsRaw = await buildGroupLeaderboard(groupId);
+      const groupRowsRaw = await leaderboardCache.getOrBuild(
+        `group:${groupId}`,
+        () => buildGroupLeaderboard(groupId)
+      );
       const orderBy = ['points', 'winRate', 'username'].includes(req.query.orderBy)
         ? req.query.orderBy
         : 'points';
@@ -766,7 +800,7 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
 
     res.json({ overall, group: groupBlock.rows, groupMeta: groupBlock });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }
 });
@@ -796,6 +830,7 @@ app.post('/api/games/:gameId/result', authMiddleware, requireAdmin, validate(res
       }
     }
 
+    leaderboardCache.invalidate('all');
     res.json({ success: true, game });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update game result' });
@@ -891,7 +926,7 @@ app.get('/api/users/:username/profile', authMiddleware, async (req, res) => {
       headToHead,
     });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
@@ -1025,6 +1060,7 @@ app.post('/api/groups/:groupId/join', authMiddleware, async (req, res) => {
     if (existing) return res.status(400).json({ error: 'Already a member' });
 
     await GroupMember.create({ groupId: group.id, userId: req.user.id });
+    leaderboardCache.invalidate(`group:${group.id}`);
     const joiner = await getUserById(req.user.id);
     if (group.ownerId !== req.user.id) {
       notify(
@@ -1053,6 +1089,7 @@ app.post('/api/groups/:groupId/leave', authMiddleware, async (req, res) => {
     if (!membership) return res.status(400).json({ error: 'Not a member of this group' });
 
     await membership.destroy();
+    leaderboardCache.invalidate(`group:${group.id}`);
     const leaver = await getUserById(req.user.id);
     notify(
       group.ownerId,
@@ -1102,18 +1139,19 @@ app.delete('/api/groups/:groupId', authMiddleware, async (req, res) => {
 
     const members = await GroupMember.findAll({ where: { groupId: group.id } });
     const memberIds = members.map((m) => m.userId).filter((id) => id !== req.user.id);
-
-    await GroupMember.destroy({ where: { groupId: group.id } });
-    await GroupInvite.destroy({ where: { groupId: group.id } });
     const groupName = group.name;
-    await group.destroy();
+
+    await sequelize.transaction(async (t) => {
+      await cascadeDeleteGroup(group, { transaction: t });
+    });
+    leaderboardCache.invalidate(`group:${group.id}`);
 
     for (const memberId of memberIds) {
       notify(memberId, 'group-join', `Group "${groupName}" was deleted by the owner`).catch(() => {});
     }
     res.json({ success: true });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to delete group' });
   }
 });
@@ -1172,7 +1210,7 @@ app.get('/api/games/:gameId/comments', authMiddleware, async (req, res) => {
       }))
     );
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to fetch comments' });
   }
 });
@@ -1318,7 +1356,7 @@ app.post('/api/admin/games', authMiddleware, requireAdmin, validate(createGameSc
     const game = await Game.create(req.body);
     res.json(game);
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to create game' });
   }
 });
@@ -1339,12 +1377,13 @@ app.delete('/api/admin/games/:id', authMiddleware, requireAdmin, async (req, res
   try {
     const game = await Game.findByPk(req.params.id);
     if (!game) return res.status(404).json({ error: 'Game not found' });
-    await Pick.destroy({ where: { gameId: game.id } });
-    await Comment.destroy({ where: { gameId: game.id } });
-    await game.destroy();
+    await sequelize.transaction(async (t) => {
+      await cascadeDeleteGame(game, { transaction: t });
+    });
+    leaderboardCache.invalidate('all');
     res.json({ success: true });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to delete game' });
   }
 });
@@ -1389,22 +1428,24 @@ app.post('/api/admin/users/:id/role', authMiddleware, requireAdmin, validate(rol
   }
 });
 
-async function cascadeDeleteUser(target) {
-  const ownedGroups = await Group.findAll({ where: { ownerId: target.id } });
+async function cascadeDeleteUser(target, { transaction } = {}) {
+  const opts = transaction ? { transaction } : {};
+  const ownedGroups = await Group.findAll({ where: { ownerId: target.id }, ...opts });
   const ownedGroupIds = ownedGroups.map((g) => g.id);
   if (ownedGroupIds.length > 0) {
-    await GroupMember.destroy({ where: { groupId: ownedGroupIds } });
-    await GroupInvite.destroy({ where: { groupId: ownedGroupIds } });
-    await Group.destroy({ where: { id: ownedGroupIds } });
+    await GroupMember.destroy({ where: { groupId: ownedGroupIds }, ...opts });
+    await GroupInvite.destroy({ where: { groupId: ownedGroupIds }, ...opts });
+    await Group.destroy({ where: { id: ownedGroupIds }, ...opts });
   }
-  await Pick.destroy({ where: { userId: target.id } });
-  await Comment.destroy({ where: { userId: target.id } });
+  await Pick.destroy({ where: { userId: target.id }, ...opts });
+  await Comment.destroy({ where: { userId: target.id }, ...opts });
   await Friendship.destroy({
     where: { [Op.or]: [{ requesterId: target.id }, { addresseeId: target.id }] },
+    ...opts,
   });
-  await GroupMember.destroy({ where: { userId: target.id } });
-  await GroupInvite.destroy({ where: { username: target.username } });
-  await target.destroy();
+  await GroupMember.destroy({ where: { userId: target.id }, ...opts });
+  await GroupInvite.destroy({ where: { username: target.username }, ...opts });
+  await target.destroy(opts);
 }
 
 app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, async (req, res) => {
@@ -1414,18 +1455,29 @@ app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, async (req, res
     }
     const target = await User.findByPk(req.params.id);
     if (!target) return res.status(404).json({ error: 'User not found' });
-    await cascadeDeleteUser(target);
+    await sequelize.transaction(async (t) => {
+      await cascadeDeleteUser(target, { transaction: t });
+    });
+    leaderboardCache.invalidate('all');
     res.json({ success: true });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 
-async function cascadeDeleteGame(game) {
-  await Pick.destroy({ where: { gameId: game.id } });
-  await Comment.destroy({ where: { gameId: game.id } });
-  await game.destroy();
+async function cascadeDeleteGame(game, { transaction } = {}) {
+  const opts = transaction ? { transaction } : {};
+  await Pick.destroy({ where: { gameId: game.id }, ...opts });
+  await Comment.destroy({ where: { gameId: game.id }, ...opts });
+  await game.destroy(opts);
+}
+
+async function cascadeDeleteGroup(group, { transaction } = {}) {
+  const opts = transaction ? { transaction } : {};
+  await GroupMember.destroy({ where: { groupId: group.id }, ...opts });
+  await GroupInvite.destroy({ where: { groupId: group.id }, ...opts });
+  await group.destroy(opts);
 }
 
 app.post('/api/admin/games/bulk', authMiddleware, requireAdmin, validate(bulkGameSchema), async (req, res) => {
@@ -1438,7 +1490,9 @@ app.post('/api/admin/games/bulk', authMiddleware, requireAdmin, validate(bulkGam
     const affected = [];
     if (action === 'delete') {
       for (const game of games) {
-        await cascadeDeleteGame(game);
+        await sequelize.transaction(async (t) => {
+          await cascadeDeleteGame(game, { transaction: t });
+        });
         affected.push(game.id);
       }
     } else if (action === 'setResult') {
@@ -1460,9 +1514,10 @@ app.post('/api/admin/games/bulk', authMiddleware, requireAdmin, validate(bulkGam
         affected.push(game.id);
       }
     }
+    if (affected.length > 0) leaderboardCache.invalidate('all');
     res.json({ success: true, affected });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Bulk game action failed' });
   }
 });
@@ -1490,15 +1545,22 @@ app.post('/api/admin/users/bulk', authMiddleware, requireAdmin, validate(bulkUse
         await target.save({ hooks: false });
         affected.push(target.id);
       } else if (action === 'delete') {
-        await cascadeDeleteUser(target);
+        await sequelize.transaction(async (t) => {
+          await cascadeDeleteUser(target, { transaction: t });
+        });
         affected.push(target.id);
       }
     }
+    if (affected.length > 0 && action === 'delete') leaderboardCache.invalidate('all');
     res.json({ success: true, affected, skipped });
   } catch (error) {
-    console.error(error);
+    req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Bulk user action failed' });
   }
+});
+
+app.get('/api/admin/cache-stats', authMiddleware, requireAdmin, (req, res) => {
+  res.json(leaderboardCache.stats());
 });
 
 app.get('*', (req, res) => {
@@ -1509,10 +1571,10 @@ app.get('*', (req, res) => {
   try {
     await initDatabase();
     app.listen(PORT, () => {
-      console.log(`ScoreCast server is running on http://localhost:${PORT}`);
+      logger.info({ port: PORT }, `ScoreCast server is running on http://localhost:${PORT}`);
     });
   } catch (error) {
-    console.error('Failed to initialize database:', error);
+    logger.fatal({ err: error }, 'failed to initialize database');
     process.exit(1);
   }
 })();

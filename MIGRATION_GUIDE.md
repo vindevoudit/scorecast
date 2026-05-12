@@ -1,186 +1,117 @@
-# PostgreSQL Migration Summary
+# Migrations Guide
 
-## What Changed
+ScoreCast uses [sequelize-cli](https://github.com/sequelize/cli) for schema migrations and seeders. Migrations are the **source of truth for schema changes**; never extend the (deprecated) `runMigrations()` boot helper in `models/index.js` again.
 
-### 1. **Database Layer**
-- **Before**: NeDB (file-based, single-file per collection)
-- **After**: PostgreSQL (client-server, relational database)
+## Layout
 
-### 2. **New Files**
-- `models/` - Sequelize model definitions:
-  - `User.js` - User table definition
-  - `Group.js` - Groups table definition
-  - `Game.js` - Games table definition
-  - `Pick.js` - User picks table definition
-  - `GroupMember.js` - Many-to-many group membership table
-  - `GroupInvite.js` - Group invitations table
-  - `index.js` - Sequelize initialization and associations
-- `.env` - Environment variables (new)
-- `db-config.js` - Database configuration
-- `DATABASE_SETUP.md` - Setup instructions
-
-### 3. **Updated Files**
-- `server.js` - Replaced all NeDB queries with Sequelize ORM
-  - NeDB: `usersDB.findOne()` → Sequelize: `User.findOne()`
-  - NeDB: `usersDB.insert()` → Sequelize: `User.create()`
-  - NeDB: `groupsDB.find()` → Sequelize: `Group.findAll()`
-  - All business logic (scoring, leaderboards) remains the same
-
-### 4. **Key Improvements**
-- **Scalability**: Handles 1000s of concurrent users
-- **Data Integrity**: ACID compliance prevents data corruption
-- **Performance**: Indexed queries, connection pooling
-- **Multi-server**: Data shared across app instances
-- **Backup**: Use PostgreSQL native tools for backups
-
-### 5. **Backward Compatibility**
-- **Old data.json**: Still supported for seeding
-- **API endpoints**: Identical, no frontend changes
-- **Business logic**: Scoring and leaderboards unchanged
-- **JWT auth**: Same implementation
-
-## Database Schema
-
-### users table
 ```
-id (UUID, PK)
-username (VARCHAR, UNIQUE)
-password (VARCHAR)
-createdAt (TIMESTAMP)
+.sequelizerc                       # tells sequelize-cli where things live
+config/database.js                 # dev / test / production DB configs (reads DATABASE_URL)
+migrations/                        # versioned schema migrations (numeric prefix = order)
+seeders/                           # repeatable data seeds (e.g. password backfill)
 ```
 
-### groups table
-```
-id (UUID, PK)
-name (VARCHAR)
-ownerId (UUID, FK → users)
-createdAt (TIMESTAMP)
-```
+## Day-to-day workflow
 
-### group_members (junction table)
-```
-groupId (UUID, PK, FK → groups)
-userId (UUID, PK, FK → users)
-```
+### Run pending migrations (local dev)
 
-### games table
-```
-id (UUID, PK)
-homeTeam (VARCHAR)
-awayTeam (VARCHAR)
-date (TIMESTAMP)
-homeProbability (DECIMAL)
-awayProbability (DECIMAL)
-result (ENUM: 'home', 'away', NULL)
-```
-
-### picks table
-```
-id (UUID, PK)
-userId (UUID, FK → users)
-gameId (UUID, FK → games)
-choice (ENUM: 'home', 'away')
-submittedAt (TIMESTAMP)
-```
-
-### group_invites table
-```
-id (UUID, PK)
-groupId (UUID, FK → groups)
-username (VARCHAR)
-createdAt (TIMESTAMP)
-```
-
-## Setup Instructions
-
-### 1. Install PostgreSQL
-Follow the OS-specific guide in `DATABASE_SETUP.md`
-
-### 2. Create Database
 ```bash
-psql -U postgres
-CREATE DATABASE scorecast_db;
-\q
+npm run db:migrate
 ```
 
-### 3. Configure .env
-Update `.env` with your PostgreSQL credentials:
-```
-DATABASE_URL=postgres://username:password@localhost:5432/scorecast_db
-```
+Already runs automatically on `node server.js` boot in dev. In production it's a no-op unless you opt in with `MIGRATE_ON_BOOT=true` (default is to skip — run `npm run db:migrate` explicitly during deploy).
 
-### 4. Install Dependencies (Already Done)
+### Check status
+
 ```bash
-npm install
+npm run db:migrate:status
 ```
 
-### 5. Run the App
+Shows which migrations are applied (`up`) vs pending (`down`).
+
+### Roll back the last migration
+
 ```bash
-npm run build
-npm start
+npm run db:migrate:undo
 ```
 
-The server will:
-- Connect to PostgreSQL
-- Auto-create schema (Sequelize.sync)
-- Seed data from `data.json` if database is empty
-- Start on http://localhost:3000
+> ⚠ `down` paths are **best-effort** and intended for local dev. They drop columns/indexes/types but won't try to restore data. Don't rely on them in production.
 
-## Troubleshooting
+### Run seeders
 
-### "connect ECONNREFUSED 127.0.0.1:5432"
-- PostgreSQL is not running
-- **Fix**: `brew services start postgresql` (macOS) or `sudo systemctl start postgresql` (Linux)
-
-### "password authentication failed"
-- Wrong credentials in `.env`
-- **Fix**: Check DATABASE_URL matches your PostgreSQL setup
-
-### "database 'scorecast_db' does not exist"
-- Database not created
-- **Fix**: Run `createdb scorecast_db` or use pgAdmin
-
-### Models not loading
-- Missing dependencies
-- **Fix**: `npm install` again
-
-### Port 3000 already in use
-- Another app using the port
-- **Fix**: `PORT=3001 npm start` or kill the process
-
-## Next Steps (Optional)
-
-### 1. Add Password Hashing
-Install bcrypt and hash passwords before storage:
 ```bash
-npm install bcrypt
+npm run db:seed         # apply all seeders (idempotent)
+npm run db:seed:undo    # roll back all seeders (rarely useful)
 ```
 
-### 2. Add Migrations
-Use Sequelize CLI for version control:
-```bash
-npx sequelize-cli init
-npx sequelize-cli migration:generate --name initial-schema
-```
+The current seeder set:
 
-### 3. Add Connection Pool
-Optimize performance for many concurrent users in `models/index.js`
+- `20260513000001-seed-password-backfill.js` — re-hashes any plaintext password that matches a `data.json` entry. Idempotent (skips already-bcrypt rows).
 
-### 4. Production Deployment
-- Use cloud PostgreSQL (AWS RDS, Heroku, Google Cloud SQL)
-- Update DATABASE_URL in production environment
-- Enable SSL for connections
+## Adding a new migration
 
-## Files to Keep/Reference
+1. Generate a stub:
 
-- `server.js.bak` - Original NeDB version (backup)
-- `data.json` - Seed data (still used)
-- Old `.db` files (users.db, groups.db, etc.) - Can be deleted after verification
+   ```bash
+   npx sequelize-cli migration:generate --name add-foo-to-bar
+   ```
 
-## Support
+   This creates `migrations/<timestamp>-add-foo-to-bar.js` with empty `up` / `down` exports.
 
-For issues, check:
-1. PostgreSQL is running: `psql --version`
-2. Database exists: `psql -l`
-3. Connection works: `psql -U postgres -d scorecast_db`
-4. Server logs for error messages
+2. Fill in `up` and `down`. Examples:
+
+   **Add a column** (idempotent):
+   ```js
+   await queryInterface.sequelize.query(
+     `ALTER TABLE games ADD COLUMN IF NOT EXISTS "broadcaster" VARCHAR(80)`
+   );
+   ```
+
+   **Add an ENUM type** (idempotent, Postgres-only):
+   ```js
+   await queryInterface.sequelize.query(`
+     DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'enum_games_league') THEN
+         CREATE TYPE "public"."enum_games_league" AS ENUM ('EPL', 'LaLiga');
+       END IF;
+     END $$;
+   `);
+   ```
+
+   **Add a new table** — use `CREATE TABLE IF NOT EXISTS` because `sequelize.sync({alter:false})` at boot may already have created it from the model definition (this is intentional in dev). The migration is what guarantees the table exists in production where sync is constrained.
+
+3. Update the matching Sequelize model in `models/` if the change adds columns/tables.
+
+4. Apply locally: `npm run db:migrate` (or just restart the server in dev).
+
+5. Verify: `npm run db:migrate:status` lists the new file as `up`.
+
+## Conventions
+
+- **File names**: `YYYYMMDDHHMMSS-short-description.js`. The timestamp determines execution order.
+- **Idempotency**: every `up` must succeed on a DB that already has the change. Use `IF NOT EXISTS`, `IF EXISTS`, and `DO $$ BEGIN … EXCEPTION WHEN duplicate_object THEN null; END $$;` for ENUMs. This is critical because some existing DBs were upgraded via the old `runMigrations()` and the new migration framework needs to be a no-op against them.
+- **Transactions**: sequelize-cli wraps each migration in a transaction automatically. Avoid `CREATE INDEX CONCURRENTLY` (incompatible with transactions); use a plain `CREATE INDEX IF NOT EXISTS` instead.
+- **Never edit a migration that's been merged to `main`.** Add a new one that adjusts the schema forward.
+- **Sequelize `sync({alter:false})`** still runs on boot as a safety net for brand-new tables in dev. It does **not** alter existing tables. Treat the migration as the canonical source of truth.
+
+## Initial migration set
+
+These were extracted from the legacy `runMigrations()` body (now removed). Each is idempotent so it's a no-op against existing DBs that already ran the old boot-time migrations.
+
+| File | Effect |
+| --- | --- |
+| `20260513000001-add-user-role.js` | `users.role` ENUM + default `'user'` |
+| `20260513000002-pick-unique-index.js` | `picks_user_game_unique` on `(userId, gameId)` |
+| `20260513000003-group-visibility-enum.js` | `groups.visibility` ENUM `'private' \| 'public'` |
+| `20260513000004-friendship-pair-unique.js` | functional unique index on `LEAST/GREATEST(requesterId, addresseeId)` |
+| `20260513000005-user-displayname-bio.js` | `users.displayName VARCHAR(60)` + `users.bio TEXT` |
+| `20260513000006-comment-edited-at.js` | `comments.editedAt TIMESTAMPTZ` |
+| `20260513000007-comment-reactions-table.js` | `comment_reactions` table + unique `(commentId, userId, emoji)` + commentId index |
+
+## Production deploy checklist
+
+1. Backup the database.
+2. Pull the new code.
+3. Run `npm run db:migrate` (does **not** run on boot in production by default).
+4. Start the app.
+5. Verify with `npm run db:migrate:status`.

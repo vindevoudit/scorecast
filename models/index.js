@@ -1,10 +1,9 @@
 require('dotenv').config();
 const { Sequelize } = require('sequelize');
-const bcrypt = require('bcryptjs');
+const { Umzug, SequelizeStorage } = require('umzug');
 const fs = require('fs');
 const path = require('path');
-
-const BCRYPT_HASH_PATTERN = /^\$2[aby]\$/;
+const logger = require('../lib/logger');
 
 // Initialize Sequelize
 const sequelize = new Sequelize(process.env.DATABASE_URL || {
@@ -68,10 +67,10 @@ CommentReaction.belongsTo(Comment, { foreignKey: 'commentId' });
 async function initDatabase() {
   try {
     await sequelize.authenticate();
-    console.log('Database connection established.');
+    logger.info('Database connection established.');
 
     await sequelize.sync({ alter: false });
-    console.log('Database synced.');
+    logger.info('Database synced.');
 
     await runMigrations();
 
@@ -81,71 +80,58 @@ async function initDatabase() {
       await seedDatabase();
     }
   } catch (error) {
-    console.error('Database initialization failed:', error);
+    logger.error({ err: error }, 'Database initialization failed');
     throw error;
   }
 }
 
+function buildUmzug() {
+  return new Umzug({
+    migrations: {
+      glob: ['*.js', { cwd: path.join(__dirname, '..', 'migrations') }],
+      resolve: ({ name, path: filepath, context }) => {
+        const migration = require(filepath);
+        return {
+          name,
+          up: async () => migration.up(context, Sequelize),
+          down: async () => migration.down(context, Sequelize),
+        };
+      },
+    },
+    context: sequelize.getQueryInterface(),
+    storage: new SequelizeStorage({ sequelize }),
+    logger: {
+      info: (params) => logger.info({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
+      warn: (params) => logger.warn({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
+      error: (params) => logger.error({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
+      debug: () => {},
+    },
+  });
+}
+
 async function runMigrations() {
-  await sequelize.query(
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS role "public"."enum_users_role" NOT NULL DEFAULT 'user'`
-  );
-  await sequelize.query(
-    'CREATE UNIQUE INDEX IF NOT EXISTS picks_user_game_unique ON picks ("userId", "gameId")'
-  );
-  await sequelize.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'enum_groups_visibility') THEN
-        CREATE TYPE "public"."enum_groups_visibility" AS ENUM ('private', 'public');
-      END IF;
-    END $$;
-  `);
-  await sequelize.query(
-    `ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility "public"."enum_groups_visibility" NOT NULL DEFAULT 'private'`
-  );
-  await sequelize.query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS friendships_pair_unique ON friendships (LEAST("requesterId", "addresseeId"), GREATEST("requesterId", "addresseeId"))`
-  );
-  await sequelize.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "displayName" VARCHAR(60)`);
-  await sequelize.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
-  await sequelize.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP WITH TIME ZONE`);
-
-  const seedFilePath = path.join(__dirname, '..', 'data.json');
-  if (!fs.existsSync(seedFilePath)) return;
-  const seed = JSON.parse(fs.readFileSync(seedFilePath, 'utf8'));
-  const seedPasswordByUsername = new Map(seed.users.map((u) => [u.username, u.password]));
-  const seedRoleByUsername = new Map(seed.users.map((u) => [u.username, u.role || 'user']));
-
-  const existingUsers = await User.findAll();
-  for (const user of existingUsers) {
-    const needsHash = user.password && !BCRYPT_HASH_PATTERN.test(user.password);
-    const seedPassword = seedPasswordByUsername.get(user.username);
-    const seedRole = seedRoleByUsername.get(user.username);
-
-    if (needsHash) {
-      if (seedPassword && user.password === seedPassword) {
-        user.password = await bcrypt.hash(seedPassword, 10);
-        console.log(`Migrated plaintext password for seed user '${user.username}'`);
-      } else {
-        console.warn(
-          `[scorecast] User '${user.username}' has a non-bcrypt password that isn't in data.json — they will need to reset it`
-        );
-      }
-    }
-    if (seedRole && user.role !== seedRole) {
-      user.role = seedRole;
-    }
-    if (user.changed()) {
-      await user.save({ hooks: false });
-    }
+  if (process.env.NODE_ENV === 'production' && process.env.MIGRATE_ON_BOOT !== 'true') {
+    logger.warn(
+      'Skipping auto-migrate in production. Run `npm run db:migrate` explicitly, or set MIGRATE_ON_BOOT=true to override.'
+    );
+    return;
   }
+  const umzug = buildUmzug();
+  const pending = await umzug.pending();
+  if (pending.length === 0) {
+    logger.info('No pending migrations.');
+    return;
+  }
+  logger.info({ count: pending.length }, `Applying ${pending.length} pending migration(s)`);
+  await umzug.up();
+  logger.info('Migrations done.');
 }
 
 async function seedDatabase() {
   const seedFilePath = path.join(__dirname, '..', 'data.json');
 
   if (!fs.existsSync(seedFilePath)) {
-    console.log('No seed file found.');
+    logger.info('No seed file found.');
     return;
   }
 
@@ -161,11 +147,11 @@ async function seedDatabase() {
       createdAt: user.createdAt,
     }));
     await User.bulkCreate(usersData, { ignoreDuplicates: true, individualHooks: true });
-    console.log('Users seeded.');
+    logger.info('Users seeded.');
 
     // Insert games
     await Game.bulkCreate(seed.games, { ignoreDuplicates: true });
-    console.log('Games seeded.');
+    logger.info('Games seeded.');
 
     // Insert groups
     const groupsData = seed.groups.map(group => ({
@@ -175,7 +161,7 @@ async function seedDatabase() {
       createdAt: group.createdAt,
     }));
     await Group.bulkCreate(groupsData, { ignoreDuplicates: true });
-    console.log('Groups seeded.');
+    logger.info('Groups seeded.');
 
     // Insert group members
     for (const group of seed.groups) {
@@ -183,7 +169,7 @@ async function seedDatabase() {
         await GroupMember.create({ groupId: group.id, userId: memberId }).catch(() => {});
       }
     }
-    console.log('Group members seeded.');
+    logger.info('Group members seeded.');
 
     // Insert group invites
     for (const group of seed.groups) {
@@ -191,13 +177,13 @@ async function seedDatabase() {
         await GroupInvite.create({ groupId: group.id, username: invite.username }).catch(() => {});
       }
     }
-    console.log('Group invites seeded.');
+    logger.info('Group invites seeded.');
 
     // Insert picks
     await Pick.bulkCreate(seed.picks, { ignoreDuplicates: true });
-    console.log('Picks seeded.');
+    logger.info('Picks seeded.');
   } catch (error) {
-    console.error('Seeding failed:', error);
+    logger.error({ err: error }, 'Seeding failed');
   }
 }
 

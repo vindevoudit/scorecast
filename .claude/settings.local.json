@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node server.js)",
+      "Read(//c/Users/vinde/AppData/Local/Temp/claude/c--Users-vinde-OneDrive-Desktop-ScoreCast/e543f434-6e95-4f33-8913-ecaf53a6d4b4/tasks/**)",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

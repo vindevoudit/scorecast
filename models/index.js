@@ -26,6 +26,7 @@ const Badge = require('./Badge')(sequelize);
 const Friendship = require('./Friendship')(sequelize);
 const Comment = require('./Comment')(sequelize);
 const Notification = require('./Notification')(sequelize);
+const CommentReaction = require('./CommentReaction')(sequelize);
 
 // Define associations
 User.hasMany(Pick, { foreignKey: 'userId', as: 'picks' });
@@ -59,6 +60,9 @@ User.hasMany(Comment, { foreignKey: 'userId', as: 'comments' });
 
 User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
 Notification.belongsTo(User, { foreignKey: 'userId' });
+
+Comment.hasMany(CommentReaction, { foreignKey: 'commentId', as: 'reactions' });
+CommentReaction.belongsTo(Comment, { foreignKey: 'commentId' });
 
 // Initialize database
 async function initDatabase() {
@@ -102,6 +106,9 @@ async function runMigrations() {
   await sequelize.query(
     `CREATE UNIQUE INDEX IF NOT EXISTS friendships_pair_unique ON friendships (LEAST("requesterId", "addresseeId"), GREATEST("requesterId", "addresseeId"))`
   );
+  await sequelize.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "displayName" VARCHAR(60)`);
+  await sequelize.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
+  await sequelize.query(`ALTER TABLE comments ADD COLUMN IF NOT EXISTS "editedAt" TIMESTAMP WITH TIME ZONE`);
 
   const seedFilePath = path.join(__dirname, '..', 'data.json');
   if (!fs.existsSync(seedFilePath)) return;
@@ -206,5 +213,6 @@ module.exports = {
   Friendship,
   Comment,
   Notification,
+  CommentReaction,
   initDatabase,
 };

@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import BadgeWall from './BadgeWall';
+import Avatar from './Avatar';
 
 function formatDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
@@ -22,36 +24,123 @@ function friendButtonProps(friendStatus) {
   }
 }
 
-function ProfileView({ profile, onFriendAction, busy }) {
+function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable }) {
+  const [editing, setEditing] = useState(false);
+  const [displayName, setDisplayName] = useState(profile?.displayName || '');
+  const [bio, setBio] = useState(profile?.bio || '');
+
   if (!profile) return null;
 
   const winRatePct = Math.round((profile.winRate || 0) * 100);
   const friendBtn = friendButtonProps(profile.friendStatus);
+  const showEdit = editable && profile.friendStatus === 'self';
+
+  const startEdit = () => {
+    setDisplayName(profile.displayName || '');
+    setBio(profile.bio || '');
+    setEditing(true);
+  };
+
+  const submitEdit = async (event) => {
+    event.preventDefault();
+    if (!onSaveProfile) return;
+    await onSaveProfile({
+      displayName: displayName.trim(),
+      bio: bio.trim(),
+    });
+    setEditing(false);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs uppercase tracking-[0.25em] text-cyan-400/80">Profile</p>
-          <h2 className="mt-2 truncate text-3xl font-semibold text-white">{profile.username}</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            {profile.role === 'admin' && (
-              <span className="mr-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">Admin</span>
+        <div className="flex min-w-0 items-center gap-4">
+          <Avatar username={profile.username} size={64} />
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-[0.25em] text-cyan-400/80">Profile</p>
+            <h2 className="mt-2 truncate text-3xl font-semibold text-white">
+              {profile.displayName || profile.username}
+            </h2>
+            {profile.displayName && (
+              <p className="truncate text-sm text-slate-400">@{profile.username}</p>
             )}
-            Joined {formatDate(profile.joinedAt)}
-          </p>
+            <p className="mt-1 text-sm text-slate-400">
+              {profile.role === 'admin' && (
+                <span className="mr-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">Admin</span>
+              )}
+              Joined {formatDate(profile.joinedAt)}
+            </p>
+          </div>
         </div>
-        {friendBtn && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onFriendAction?.(friendBtn.action)}
-            className="shrink-0 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {friendBtn.label}
-          </button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {showEdit && !editing && (
+            <button
+              type="button"
+              onClick={startEdit}
+              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              Edit profile
+            </button>
+          )}
+          {friendBtn && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onFriendAction?.(friendBtn.action)}
+              className="shrink-0 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {friendBtn.label}
+            </button>
+          )}
+        </div>
       </div>
+
+      {editing ? (
+        <form onSubmit={submitEdit} className="space-y-3 rounded-3xl bg-slate-950/70 p-4">
+          <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
+            Display name
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              maxLength={60}
+              placeholder={profile.username}
+              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+            />
+          </label>
+          <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
+            Bio
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              maxLength={280}
+              rows={3}
+              placeholder="Tell people who you are…"
+              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+            />
+            <span className="mt-1 block text-right text-xs text-slate-500 tabular-nums">{bio.length} / 280</span>
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        profile.bio && (
+          <p className="whitespace-pre-wrap rounded-3xl bg-slate-950/70 p-4 text-sm text-slate-200">{profile.bio}</p>
+        )
+      )}
 
       <div className="grid gap-3 sm:grid-cols-4">
         <div className="rounded-3xl bg-slate-950/70 p-4">
@@ -76,7 +165,7 @@ function ProfileView({ profile, onFriendAction, busy }) {
         <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Head-to-head</p>
           <p className="mt-2 text-sm text-slate-200">
-            You {profile.headToHead.viewerWins} — {profile.headToHead.targetWins} {profile.username}
+            You {profile.headToHead.viewerWins} — {profile.headToHead.targetWins} {profile.displayName || profile.username}
             {profile.headToHead.ties > 0 && ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`}
           </p>
         </div>

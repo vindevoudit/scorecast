@@ -32,24 +32,27 @@ function teamCardClass(side, game) {
   return `${base} bg-slate-950/70 opacity-60`;
 }
 
-function GameCard({ game, existingPick, onPickSubmit, currentUserId, request, onError }) {
+function GameCard({ game, existingPick, onPickSubmit, onPickRemove, currentUserId, request, onError }) {
   const upcoming = isUpcomingGame(game);
   const countdown = useCountdown(game.date);
 
-  const pickedTeam = existingPick === 'home' ? game.homeTeam : existingPick === 'away' ? game.awayTeam : null;
-  const pointsIfWon = game.result && existingPick
-    ? scorePick({ choice: existingPick }, game)
+  const existingChoice = existingPick?.choice || null;
+  const existingPickId = existingPick?.id || null;
+
+  const pickedTeam = existingChoice === 'home' ? game.homeTeam : existingChoice === 'away' ? game.awayTeam : null;
+  const pointsIfWon = game.result && existingChoice
+    ? scorePick({ choice: existingChoice }, game)
     : 0;
 
   let outcomeBadge = null;
   if (game.result) {
-    if (!existingPick) {
+    if (!existingChoice) {
       outcomeBadge = (
         <span className="inline-flex rounded-full bg-slate-700/60 px-3 py-1 text-xs font-semibold text-slate-200">
           No pick
         </span>
       );
-    } else if (existingPick === game.result) {
+    } else if (existingChoice === game.result) {
       outcomeBadge = (
         <span className="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300">
           ✓ Correct +{pointsIfWon} pts
@@ -113,7 +116,7 @@ function GameCard({ game, existingPick, onPickSubmit, currentUserId, request, on
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <button
-          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingPick === 'home' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:bg-cyan-500/20'}`}
+          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'home' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:bg-cyan-500/20'}`}
           disabled={!upcoming}
           onClick={() => onPickSubmit(game.id, 'home')}
           aria-label={`Pick ${game.homeTeam} to win`}
@@ -121,7 +124,7 @@ function GameCard({ game, existingPick, onPickSubmit, currentUserId, request, on
           Pick {game.homeTeam}
         </button>
         <button
-          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingPick === 'away' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-slate-700 bg-slate-950/90 text-slate-100 hover:border-slate-500 hover:bg-slate-900'}`}
+          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'away' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-slate-700 bg-slate-950/90 text-slate-100 hover:border-slate-500 hover:bg-slate-900'}`}
           disabled={!upcoming}
           onClick={() => onPickSubmit(game.id, 'away')}
           aria-label={`Pick ${game.awayTeam} to win`}
@@ -129,6 +132,18 @@ function GameCard({ game, existingPick, onPickSubmit, currentUserId, request, on
           Pick {game.awayTeam}
         </button>
       </div>
+
+      {upcoming && existingPickId && onPickRemove && (
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => onPickRemove(existingPickId)}
+            className="text-xs text-slate-400 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+          >
+            Undo pick
+          </button>
+        </div>
+      )}
 
       {request && (
         <CommentThread

@@ -14,6 +14,7 @@ import ProfileDrawer from './components/ProfileDrawer';
 import FriendsList from './components/FriendsList';
 import NotificationBell from './components/NotificationBell';
 import AdminPanel from './components/admin/AdminPanel';
+import SearchBar from './components/SearchBar';
 
 const initialAuthData = {
   loginUsername: '',
@@ -42,7 +43,10 @@ function App() {
   const [groups, setGroups] = useState([]);
   const [picks, setPicks] = useState([]);
   const [pendingInvites, setPendingInvites] = useState([]);
-  const [leaderboard, setLeaderboard] = useState({ overall: [], group: [] });
+  const [leaderboard, setLeaderboard] = useState({ overall: [], group: [], groupMeta: null });
+  const [groupOrderBy, setGroupOrderBy] = useState('points');
+  const [groupOffset, setGroupOffset] = useState(0);
+  const groupLimit = 20;
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [view, setView] = useState('games');
   const [status, setStatus] = useState('');
@@ -61,7 +65,7 @@ function App() {
   tokenRef.current = token;
 
   const pickMap = useMemo(
-    () => new Map(picks.map((pick) => [pick.gameId, pick.choice])),
+    () => new Map(picks.map((pick) => [pick.gameId, pick])),
     [picks]
   );
 
@@ -168,17 +172,36 @@ function App() {
     }
   };
 
-  const refreshLeaderboard = async (groupId = '') => {
+  const refreshLeaderboard = async (groupId = '', overrides = {}) => {
     const effectiveGroupId = groupId || selectedGroupId || groups[0]?.id || '';
-    const query = effectiveGroupId ? `?groupId=${effectiveGroupId}` : '';
+    const orderBy = overrides.orderBy ?? groupOrderBy;
+    const offset = overrides.offset ?? groupOffset;
+    const params = new URLSearchParams();
+    if (effectiveGroupId) params.set('groupId', effectiveGroupId);
+    if (orderBy) params.set('orderBy', orderBy);
+    if (offset) params.set('offset', String(offset));
+    params.set('limit', String(groupLimit));
+    const query = params.toString() ? `?${params.toString()}` : '';
     const data = await request(`/api/leaderboard${query}`);
-    setLeaderboard(data);
+    setLeaderboard({ overall: data.overall, group: data.group, groupMeta: data.groupMeta || null });
+  };
+
+  const handleChangeGroupOrder = async (next) => {
+    setGroupOrderBy(next);
+    setGroupOffset(0);
+    await refreshLeaderboard('', { orderBy: next, offset: 0 });
+  };
+
+  const handleChangeGroupOffset = async (next) => {
+    setGroupOffset(next);
+    await refreshLeaderboard('', { offset: next });
   };
 
   const handleGroupSelection = async (event) => {
     const groupId = event.target.value;
     setSelectedGroupId(groupId);
-    await refreshLeaderboard(groupId);
+    setGroupOffset(0);
+    await refreshLeaderboard(groupId, { offset: 0 });
   };
 
   const loadDashboard = async () => {
@@ -234,6 +257,16 @@ function App() {
     localStorage.removeItem('scorecastToken');
     setView('games');
     setConfirmingLogout(false);
+  };
+
+  const removePick = async (pickId) => {
+    try {
+      await request(`/api/picks/${pickId}`, { method: 'DELETE' });
+      await Promise.all([refreshPicks(), refreshLeaderboard()]);
+      await showStatus('Pick removed');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
   };
 
   const submitPick = async (gameId, choice) => {
@@ -391,6 +424,53 @@ function App() {
     }
   };
 
+  const handleLeaveGroup = async (groupId) => {
+    try {
+      await request(`/api/groups/${groupId}/leave`, { method: 'POST' });
+      await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
+      showStatus('Left the group');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleTransferGroup = async (groupId, newOwnerId) => {
+    try {
+      await request(`/api/groups/${groupId}/transfer`, {
+        method: 'POST',
+        body: JSON.stringify({ newOwnerId }),
+      });
+      await refreshGroups();
+      showStatus('Ownership transferred');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId) => {
+    try {
+      await request(`/api/groups/${groupId}`, { method: 'DELETE' });
+      await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
+      showStatus('Group deleted');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleSaveProfile = async (payload) => {
+    try {
+      const updated = await request('/api/me', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      setUser((prev) => prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev);
+      setOwnProfile((prev) => prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev);
+      showStatus('Profile updated');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
   const handleJoinPublicGroup = async (groupId) => {
     try {
       await request(`/api/groups/${groupId}/join`, { method: 'POST' });
@@ -454,6 +534,7 @@ function App() {
             game={game}
             existingPick={pickMap.get(game.id)}
             onPickSubmit={submitPick}
+            onPickRemove={removePick}
             currentUserId={user?.id}
             request={request}
             onError={handleCommentError}
@@ -500,6 +581,21 @@ function App() {
             </button>
           ))}
         </div>
+
+        <SearchBar
+          request={request}
+          onSelectUser={openProfile}
+          onSelectGroup={async (g) => {
+            if (g.isMember) {
+              setView('groups');
+            } else if (g.visibility === 'public') {
+              await handleJoinPublicGroup(g.id);
+              setView('groups');
+            }
+          }}
+          onSelectGame={() => setView('games')}
+          onError={handleCommentError}
+        />
 
         <NotificationBell request={request} onError={handleCommentError} />
 
@@ -750,7 +846,15 @@ function App() {
                 />
               ) : (
                 groups.map((group) => (
-                  <GroupCard key={group.id} group={group} onInvite={handleInvite} />
+                  <GroupCard
+                    key={group.id}
+                    group={group}
+                    currentUserId={user?.id}
+                    onInvite={handleInvite}
+                    onLeave={handleLeaveGroup}
+                    onTransfer={handleTransferGroup}
+                    onDelete={handleDeleteGroup}
+                  />
                 ))
               )}
             </div>
@@ -762,7 +866,11 @@ function App() {
             {!ownProfile ? (
               <p className="text-sm text-slate-400">Loading your profile…</p>
             ) : (
-              <ProfileView profile={ownProfile} />
+              <ProfileView
+                profile={ownProfile}
+                editable
+                onSaveProfile={handleSaveProfile}
+              />
             )}
           </div>
         )}
@@ -782,6 +890,12 @@ function App() {
               leaderboardGroup={leaderboard.group}
               currentUserId={user?.id}
               onSelectUser={openProfile}
+              groupMeta={leaderboard.groupMeta}
+              orderBy={groupOrderBy}
+              offset={groupOffset}
+              limit={groupLimit}
+              onChangeOrder={handleChangeGroupOrder}
+              onChangeOffset={handleChangeGroupOffset}
             />
           </div>
         )}

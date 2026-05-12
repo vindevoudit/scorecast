@@ -1,13 +1,13 @@
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
-  const Comment = sequelize.define('Comment', {
+  const CommentReaction = sequelize.define('CommentReaction', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    gameId: {
+    commentId: {
       type: DataTypes.UUID,
       allowNull: false,
     },
@@ -15,8 +15,8 @@ module.exports = (sequelize) => {
       type: DataTypes.UUID,
       allowNull: false,
     },
-    body: {
-      type: DataTypes.TEXT,
+    emoji: {
+      type: DataTypes.STRING,
       allowNull: false,
     },
     createdAt: {
@@ -24,17 +24,14 @@ module.exports = (sequelize) => {
       allowNull: false,
       defaultValue: DataTypes.NOW,
     },
-    editedAt: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
   }, {
-    tableName: 'comments',
+    tableName: 'comment_reactions',
     timestamps: false,
     indexes: [
-      { name: 'comments_game_idx', fields: ['gameId'] },
+      { name: 'comment_reactions_unique', unique: true, fields: ['commentId', 'userId', 'emoji'] },
+      { name: 'comment_reactions_comment_idx', fields: ['commentId'] },
     ],
   });
 
-  return Comment;
+  return CommentReaction;
 };

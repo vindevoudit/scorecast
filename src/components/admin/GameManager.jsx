@@ -182,14 +182,62 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [pendingBulk, setPendingBulk] = useState(null);
 
   const load = async () => {
     try {
       const data = await request('/api/games');
       setGames([...data].sort((a, b) => new Date(b.date) - new Date(a.date)));
+      setSelectedIds(new Set());
     } catch (error) {
       onError?.(error.message);
     }
+  };
+
+  const toggleOne = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = games.length > 0 && games.every((g) => selectedIds.has(g.id));
+  const toggleAll = () => {
+    setSelectedIds((prev) => (allSelected ? new Set() : new Set(games.map((g) => g.id))));
+  };
+
+  const performBulk = async (action, result) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    setBusy(true);
+    setPendingBulk(null);
+    try {
+      const payload = { ids, action };
+      if (action === 'setResult') payload.result = result;
+      const response = await request('/api/admin/games/bulk', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      await load();
+      onAfterChange?.();
+      const affected = response?.affected?.length || 0;
+      onSuccess?.(`${action}: ${affected} game${affected === 1 ? '' : 's'}`);
+    } catch (error) {
+      onError?.(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runBulk = (action, result) => {
+    if (action === 'delete') {
+      setPendingBulk({ action, ids: [...selectedIds] });
+      return;
+    }
+    performBulk(action, result);
   };
 
   useEffect(() => {
@@ -355,19 +403,47 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
         </form>
       )}
 
+      {games.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-slate-950/70 px-3 py-2 text-xs text-slate-300">
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all games" />
+            Select all
+          </label>
+          {selectedIds.size > 0 && (
+            <>
+              <span className="ml-2 text-slate-500">{selectedIds.size} selected</span>
+              <button type="button" disabled={busy} onClick={() => runBulk('setResult', 'home')} className="ml-auto rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Result → Home</button>
+              <button type="button" disabled={busy} onClick={() => runBulk('setResult', 'away')} className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Result → Away</button>
+              <button type="button" disabled={busy} onClick={() => runBulk('setResult', null)} className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Clear result</button>
+              <button type="button" disabled={busy} onClick={() => runBulk('delete')} className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Delete</button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="mt-5 space-y-3">
         {games.length === 0 ? (
           <p className="text-sm text-slate-500">No games yet.</p>
         ) : (
           games.map((game) => (
-            <GameRow
-              key={game.id}
-              game={game}
-              onSave={handleUpdate}
-              onSetResult={handleSetResult}
-              onDelete={(g) => setPendingDelete(g)}
-              busy={busy}
-            />
+            <div key={game.id} className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(game.id)}
+                onChange={() => toggleOne(game.id)}
+                aria-label={`Select ${game.homeTeam} vs ${game.awayTeam}`}
+                className="mt-5 shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <GameRow
+                  game={game}
+                  onSave={handleUpdate}
+                  onSetResult={handleSetResult}
+                  onDelete={(g) => setPendingDelete(g)}
+                  busy={busy}
+                />
+              </div>
+            </div>
           ))
         )}
       </div>
@@ -380,6 +456,16 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
         cancelLabel="Cancel"
         onConfirm={handleDelete}
         onCancel={() => setPendingDelete(null)}
+      />
+
+      <ConfirmModal
+        open={Boolean(pendingBulk)}
+        title="Bulk delete games?"
+        description={pendingBulk ? `${pendingBulk.ids.length} game${pendingBulk.ids.length === 1 ? '' : 's'} and their picks/comments will be removed. This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => pendingBulk && performBulk('delete')}
+        onCancel={() => setPendingBulk(null)}
       />
     </div>
   );

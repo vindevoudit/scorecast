@@ -30,6 +30,14 @@ module.exports = (sequelize) => {
       allowNull: false,
       defaultValue: 'user',
     },
+    displayName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    bio: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,

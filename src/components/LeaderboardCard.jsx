@@ -1,4 +1,5 @@
 import EmptyState from './EmptyState';
+import Avatar from './Avatar';
 
 export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
   const baseClass = `flex w-full items-center justify-between gap-3 rounded-3xl px-4 py-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
@@ -15,8 +16,9 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
             {rank}.
           </span>
         )}
+        <Avatar username={entry.username} displayName={entry.displayName} size={28} />
         <span className={`min-w-0 truncate text-sm ${isCurrentUser ? 'font-semibold text-white' : 'text-slate-300'}`}>
-          {entry.username}
+          {entry.displayName || entry.username}
           {isCurrentUser && <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">you</span>}
         </span>
       </div>

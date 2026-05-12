@@ -49,6 +49,27 @@ const updateGameSchema = z.object({
 
 const roleSchema = z.object({ role: z.enum(['user', 'admin']) });
 
+const transferOwnerSchema = z.object({ newOwnerId: uuid });
+
+const editProfileSchema = z.object({
+  displayName: z.union([z.string().trim().max(60), z.literal('')]).optional(),
+  bio: z.union([z.string().trim().max(280), z.literal('')]).optional(),
+});
+
+const ALLOWED_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
+const reactionSchema = z.object({ emoji: z.enum(ALLOWED_EMOJIS) });
+
+const bulkGameSchema = z.object({
+  ids: z.array(uuid).min(1).max(100),
+  action: z.enum(['delete', 'setResult']),
+  result: z.union([z.enum(['home', 'away']), z.null()]).optional(),
+});
+
+const bulkUserSchema = z.object({
+  ids: z.array(uuid).min(1).max(100),
+  action: z.enum(['promote', 'demote', 'delete']),
+});
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -62,4 +83,10 @@ module.exports = {
   createGameSchema,
   updateGameSchema,
   roleSchema,
+  transferOwnerSchema,
+  editProfileSchema,
+  reactionSchema,
+  bulkGameSchema,
+  bulkUserSchema,
+  ALLOWED_EMOJIS,
 };

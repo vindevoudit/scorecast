@@ -1,7 +1,7 @@
 import { LeaderboardRow } from './LeaderboardCard';
 import EmptyState from './EmptyState';
 
-function GroupLeaderboardCard({ groups, selectedGroupId, onGroupSelection, leaderboardGroup, currentUserId }) {
+function GroupLeaderboardCard({ groups, selectedGroupId, onGroupSelection, leaderboardGroup, currentUserId, onSelectUser }) {
   return (
     <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -39,6 +39,7 @@ function GroupLeaderboardCard({ groups, selectedGroupId, onGroupSelection, leade
               entry={entry}
               rank={index + 1}
               isCurrentUser={entry.userId === currentUserId}
+              onSelectUser={onSelectUser}
             />
           ))
         )}

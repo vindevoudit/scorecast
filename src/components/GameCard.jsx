@@ -1,5 +1,6 @@
 import { scorePick } from '../utils/scoring';
 import { useCountdown } from '../utils/time';
+import CommentThread from './CommentThread';
 
 function formatProbability(value) {
   return `${Math.round(value * 100)}%`;
@@ -31,7 +32,7 @@ function teamCardClass(side, game) {
   return `${base} bg-slate-950/70 opacity-60`;
 }
 
-function GameCard({ game, existingPick, onPickSubmit }) {
+function GameCard({ game, existingPick, onPickSubmit, currentUserId, request, onError }) {
   const upcoming = isUpcomingGame(game);
   const countdown = useCountdown(game.date);
 
@@ -128,6 +129,15 @@ function GameCard({ game, existingPick, onPickSubmit }) {
           Pick {game.awayTeam}
         </button>
       </div>
+
+      {request && (
+        <CommentThread
+          gameId={game.id}
+          currentUserId={currentUserId}
+          request={request}
+          onError={onError}
+        />
+      )}
     </div>
   );
 }

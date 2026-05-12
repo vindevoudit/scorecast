@@ -1,0 +1,32 @@
+function BadgeWall({ catalog = [], earned = [] }) {
+  const earnedSet = new Set(earned.map((b) => b.slug));
+
+  if (!catalog.length) {
+    return <p className="text-sm text-slate-500">No badges defined yet.</p>;
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      {catalog.map((badge) => {
+        const isEarned = earnedSet.has(badge.slug);
+        return (
+          <div
+            key={badge.slug}
+            title={badge.description}
+            className={`rounded-3xl border p-4 text-center transition duration-200 ${
+              isEarned
+                ? 'border-cyan-400/40 bg-cyan-500/10 text-white'
+                : 'border-slate-800 bg-slate-950/60 text-slate-500 grayscale'
+            }`}
+          >
+            <div className="text-3xl">{badge.emoji}</div>
+            <p className="mt-2 text-sm font-semibold">{badge.name}</p>
+            <p className="mt-1 text-xs text-slate-400">{badge.description}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default BadgeWall;

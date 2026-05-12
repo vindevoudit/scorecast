@@ -18,6 +18,16 @@ export function formatCountdown(target) {
   return `${seconds}s`;
 }
 
+export function timeAgo(target) {
+  const ms = Date.now() - new Date(target).getTime();
+  if (ms < MS_PER_MINUTE) return 'just now';
+  if (ms < MS_PER_HOUR) return `${Math.floor(ms / MS_PER_MINUTE)}m ago`;
+  if (ms < MS_PER_DAY) return `${Math.floor(ms / MS_PER_HOUR)}h ago`;
+  const days = Math.floor(ms / MS_PER_DAY);
+  if (days < 7) return `${days}d ago`;
+  return new Date(target).toLocaleDateString();
+}
+
 export function useCountdown(target) {
   const [label, setLabel] = useState(() => formatCountdown(target));
   useEffect(() => {

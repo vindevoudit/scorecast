@@ -1,34 +1,32 @@
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
-  const Group = sequelize.define('Group', {
+  const Badge = sequelize.define('Badge', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    ownerId: {
+    userId: {
       type: DataTypes.UUID,
       allowNull: false,
     },
-    visibility: {
-      type: DataTypes.ENUM('private', 'public'),
+    slug: {
+      type: DataTypes.STRING,
       allowNull: false,
-      defaultValue: 'private',
     },
-    createdAt: {
+    awardedAt: {
       type: DataTypes.DATE,
       allowNull: false,
       defaultValue: DataTypes.NOW,
     },
   }, {
-    tableName: 'groups',
+    tableName: 'badges',
     timestamps: false,
+    indexes: [
+      { name: 'badges_user_slug_unique', unique: true, fields: ['userId', 'slug'] },
+    ],
   });
 
-  return Group;
+  return Badge;
 };

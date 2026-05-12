@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import GameCard from './components/GameCard';
 import LeaderboardCard, { LeaderboardRow } from './components/LeaderboardCard';
 import LoginForm from './components/LoginForm';
@@ -9,6 +9,10 @@ import PicksHistory from './components/PicksHistory';
 import ConfirmModal from './components/ConfirmModal';
 import EmptyState from './components/EmptyState';
 import { SkeletonGameCard, SkeletonLeaderboardRow } from './components/Skeleton';
+import ProfileView from './components/ProfileView';
+import ProfileDrawer from './components/ProfileDrawer';
+import FriendsList from './components/FriendsList';
+import NotificationBell from './components/NotificationBell';
 
 const initialAuthData = {
   loginUsername: '',
@@ -16,6 +20,7 @@ const initialAuthData = {
   registerUsername: '',
   registerPassword: '',
   groupName: '',
+  groupVisibility: 'private',
 };
 
 const TABS = [
@@ -23,6 +28,7 @@ const TABS = [
   { id: 'mypicks', kicker: 'My Picks', label: 'Your History' },
   { id: 'groups', kicker: 'Groups', label: 'My Groups' },
   { id: 'leaderboard', kicker: 'Leaderboards', label: 'Rankings' },
+  { id: 'profile', kicker: 'Profile', label: 'Your Stats' },
 ];
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,6 +48,13 @@ function App() {
   const [authData, setAuthData] = useState(initialAuthData);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [profileUsername, setProfileUsername] = useState('');
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [friends, setFriends] = useState({ friends: [], incoming: [], outgoing: [] });
+  const [discoverGroups, setDiscoverGroups] = useState([]);
+  const [ownProfile, setOwnProfile] = useState(null);
   const tokenRef = useRef(token);
   tokenRef.current = token;
 
@@ -67,12 +80,6 @@ function App() {
     return { upcomingGames: upcoming, liveGames: live, completedGames: completed };
   }, [games]);
 
-  const authHeaders = () => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    return headers;
-  };
-
   const showStatus = async (message) => {
     setStatus(message);
     await delay(3500);
@@ -93,11 +100,14 @@ function App() {
     showStatus('Session expired — please sign in again.');
   };
 
-  const request = async (path, options = {}) => {
+  const request = useCallback(async (path, options = {}) => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (tokenRef.current) headers.Authorization = `Bearer ${tokenRef.current}`;
+
     const response = await fetch(path, {
       credentials: 'include',
       ...options,
-      headers: { ...(options.headers || {}), ...authHeaders() },
+      headers: { ...(options.headers || {}), ...headers },
     });
 
     if (response.status === 401 && tokenRef.current) {
@@ -105,12 +115,14 @@ function App() {
       throw new Error('Session expired');
     }
 
-    const data = await response.json();
+    if (response.status === 204) return null;
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
     if (!response.ok) {
-      throw new Error(data.error || 'Request failed');
+      throw new Error((data && data.error) || 'Request failed');
     }
     return data;
-  };
+  }, []);
 
   const refreshPicks = async () => {
     const data = await request('/api/picks');
@@ -129,6 +141,24 @@ function App() {
       setSelectedGroupId(data[0].id);
     }
     return data;
+  };
+
+  const refreshFriends = async () => {
+    try {
+      const data = await request('/api/friends');
+      setFriends(data);
+    } catch (error) {
+      if (error.message !== 'Session expired') console.warn(error.message);
+    }
+  };
+
+  const refreshDiscover = async () => {
+    try {
+      const data = await request('/api/groups/discover');
+      setDiscoverGroups(data);
+    } catch (error) {
+      if (error.message !== 'Session expired') console.warn(error.message);
+    }
   };
 
   const refreshLeaderboard = async (groupId = '') => {
@@ -157,7 +187,12 @@ function App() {
         ? selectedGroupId
         : groupData[0]?.id || '';
       setSelectedGroupId(initialGroupId);
-      await Promise.all([refreshPicks(), refreshLeaderboard(initialGroupId)]);
+      await Promise.all([
+        refreshPicks(),
+        refreshLeaderboard(initialGroupId),
+        refreshFriends(),
+        refreshDiscover(),
+      ]);
     } finally {
       setLoading(false);
     }
@@ -170,6 +205,15 @@ function App() {
       if (error.message !== 'Session expired') showStatus(error.message);
     });
   }, [token]);
+
+  useEffect(() => {
+    if (view !== 'profile' || !user?.username) return;
+    request(`/api/users/${encodeURIComponent(user.username)}/profile`)
+      .then(setOwnProfile)
+      .catch((error) => {
+        if (error.message !== 'Session expired') showStatus(error.message);
+      });
+  }, [view, user?.username, picks, games, request]);
 
   const performLogout = () => {
     setToken('');
@@ -233,11 +277,118 @@ function App() {
     try {
       await request('/api/groups', {
         method: 'POST',
-        body: JSON.stringify({ name: authData.groupName }),
+        body: JSON.stringify({
+          name: authData.groupName,
+          visibility: authData.groupVisibility,
+        }),
       });
-      setAuthData((prev) => ({ ...prev, groupName: '' }));
-      await Promise.all([refreshGroups(), refreshLeaderboard()]);
+      setAuthData((prev) => ({ ...prev, groupName: '', groupVisibility: 'private' }));
+      await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
       showStatus('Group created successfully');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const fetchProfile = useCallback(async (username) => {
+    if (!username) return;
+    setProfileLoading(true);
+    try {
+      const data = await request(`/api/users/${encodeURIComponent(username)}/profile`);
+      setProfile(data);
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+      setProfile(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [request]);
+
+  const openProfile = (username) => {
+    setProfileUsername(username);
+    setProfile(null);
+    fetchProfile(username);
+  };
+
+  const closeProfile = () => {
+    setProfileUsername('');
+    setProfile(null);
+  };
+
+  const handleFriendAction = async (action) => {
+    if (!profile) return;
+    setProfileBusy(true);
+    try {
+      if (action === 'request') {
+        await request('/api/friends/request', {
+          method: 'POST',
+          body: JSON.stringify({ username: profile.username }),
+        });
+        showStatus(`Friend request sent to ${profile.username}`);
+      } else if (action === 'cancel' && profile.friendship) {
+        await request(`/api/friends/${profile.friendship.id}`, { method: 'DELETE' });
+        showStatus('Request cancelled');
+      } else if (action === 'accept' && profile.friendship) {
+        await request(`/api/friends/${profile.friendship.id}/accept`, { method: 'POST' });
+        showStatus(`You are now friends with ${profile.username}`);
+      } else if (action === 'unfriend' && profile.friendship) {
+        await request(`/api/friends/${profile.friendship.id}`, { method: 'DELETE' });
+        showStatus(`Unfriended ${profile.username}`);
+      }
+      await Promise.all([fetchProfile(profile.username), refreshFriends()]);
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const handleSendFriendRequest = async (username) => {
+    try {
+      await request('/api/friends/request', {
+        method: 'POST',
+        body: JSON.stringify({ username }),
+      });
+      await refreshFriends();
+      showStatus(`Friend request sent to ${username}`);
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleAcceptFriend = async (id) => {
+    try {
+      await request(`/api/friends/${id}/accept`, { method: 'POST' });
+      await refreshFriends();
+      showStatus('Friend request accepted');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleDeclineFriend = async (id) => {
+    try {
+      await request(`/api/friends/${id}/decline`, { method: 'POST' });
+      await refreshFriends();
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleUnfriend = async (id) => {
+    try {
+      await request(`/api/friends/${id}`, { method: 'DELETE' });
+      await refreshFriends();
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleJoinPublicGroup = async (groupId) => {
+    try {
+      await request(`/api/groups/${groupId}/join`, { method: 'POST' });
+      await Promise.all([refreshGroups(), refreshDiscover(), refreshLeaderboard()]);
+      showStatus('Joined group');
     } catch (error) {
       if (error.message !== 'Session expired') showStatus(error.message);
     }
@@ -280,6 +431,10 @@ function App() {
     }
   };
 
+  const handleCommentError = (message) => {
+    if (message && message !== 'Session expired') showStatus(message);
+  };
+
   const renderGameSection = (heading, list, emptyText) => (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">{heading}</h3>
@@ -292,6 +447,9 @@ function App() {
             game={game}
             existingPick={pickMap.get(game.id)}
             onPickSubmit={submitPick}
+            currentUserId={user?.id}
+            request={request}
+            onError={handleCommentError}
           />
         ))
       )}
@@ -336,6 +494,8 @@ function App() {
           ))}
         </div>
 
+        <NotificationBell request={request} onError={handleCommentError} />
+
         <button
           onClick={() => setConfirmingLogout(true)}
           className="inline-flex shrink-0 items-center justify-center rounded-3xl bg-slate-800 px-6 py-4 text-sm font-semibold text-cyan-300 transition duration-300 hover:bg-cyan-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
@@ -378,6 +538,9 @@ function App() {
                       game={game}
                       existingPick={pickMap.get(game.id)}
                       onPickSubmit={submitPick}
+                      currentUserId={user?.id}
+                      request={request}
+                      onError={handleCommentError}
                     />
                   ))}
                 </div>
@@ -401,6 +564,7 @@ function App() {
                             entry={entry}
                             rank={index + 1}
                             isCurrentUser={entry.userId === user?.id}
+                            onSelectUser={openProfile}
                           />
                         ))
                       )}
@@ -439,6 +603,7 @@ function App() {
                             entry={entry}
                             rank={index + 1}
                             isCurrentUser={entry.userId === user?.id}
+                            onSelectUser={openProfile}
                           />
                         ))
                       )}
@@ -468,10 +633,75 @@ function App() {
                   placeholder="Group name"
                   className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
                 />
+                <fieldset className="rounded-3xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                  <legend className="px-2 text-xs uppercase tracking-[0.25em] text-slate-400">Visibility</legend>
+                  <div className="flex flex-wrap gap-3 pt-2 text-sm text-slate-200">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="group-visibility"
+                        value="private"
+                        checked={authData.groupVisibility === 'private'}
+                        onChange={() => setAuthData((prev) => ({ ...prev, groupVisibility: 'private' }))}
+                      />
+                      Private (invite-only)
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="group-visibility"
+                        value="public"
+                        checked={authData.groupVisibility === 'public'}
+                        onChange={() => setAuthData((prev) => ({ ...prev, groupVisibility: 'public' }))}
+                      />
+                      Public (discoverable)
+                    </label>
+                  </div>
+                </fieldset>
                 <button type="submit" className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
                   Create group
                 </button>
               </form>
+
+              <div className="mt-6 space-y-3">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Discover public groups</h3>
+                {discoverGroups.length === 0 ? (
+                  <EmptyState
+                    title="No public groups right now"
+                    description="Check back later, or invite friends to a private group."
+                  />
+                ) : (
+                  discoverGroups.map((group) => (
+                    <div key={group.id} className="flex flex-col gap-3 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">{group.name}</p>
+                        <p className="text-xs text-slate-400">{group.memberCount} member{group.memberCount === 1 ? '' : 's'}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleJoinPublicGroup(group.id)}
+                        className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                      >
+                        Join
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="mt-6">
+                <FriendsList
+                  friends={friends.friends}
+                  incoming={friends.incoming}
+                  outgoing={friends.outgoing}
+                  onSendRequest={handleSendFriendRequest}
+                  onAccept={handleAcceptFriend}
+                  onDecline={handleDeclineFriend}
+                  onCancel={handleUnfriend}
+                  onUnfriend={handleUnfriend}
+                  onSelectUser={openProfile}
+                />
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -520,12 +750,23 @@ function App() {
           </div>
         )}
 
+        {view === 'profile' && (
+          <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+            {!ownProfile ? (
+              <p className="text-sm text-slate-400">Loading your profile…</p>
+            ) : (
+              <ProfileView profile={ownProfile} />
+            )}
+          </div>
+        )}
+
         {view === 'leaderboard' && (
           <div className="grid gap-6 lg:grid-cols-2">
             <LeaderboardCard
               title="Overall Leaderboard"
               entries={leaderboard.overall}
               currentUserId={user?.id}
+              onSelectUser={openProfile}
             />
             <GroupLeaderboardCard
               groups={groups}
@@ -533,6 +774,7 @@ function App() {
               onGroupSelection={handleGroupSelection}
               leaderboardGroup={leaderboard.group}
               currentUserId={user?.id}
+              onSelectUser={openProfile}
             />
           </div>
         )}
@@ -546,6 +788,15 @@ function App() {
         cancelLabel="Stay signed in"
         onConfirm={performLogout}
         onCancel={() => setConfirmingLogout(false)}
+      />
+
+      <ProfileDrawer
+        open={Boolean(profileUsername)}
+        profile={profile}
+        loading={profileLoading}
+        busy={profileBusy}
+        onClose={closeProfile}
+        onFriendAction={handleFriendAction}
       />
     </div>
   );

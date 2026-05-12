@@ -1,24 +1,23 @@
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
-  const Group = sequelize.define('Group', {
+  const Comment = sequelize.define('Comment', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    ownerId: {
+    gameId: {
       type: DataTypes.UUID,
       allowNull: false,
     },
-    visibility: {
-      type: DataTypes.ENUM('private', 'public'),
+    userId: {
+      type: DataTypes.UUID,
       allowNull: false,
-      defaultValue: 'private',
+    },
+    body: {
+      type: DataTypes.TEXT,
+      allowNull: false,
     },
     createdAt: {
       type: DataTypes.DATE,
@@ -26,9 +25,12 @@ module.exports = (sequelize) => {
       defaultValue: DataTypes.NOW,
     },
   }, {
-    tableName: 'groups',
+    tableName: 'comments',
     timestamps: false,
+    indexes: [
+      { name: 'comments_game_idx', fields: ['gameId'] },
+    ],
   });
 
-  return Group;
+  return Comment;
 };

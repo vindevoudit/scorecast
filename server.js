@@ -9,7 +9,7 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { Op } = require('sequelize');
 
-const { User, Group, Game, Pick, GroupMember, GroupInvite, initDatabase } = require('./models');
+const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, initDatabase } = require('./models');
 const { validate } = require('./validation/middleware');
 const {
   registerSchema,
@@ -18,7 +18,11 @@ const {
   inviteSchema,
   pickSchema,
   resultSchema,
+  friendRequestSchema,
+  visibilitySchema,
+  commentSchema,
 } = require('./validation/schemas');
+const { BADGE_CATALOG } = require('./badges/catalog');
 
 const RAW_JWT_SECRET = process.env.JWT_SECRET;
 if (!RAW_JWT_SECRET) {
@@ -134,6 +138,7 @@ async function getGroupsForUser(userId) {
       id: group.id,
       name: group.name,
       ownerId: group.ownerId,
+      visibility: group.visibility,
       members: orderedMembers,
       invites: invites.map((i) => ({ username: i.username, createdAt: i.createdAt })),
       createdAt: group.createdAt,
@@ -180,6 +185,92 @@ async function buildUserSummary() {
   });
 
   return Object.values(userScores).sort((a, b) => b.points - a.points);
+}
+
+async function notify(userId, type, title, body = null, link = null) {
+  try {
+    await Notification.create({ userId, type, title, body, link });
+  } catch (error) {
+    console.warn('[scorecast] failed to create notification:', error.message);
+  }
+}
+
+async function awardBadge(userId, slug) {
+  try {
+    await Badge.create({ userId, slug });
+    const meta = BADGE_CATALOG.find((b) => b.slug === slug);
+    await notify(
+      userId,
+      'badge',
+      `Badge earned: ${meta?.name || slug}`,
+      meta?.description || null
+    );
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function evaluateBadges(userId, context = {}) {
+  if (!userId) return;
+  try {
+    const earned = await Badge.findAll({ where: { userId } });
+    const earnedSlugs = new Set(earned.map((b) => b.slug));
+
+    const userPicks = await Pick.findAll({ where: { userId } });
+    if (userPicks.length > 0 && !earnedSlugs.has('first-pick')) {
+      await awardBadge(userId, 'first-pick');
+    }
+
+    const games = await Game.findAll();
+    const gameById = new Map(games.map((g) => [g.id, g]));
+
+    let correctCount = 0;
+    let upsetWins = 0;
+    for (const pick of userPicks) {
+      const game = gameById.get(pick.gameId);
+      if (!game || !game.result) continue;
+      const isWin = pick.choice === game.result;
+      if (!isWin) continue;
+      correctCount += 1;
+      const probability = pick.choice === 'home'
+        ? parseFloat(game.homeProbability)
+        : parseFloat(game.awayProbability);
+      if (probability < 0.4) upsetWins += 1;
+    }
+
+    if (correctCount >= 1 && !earnedSlugs.has('first-win')) await awardBadge(userId, 'first-win');
+    if (correctCount >= 10 && !earnedSlugs.has('correct-10')) await awardBadge(userId, 'correct-10');
+    if (correctCount >= 25 && !earnedSlugs.has('correct-25')) await awardBadge(userId, 'correct-25');
+    if (correctCount >= 50 && !earnedSlugs.has('correct-50')) await awardBadge(userId, 'correct-50');
+    if (upsetWins >= 5 && !earnedSlugs.has('upset-specialist')) await awardBadge(userId, 'upset-specialist');
+
+    if (context.groupCreated && !earnedSlugs.has('group-founder')) {
+      await awardBadge(userId, 'group-founder');
+    }
+  } catch (error) {
+    console.warn('[scorecast] badge evaluation failed:', error.message);
+  }
+}
+
+async function getFriendshipBetween(userAId, userBId) {
+  if (!userAId || !userBId || userAId === userBId) return null;
+  return Friendship.findOne({
+    where: {
+      [Op.or]: [
+        { requesterId: userAId, addresseeId: userBId },
+        { requesterId: userBId, addresseeId: userAId },
+      ],
+    },
+  });
+}
+
+function friendStatusFrom(friendship, viewerId, targetId) {
+  if (viewerId === targetId) return 'self';
+  if (!friendship) return 'none';
+  if (friendship.status === 'accepted') return 'friends';
+  if (friendship.requesterId === viewerId) return 'pending-out';
+  return 'pending-in';
 }
 
 async function buildGroupLeaderboard(groupId) {
@@ -266,6 +357,38 @@ app.get('/api/groups', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/groups/discover', authMiddleware, async (req, res) => {
+  try {
+    const joinedIds = await getJoinedGroupIds(req.user.id);
+    const publicGroups = await Group.findAll({
+      where: {
+        visibility: 'public',
+        id: { [Op.notIn]: joinedIds.length ? joinedIds : ['00000000-0000-0000-0000-000000000000'] },
+      },
+      limit: 20,
+      order: [['createdAt', 'DESC']],
+    });
+    const groupIds = publicGroups.map((g) => g.id);
+    const members = await GroupMember.findAll({ where: { groupId: groupIds } });
+    const countByGroup = new Map();
+    for (const m of members) {
+      countByGroup.set(m.groupId, (countByGroup.get(m.groupId) || 0) + 1);
+    }
+    res.json(
+      publicGroups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        ownerId: g.ownerId,
+        visibility: g.visibility,
+        memberCount: countByGroup.get(g.id) || 0,
+        createdAt: g.createdAt,
+      }))
+    );
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch public groups' });
+  }
+});
+
 app.get('/api/groups/:groupId', authMiddleware, async (req, res) => {
   try {
     const group = await getGroupById(req.params.groupId);
@@ -279,16 +402,18 @@ app.get('/api/groups/:groupId', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/groups', authMiddleware, validate(createGroupSchema), async (req, res) => {
-  const { name } = req.body;
+  const { name, visibility = 'private' } = req.body;
 
   try {
-    const group = await Group.create({ name, ownerId: req.user.id });
+    const group = await Group.create({ name, ownerId: req.user.id, visibility });
     await GroupMember.create({ groupId: group.id, userId: req.user.id });
     const user = await getUserById(req.user.id);
+    evaluateBadges(req.user.id, { groupCreated: true }).catch(() => {});
     res.json({
       id: group.id,
       name: group.name,
       ownerId: group.ownerId,
+      visibility: group.visibility,
       members: [{ userId: req.user.id, username: user.username }],
       invites: [],
       createdAt: group.createdAt,
@@ -334,6 +459,12 @@ app.post('/api/groups/:groupId/invite', authMiddleware, validate(inviteSchema), 
     }
 
     await GroupInvite.create({ groupId: req.params.groupId, username: invitedUser.username });
+    notify(
+      invitedUser.id,
+      'invite',
+      `You were invited to "${group.name}"`,
+      `Open the Groups tab to accept or decline.`
+    ).catch(() => {});
     const updatedGroup = await getGroupById(req.params.groupId);
     res.json({ success: true, group: updatedGroup });
   } catch (error) {
@@ -366,6 +497,13 @@ app.post('/api/groups/:groupId/invite/:inviteId/accept', authMiddleware, async (
     }
 
     await GroupInvite.destroy({ where: { id: req.params.inviteId } });
+    if (group.ownerId && group.ownerId !== req.user.id) {
+      notify(
+        group.ownerId,
+        'group-join',
+        `${user.username} joined "${group.name}"`
+      ).catch(() => {});
+    }
     const updatedGroup = await getGroupById(req.params.groupId);
     res.json({ success: true, group: updatedGroup });
   } catch (error) {
@@ -419,6 +557,8 @@ app.post('/api/picks', authMiddleware, validate(pickSchema), async (req, res) =>
       await Pick.create({ userId: req.user.id, gameId, choice });
     }
 
+    evaluateBadges(req.user.id).catch(() => {});
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to submit pick' });
@@ -456,9 +596,374 @@ app.post('/api/games/:gameId/result', authMiddleware, requireAdmin, validate(res
 
     game.result = result;
     await game.save();
+
+    if (result) {
+      const picksForGame = await Pick.findAll({ where: { gameId: req.params.gameId } });
+      for (const pick of picksForGame) {
+        const points = scorePick(pick, game);
+        const isWin = pick.choice === result;
+        const title = isWin
+          ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
+          : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
+        notify(pick.userId, 'pick-scored', title).catch(() => {});
+        evaluateBadges(pick.userId).catch(() => {});
+      }
+    }
+
     res.json({ success: true, game });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update game result' });
+  }
+});
+
+app.get('/api/users/:username/profile', authMiddleware, async (req, res) => {
+  try {
+    const targetUser = await getUserByUsername(req.params.username);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const [userPicks, allGames, badges] = await Promise.all([
+      Pick.findAll({ where: { userId: targetUser.id } }),
+      Game.findAll(),
+      Badge.findAll({ where: { userId: targetUser.id } }),
+    ]);
+
+    const gameById = new Map(allGames.map((g) => [g.id, g]));
+    let totalPoints = 0;
+    let picksWon = 0;
+    let picksScored = 0;
+    for (const pick of userPicks) {
+      const game = gameById.get(pick.gameId);
+      if (!game) continue;
+      if (game.result) {
+        picksScored += 1;
+        const pts = scorePick(pick, game);
+        totalPoints += pts;
+        if (pick.choice === game.result) picksWon += 1;
+      }
+    }
+    const picksMade = userPicks.length;
+    const winRate = picksScored > 0 ? picksWon / picksScored : 0;
+
+    const recentPicks = [...userPicks]
+      .map((pick) => ({ pick, game: gameById.get(pick.gameId) }))
+      .filter((row) => row.game)
+      .sort((a, b) => new Date(b.game.date) - new Date(a.game.date))
+      .slice(0, 10)
+      .map(({ pick, game }) => ({
+        gameId: game.id,
+        homeTeam: game.homeTeam,
+        awayTeam: game.awayTeam,
+        date: game.date,
+        result: game.result,
+        choice: pick.choice,
+        points: scorePick(pick, game),
+      }));
+
+    const friendship = await getFriendshipBetween(req.user.id, targetUser.id);
+    const friendStatus = friendStatusFrom(friendship, req.user.id, targetUser.id);
+
+    let headToHead = null;
+    if (friendStatus === 'friends') {
+      const viewerPicks = await Pick.findAll({ where: { userId: req.user.id } });
+      const viewerByGame = new Map(viewerPicks.map((p) => [p.gameId, p]));
+      let viewerWins = 0;
+      let targetWins = 0;
+      let ties = 0;
+      for (const pick of userPicks) {
+        const game = gameById.get(pick.gameId);
+        if (!game || !game.result) continue;
+        const viewerPick = viewerByGame.get(pick.gameId);
+        if (!viewerPick) continue;
+        const viewerPts = scorePick(viewerPick, game);
+        const targetPts = scorePick(pick, game);
+        if (viewerPts > targetPts) viewerWins += 1;
+        else if (targetPts > viewerPts) targetWins += 1;
+        else ties += 1;
+      }
+      headToHead = { viewerWins, targetWins, ties };
+    }
+
+    res.json({
+      id: targetUser.id,
+      username: targetUser.username,
+      role: targetUser.role,
+      joinedAt: targetUser.createdAt,
+      totalPoints,
+      picksMade,
+      picksWon,
+      picksScored,
+      winRate,
+      badges: badges.map((b) => ({ slug: b.slug, awardedAt: b.awardedAt })),
+      catalog: BADGE_CATALOG,
+      recentPicks,
+      friendship: friendship ? { id: friendship.id, status: friendship.status } : null,
+      friendStatus,
+      headToHead,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+app.post('/api/friends/request', authMiddleware, validate(friendRequestSchema), async (req, res) => {
+  try {
+    const target = await getUserByUsername(req.body.username);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (target.id === req.user.id) return res.status(400).json({ error: 'You cannot friend yourself' });
+
+    const existing = await getFriendshipBetween(req.user.id, target.id);
+    if (existing) {
+      if (existing.status === 'accepted') return res.status(400).json({ error: 'Already friends' });
+      return res.status(400).json({ error: 'Friend request already pending' });
+    }
+
+    const friendship = await Friendship.create({
+      requesterId: req.user.id,
+      addresseeId: target.id,
+      status: 'pending',
+    });
+    const requester = await getUserById(req.user.id);
+    notify(
+      target.id,
+      'friend-request',
+      `${requester.username} sent you a friend request`,
+      'Open Groups → Friends to accept or decline.'
+    ).catch(() => {});
+    res.json({ success: true, friendship });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send friend request' });
+  }
+});
+
+app.post('/api/friends/:id/accept', authMiddleware, async (req, res) => {
+  try {
+    const friendship = await Friendship.findByPk(req.params.id);
+    if (!friendship) return res.status(404).json({ error: 'Friend request not found' });
+    if (friendship.addresseeId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (friendship.status !== 'pending') return res.status(400).json({ error: 'Already accepted' });
+
+    friendship.status = 'accepted';
+    friendship.acceptedAt = new Date();
+    await friendship.save();
+
+    const accepter = await getUserById(req.user.id);
+    notify(
+      friendship.requesterId,
+      'friend-request',
+      `${accepter.username} accepted your friend request`
+    ).catch(() => {});
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to accept friend request' });
+  }
+});
+
+app.post('/api/friends/:id/decline', authMiddleware, async (req, res) => {
+  try {
+    const friendship = await Friendship.findByPk(req.params.id);
+    if (!friendship) return res.status(404).json({ error: 'Friend request not found' });
+    if (friendship.addresseeId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    await friendship.destroy();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to decline friend request' });
+  }
+});
+
+app.delete('/api/friends/:id', authMiddleware, async (req, res) => {
+  try {
+    const friendship = await Friendship.findByPk(req.params.id);
+    if (!friendship) return res.status(404).json({ error: 'Friendship not found' });
+    if (friendship.requesterId !== req.user.id && friendship.addresseeId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    await friendship.destroy();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove friend' });
+  }
+});
+
+app.get('/api/friends', authMiddleware, async (req, res) => {
+  try {
+    const rows = await Friendship.findAll({
+      where: {
+        [Op.or]: [{ requesterId: req.user.id }, { addresseeId: req.user.id }],
+      },
+    });
+    const userIds = new Set();
+    for (const row of rows) {
+      userIds.add(row.requesterId);
+      userIds.add(row.addresseeId);
+    }
+    const users = await User.findAll({ where: { id: [...userIds] } });
+    const userById = new Map(users.map((u) => [u.id, u]));
+
+    const friends = [];
+    const incoming = [];
+    const outgoing = [];
+    for (const row of rows) {
+      const otherId = row.requesterId === req.user.id ? row.addresseeId : row.requesterId;
+      const other = userById.get(otherId);
+      const entry = {
+        id: row.id,
+        userId: otherId,
+        username: other?.username || 'Unknown',
+        createdAt: row.createdAt,
+      };
+      if (row.status === 'accepted') friends.push(entry);
+      else if (row.addresseeId === req.user.id) incoming.push(entry);
+      else outgoing.push(entry);
+    }
+    res.json({ friends, incoming, outgoing });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch friends' });
+  }
+});
+
+app.post('/api/groups/:groupId/join', authMiddleware, async (req, res) => {
+  try {
+    const group = await Group.findByPk(req.params.groupId);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (group.visibility !== 'public') return res.status(403).json({ error: 'This group is private' });
+
+    const existing = await GroupMember.findOne({
+      where: { groupId: group.id, userId: req.user.id },
+    });
+    if (existing) return res.status(400).json({ error: 'Already a member' });
+
+    await GroupMember.create({ groupId: group.id, userId: req.user.id });
+    const joiner = await getUserById(req.user.id);
+    if (group.ownerId !== req.user.id) {
+      notify(
+        group.ownerId,
+        'group-join',
+        `${joiner.username} joined "${group.name}"`
+      ).catch(() => {});
+    }
+    const updated = await getGroupById(group.id);
+    res.json({ success: true, group: updated });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to join group' });
+  }
+});
+
+app.post('/api/groups/:groupId/visibility', authMiddleware, validate(visibilitySchema), async (req, res) => {
+  try {
+    const group = await Group.findByPk(req.params.groupId);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (group.ownerId !== req.user.id) return res.status(403).json({ error: 'Only the owner can change visibility' });
+    group.visibility = req.body.visibility;
+    await group.save();
+    res.json({ success: true, visibility: group.visibility });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update visibility' });
+  }
+});
+
+app.get('/api/games/:gameId/comments', authMiddleware, async (req, res) => {
+  try {
+    const comments = await Comment.findAll({
+      where: { gameId: req.params.gameId },
+      order: [['createdAt', 'DESC']],
+      limit: 50,
+    });
+    const userIds = [...new Set(comments.map((c) => c.userId))];
+    const users = await User.findAll({ where: { id: userIds } });
+    const userById = new Map(users.map((u) => [u.id, u]));
+    res.json(
+      comments.map((c) => ({
+        id: c.id,
+        gameId: c.gameId,
+        userId: c.userId,
+        username: userById.get(c.userId)?.username || 'Unknown',
+        body: c.body,
+        createdAt: c.createdAt,
+      }))
+    );
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch comments' });
+  }
+});
+
+app.post('/api/games/:gameId/comments', authMiddleware, validate(commentSchema), async (req, res) => {
+  try {
+    const game = await Game.findByPk(req.params.gameId);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+
+    const comment = await Comment.create({
+      gameId: req.params.gameId,
+      userId: req.user.id,
+      body: req.body.body,
+    });
+    const user = await getUserById(req.user.id);
+    res.json({
+      id: comment.id,
+      gameId: comment.gameId,
+      userId: comment.userId,
+      username: user.username,
+      body: comment.body,
+      createdAt: comment.createdAt,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to post comment' });
+  }
+});
+
+app.delete('/api/comments/:id', authMiddleware, async (req, res) => {
+  try {
+    const comment = await Comment.findByPk(req.params.id);
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+    if (comment.userId !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    await comment.destroy();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete comment' });
+  }
+});
+
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  try {
+    const unreadOnly = req.query.unreadOnly === 'true';
+    const where = { userId: req.user.id };
+    if (unreadOnly) where.read = false;
+    const items = await Notification.findAll({
+      where,
+      order: [['createdAt', 'DESC']],
+      limit: 50,
+    });
+    const unreadCount = await Notification.count({ where: { userId: req.user.id, read: false } });
+    res.json({ items, unreadCount });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+app.post('/api/notifications/:id/read', authMiddleware, async (req, res) => {
+  try {
+    const notification = await Notification.findByPk(req.params.id);
+    if (!notification) return res.status(404).json({ error: 'Notification not found' });
+    if (notification.userId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    notification.read = true;
+    await notification.save();
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark notification' });
+  }
+});
+
+app.post('/api/notifications/read-all', authMiddleware, async (req, res) => {
+  try {
+    await Notification.update({ read: true }, { where: { userId: req.user.id, read: false } });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark notifications' });
   }
 });
 

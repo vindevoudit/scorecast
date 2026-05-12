@@ -1,34 +1,38 @@
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
-  const Group = sequelize.define('Group', {
+  const Friendship = sequelize.define('Friendship', {
     id: {
       type: DataTypes.UUID,
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    ownerId: {
+    requesterId: {
       type: DataTypes.UUID,
       allowNull: false,
     },
-    visibility: {
-      type: DataTypes.ENUM('private', 'public'),
+    addresseeId: {
+      type: DataTypes.UUID,
       allowNull: false,
-      defaultValue: 'private',
+    },
+    status: {
+      type: DataTypes.ENUM('pending', 'accepted'),
+      allowNull: false,
+      defaultValue: 'pending',
     },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
       defaultValue: DataTypes.NOW,
     },
+    acceptedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   }, {
-    tableName: 'groups',
+    tableName: 'friendships',
     timestamps: false,
   });
 
-  return Group;
+  return Friendship;
 };

@@ -22,6 +22,10 @@ const Game = require('./Game')(sequelize);
 const Pick = require('./Pick')(sequelize);
 const GroupMember = require('./GroupMember')(sequelize);
 const GroupInvite = require('./GroupInvite')(sequelize);
+const Badge = require('./Badge')(sequelize);
+const Friendship = require('./Friendship')(sequelize);
+const Comment = require('./Comment')(sequelize);
+const Notification = require('./Notification')(sequelize);
 
 // Define associations
 User.hasMany(Pick, { foreignKey: 'userId', as: 'picks' });
@@ -41,6 +45,20 @@ GroupMember.belongsTo(User, { foreignKey: 'userId' });
 
 Group.hasMany(GroupInvite, { foreignKey: 'groupId', as: 'invites' });
 GroupInvite.belongsTo(Group, { foreignKey: 'groupId' });
+
+User.hasMany(Badge, { foreignKey: 'userId', as: 'badges' });
+Badge.belongsTo(User, { foreignKey: 'userId' });
+
+Friendship.belongsTo(User, { foreignKey: 'requesterId', as: 'requester' });
+Friendship.belongsTo(User, { foreignKey: 'addresseeId', as: 'addressee' });
+
+Game.hasMany(Comment, { foreignKey: 'gameId', as: 'comments' });
+Comment.belongsTo(Game, { foreignKey: 'gameId' });
+Comment.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(Comment, { foreignKey: 'userId', as: 'comments' });
+
+User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'userId' });
 
 // Initialize database
 async function initDatabase() {
@@ -70,6 +88,19 @@ async function runMigrations() {
   );
   await sequelize.query(
     'CREATE UNIQUE INDEX IF NOT EXISTS picks_user_game_unique ON picks ("userId", "gameId")'
+  );
+  await sequelize.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'enum_groups_visibility') THEN
+        CREATE TYPE "public"."enum_groups_visibility" AS ENUM ('private', 'public');
+      END IF;
+    END $$;
+  `);
+  await sequelize.query(
+    `ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility "public"."enum_groups_visibility" NOT NULL DEFAULT 'private'`
+  );
+  await sequelize.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS friendships_pair_unique ON friendships (LEAST("requesterId", "addresseeId"), GREATEST("requesterId", "addresseeId"))`
   );
 
   const seedFilePath = path.join(__dirname, '..', 'data.json');
@@ -171,5 +202,9 @@ module.exports = {
   Pick,
   GroupMember,
   GroupInvite,
+  Badge,
+  Friendship,
+  Comment,
+  Notification,
   initDatabase,
 };

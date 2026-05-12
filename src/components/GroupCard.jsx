@@ -8,7 +8,16 @@ function GroupCard({ group, onInvite }) {
           <h2 className="truncate text-xl font-semibold text-white">{group.name}</h2>
           <p className="text-sm text-slate-400">{group.members.length} member{group.members.length === 1 ? '' : 's'}</p>
         </div>
-        <p className="max-w-full truncate rounded-full bg-slate-950/80 px-4 py-2 text-xs text-cyan-300 sm:text-sm">{group.id}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest ${
+            group.visibility === 'public'
+              ? 'bg-emerald-500/15 text-emerald-300'
+              : 'bg-slate-700/60 text-slate-300'
+          }`}>
+            {group.visibility === 'public' ? 'Public' : 'Private'}
+          </span>
+          <p className="max-w-full truncate rounded-full bg-slate-950/80 px-4 py-2 text-xs text-cyan-300 sm:text-sm">{group.id}</p>
+        </div>
       </div>
 
       <div className="mt-5 space-y-3">

@@ -1,4 +1,4 @@
-# ScoreCast v0.1 - Project Handover
+# ScoreCast
 
 ## Project Overview
 ScoreCast is a full-stack football prediction web app built with React + Node/Express. Users can make picks on games, join groups with friends, and compete on leaderboards with probability-based scoring.
@@ -14,7 +14,7 @@ ScoreCast is a full-stack football prediction web app built with React + Node/Ex
 
 ## Project Structure
 ```
-ScoreCast v0.1/
+ScoreCast/
 ├── src/                           # React frontend source
 │   ├── App.jsx                   # Main app: state, tabs, dashboard layout, 401 handling
 │   ├── main.jsx                  # React entry point
@@ -156,28 +156,6 @@ Copy [.env.example](.env.example) to `.env` and fill in:
 - Add new database model: create file in [models/](models/), wire it up in [models/index.js](models/index.js); if you change an existing model's schema, add an idempotent statement in `runMigrations()`
 - Promote a user to admin: `UPDATE users SET role = 'admin' WHERE username = '…';` (no admin UI yet)
 - Deploy: `npm run build` then deploy `dist/` + `server.js` + `node_modules` + `.env`
-
-## Recent Changes
-
-### Tier 1 — Security hardening (2026-05-12)
-- bcrypt password hashing (via User `beforeCreate`/`beforeUpdate` hooks)
-- RBAC: `role` ENUM column + `requireAdmin` middleware; JWT payload now includes `role`
-- Rate limiting on `/api/register` and `/api/login`
-- zod validation on every POST route
-- Unique composite index on `Pick(userId, gameId)`
-- JWT secret moved to required env var (no insecure fallback in production)
-- Idempotent `runMigrations()` that evolves the schema and re-hashes legacy plaintext passwords
-
-### Tier 2 — UX completions (2026-05-12)
-- Game outcome badges in GameCard
-- Full (uncapped) leaderboards with "you are here" highlight, rank column, scrollable
-- New "My Picks" tab with All/Wins/Losses/Pending filters
-- Game filter sections (Live / Upcoming / Completed)
-- Pick deadline countdown chips
-- Empty-state component + skeleton variants for loading states
-- Logout confirmation modal + session-expired (401) auto-logout with toast
-- Mobile responsive pass (horizontal-scrolling tab row, truncate on long usernames/group IDs)
-- Accessibility pass (htmlFor, autoComplete hints, focus-visible rings, aria-current/aria-live/aria-busy)
 
 ## Known Issues / TODOs
 

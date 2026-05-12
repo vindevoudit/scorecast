@@ -1,4 +1,5 @@
-﻿require('dotenv').config();
+﻿require('./lib/instrument'); // Sentry init must come before Express for OpenTelemetry instrumentation
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
@@ -14,6 +15,7 @@ const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Co
 const logger = require('./lib/logger');
 const requestId = require('./middleware/requestId');
 const leaderboardCache = require('./lib/leaderboardCache');
+const sentry = require('./lib/sentry');
 const pinoHttp = require('pino-http');
 const { validate } = require('./validation/middleware');
 const {
@@ -34,6 +36,7 @@ const {
   reactionSchema,
   bulkGameSchema,
   bulkUserSchema,
+  clientErrorSchema,
   ALLOWED_EMOJIS,
 } = require('./validation/schemas');
 const { BADGE_CATALOG } = require('./badges/catalog');
@@ -94,6 +97,14 @@ const registerLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many registrations from this IP, try again later' },
+});
+
+const clientErrorLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many error reports' },
 });
 
 function scorePick(pick, game) {
@@ -401,6 +412,28 @@ app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => 
   }
 
   res.json({ token: createToken(user), user: { id: user.id, username: user.username } });
+});
+
+app.post('/api/client-errors', clientErrorLimiter, validate(clientErrorSchema), (req, res) => {
+  let userId = null;
+  try {
+    const authHeader = req.headers.authorization;
+    const token = req.cookies?.token || (authHeader && authHeader.split(' ')[1]);
+    if (token) {
+      const payload = jwt.verify(token, JWT_SECRET);
+      userId = payload?.id || null;
+    }
+  } catch (_) {
+    // anonymous report — token missing or invalid; that's fine
+  }
+
+  const { level = 'error', message, stack, componentStack, url, reqId, userAgent } = req.body;
+  const logFn = level === 'warn' ? req.log.warn.bind(req.log) : req.log.error.bind(req.log);
+  logFn(
+    { clientError: { message, stack, componentStack, url, reqId, userAgent }, userId },
+    'client error'
+  );
+  res.status(204).end();
 });
 
 app.get('/api/me', authMiddleware, async (req, res) => {
@@ -1566,6 +1599,8 @@ app.get('/api/admin/cache-stats', authMiddleware, requireAdmin, (req, res) => {
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
+
+sentry.setupExpressErrorHandler(app);
 
 (async () => {
   try {

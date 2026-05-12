@@ -22,6 +22,7 @@ Full-stack football prediction web app. React 18 + Vite frontend, Node/Express b
 - **Validation**: zod on every POST/PUT body
 - **Rate limiting**: express-rate-limit (login + register only)
 - **Logging**: pino + pino-http with request-id correlation
+- **Error reporting**: React `ErrorBoundary` + window listeners → `POST /api/client-errors` → structured log; Sentry opt-in via `SENTRY_DSN` / `VITE_SENTRY_DSN`
 - **HTTP**: gzip via `compression` middleware
 - **Leaderboard cache**: in-memory `Map` with 30s TTL
 - **State**: React hooks — `App.jsx` is the single state owner (no Redux/Context)
@@ -33,8 +34,10 @@ Full-stack football prediction web app. React 18 + Vite frontend, Node/Express b
 - [models/index.js](models/index.js) — Sequelize init + umzug shim + seeder
 - [validation/schemas.js](validation/schemas.js) — zod schemas for every POST/PUT
 - [badges/catalog.js](badges/catalog.js) — badge slug source of truth
-- [lib/](lib/) — `logger.js`, `leaderboardCache.js`
+- [lib/](lib/) — `logger.js`, `leaderboardCache.js`, `instrument.js` (Sentry init, must load before Express), `sentry.js`
 - [middleware/](middleware/) — `requestId.js`
+- [src/lib/](src/lib/) — `clientErrorReporter.js` (window listeners + `/api/client-errors` reporter), `sentry.js` (lazy browser SDK)
+- [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx) — wraps `<App />` in `main.jsx`
 - [migrations/](migrations/), [seeders/](seeders/) — versioned schema + data changes
 
 Full repo layout: [ARCHITECTURE.md §4](ARCHITECTURE.md).
@@ -51,7 +54,7 @@ npm run db:migrate   # apply pending migrations (required step in prod deploys)
 
 ## Configuration
 
-See [.env.example](.env.example). Required in production: `JWT_SECRET` (server throws on boot without it). Optional: `DATABASE_URL`, `PORT`, `NODE_ENV`, `LOG_LEVEL`, `MIGRATE_ON_BOOT`.
+See [.env.example](.env.example). Required in production: `JWT_SECRET` (server throws on boot without it). Optional: `DATABASE_URL`, `PORT`, `NODE_ENV`, `LOG_LEVEL`, `MIGRATE_ON_BOOT`, `SENTRY_DSN` (server), `VITE_SENTRY_DSN` (browser; read at build time — rebuild after changing).
 
 ---
 
@@ -71,6 +74,7 @@ Every item below is a load-bearing invariant or gotcha that **isn't obvious from
 - **Leaderboard cache (Tier 5.2)**: `GET /api/leaderboard` reads through [lib/leaderboardCache.js](lib/leaderboardCache.js) with 30s TTL. **Any new mutation that affects standings must call `leaderboardCache.invalidate('all')` or `invalidate('group:<id>')` before responding** — see existing call sites in `POST /api/picks`, `DELETE /api/picks/:id`, `POST /api/games/:gameId/result`, the four group-membership endpoints, both single-item admin deletes, and both `/api/admin/*/bulk` endpoints. Forgetting this means stale standings for up to 30 s.
 - **Cascade transactions (Tier 5.3)**: `cascadeDeleteUser`, `cascadeDeleteGame`, and `cascadeDeleteGroup` accept a `{transaction}` option and forward it to every internal `destroy()`. Callers wrap with `await sequelize.transaction(async (t) => { await cascadeFn(x, {transaction: t}); })`. Bulk endpoints run **one transaction per entity** (a single bad row doesn't undo the rest). **`notify()` calls fire outside the transaction** so a rollback never produces ghost messages — keep that ordering.
 - **Structured logging (Tier 5.4)**: use `req.log.error({err}, 'msg')` in handlers, top-level `logger.*` for boot-time messages. **Don't use `console.*`** — there should be zero such calls in backend code. The `X-Request-Id` response header is echoed back to clients; pass it through to correlate a client error with a server log line.
+- **Frontend error reporting (Tier 5.4b)**: render errors bubble to [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx); window-level errors + unhandled promise rejections go through [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) to `POST /api/client-errors`. Both paths also fire a `scorecast:client-error` DOM event that App.jsx listens for to show a transient toast. The boundary's raw error text is gated on `import.meta.env.DEV` — **don't surface it in prod**. Sentry is opt-in: server-side requires [lib/instrument.js](lib/instrument.js) to be the very first `require()` in [server.js](server.js) (OpenTelemetry instrumentation); browser-side is a dynamic import gated on `VITE_SENTRY_DSN` so Vite tree-shakes it when unset.
 - **Helper return shapes (Tier 5.7)**: `getGroupsForUser()` returns `[{id, name, ownerId, visibility, members: [{userId, username}], invites: [{username, createdAt}], createdAt}]`; `getGroupById()` returns the same shape minus `visibility` (existing inconsistency, intentional). Preserve the shape — several components consume it.
 
 ---
@@ -101,6 +105,5 @@ Detailed handler references and existing patterns: [ARCHITECTURE.md §5](ARCHITE
 - **No real-time updates** — everything polls at 30 s — Tier 7
 - **No automated E2E tests** (Playwright deferred, needs Docker) — Tier 5.5 / 9.4
 - **Single-process leaderboard cache** — fine today; needs Redis for multi-instance — future
-- **No frontend error boundary / Sentry** — Tier 5.4b
 
-Recently shipped: **Tier 5 (core)** — migrations framework, leaderboard cache, transactional cascades, structured logging, N+1 elimination, gzip compression. See [ARCHITECTURE.md §13](ARCHITECTURE.md) for full roadmap status.
+Recently shipped: **Tier 5 (core)** + **Tier 5.4b** — migrations framework, leaderboard cache, transactional cascades, structured logging, N+1 elimination, gzip compression, plus frontend error boundary + `/api/client-errors` + Sentry hook (opt-in). See [ARCHITECTURE.md §13](ARCHITECTURE.md) for full roadmap status.

@@ -107,6 +107,7 @@ There is **one server process**, **one database**, **no message queue**, **no wo
 | Logging | **pino + pino-http** (Tier 5.4) | Structured JSON in prod, `pino-pretty` in dev. Every request gets `req.id` (UUID or inbound `X-Request-Id`) and a `req.log` child logger |
 | HTTP compression | **`compression`** (Tier 5.6) | Gzip middleware mounted before static + body parser; ~75% size reduction on the JS bundle |
 | Leaderboard cache | **In-memory Map** with 30 s TTL (Tier 5.2) | No Redis dependency; appropriate for the current single-process deployment. See §8.14 |
+| Error reporting | **React `ErrorBoundary` + window listeners → `POST /api/client-errors`** (Tier 5.4b); **Sentry SDK** (`@sentry/node` + `@sentry/react`) gated behind `SENTRY_DSN` / `VITE_SENTRY_DSN` (lazy on both sides). See §6.7 + §10.1 |
 
 Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker, no CI/CD config. These are deliberate scope decisions documented in [CLAUDE.md](CLAUDE.md).
 
@@ -143,7 +144,9 @@ ScoreCast/
 │
 ├── lib/                                 # Process-local helpers
 │   ├── logger.js                        # Tier 5.4: pino instance (pretty in dev, JSON in prod, LOG_LEVEL env)
-│   └── leaderboardCache.js              # Tier 5.2: getOrBuild/invalidate/stats; 30s TTL in-memory Map
+│   ├── leaderboardCache.js              # Tier 5.2: getOrBuild/invalidate/stats; 30s TTL in-memory Map
+│   ├── instrument.js                    # Tier 5.4b: Sentry.init() — MUST be the very first require() in server.js
+│   └── sentry.js                        # Tier 5.4b: captureException + setupExpressErrorHandler wrappers (no-ops if SENTRY_DSN unset)
 │
 ├── middleware/
 │   └── requestId.js                     # Tier 5.4: assigns req.id + req.log child; echoes X-Request-Id header
@@ -170,13 +173,17 @@ ScoreCast/
 │   └── middleware.js                    # validate(schema) → 400 with structured issues on failure
 │
 ├── src/                                 # React frontend
-│   ├── main.jsx                         # React.createRoot bootstrap
+│   ├── main.jsx                         # React.createRoot bootstrap; mounts ErrorBoundary, installs clientErrorReporter, calls initSentry()
 │   ├── App.jsx                          # ~1100 LOC; state, tabs, request(), all handlers
 │   ├── index.css                        # @tailwind base/components/utilities
+│   ├── lib/
+│   │   ├── clientErrorReporter.js       # Tier 5.4b: window error + unhandledrejection listeners; throttled POST to /api/client-errors; dispatches scorecast:client-error DOM event
+│   │   └── sentry.js                    # Tier 5.4b: dynamic import('@sentry/react') gated on VITE_SENTRY_DSN (Vite tree-shakes when unset)
 │   ├── utils/
 │   │   ├── scoring.js                   # MIRROR of server's scorePick; see §8.1
 │   │   └── time.js                      # formatCountdown, useCountdown hook, timeAgo
 │   └── components/
+│       ├── ErrorBoundary.jsx            # Tier 5.4b: class component wrapping <App />; reports via reportClientError + Sentry captureException; raw message gated on import.meta.env.DEV
 │       ├── GameCard.jsx                 # Pick UI, outcome badge, countdown chip, undo-pick, CommentThread footer
 │       ├── GroupCard.jsx                # Member grid + Avatars, invite form, Public/Private badge, leave/transfer/delete menu
 │       ├── GroupLeaderboardCard.jsx     # Sort select + pagination + viewer-row anchor
@@ -283,9 +290,10 @@ On success it **replaces `req.body` with the parsed (sanitized, defaulted) value
 Schemas live in [validation/schemas.js](validation/schemas.js): `registerSchema`, `loginSchema`, `createGroupSchema` (with optional `visibility`), `inviteSchema`, `pickSchema`, `resultSchema`, `friendRequestSchema`, `visibilitySchema`, `commentSchema`, `createGameSchema`, `updateGameSchema`, `roleSchema`, `transferOwnerSchema`, `editProfileSchema`, `reactionSchema` (emoji ∈ `ALLOWED_EMOJIS`), `bulkGameSchema`, `bulkUserSchema`.
 
 #### Rate limiting
-Two limiters from `express-rate-limit`, both configured `standardHeaders: true, legacyHeaders: false`:
+Three limiters from `express-rate-limit`, all configured `standardHeaders: true, legacyHeaders: false`:
 - `loginLimiter`: 5 requests / 15 min per IP. Applied to `POST /api/login`.
 - `registerLimiter`: 3 requests / hour per IP. Applied to `POST /api/register`.
+- `clientErrorLimiter` (Tier 5.4b): 30 requests / 5 min per IP. Applied to `POST /api/client-errors`. Tuned so a runaway client-side throw can't flood the server log.
 
 In-memory store, so a server restart wipes the counters. Acceptable for a single-instance deployment; would need Redis-backed limits for horizontal scaling.
 
@@ -295,7 +303,7 @@ In-memory store, so a server restart wipes the counters. Acceptable for a single
 ### 5.4 Route Catalogue
 
 Routes are registered in [server.js](server.js) in roughly this order:
-1. Auth: `POST /api/register`, `POST /api/login`
+1. Auth: `POST /api/register`, `POST /api/login`, **`POST /api/client-errors`** (Tier 5.4b — soft-auth: logs `userId` if token is valid, anonymous otherwise; structured-logs `clientError` payload at `error` or `warn` level per `level` field)
 2. Identity: `GET /api/me`, `PUT /api/me` (displayName + bio edit)
 3. Games: `GET /api/games`
 4. Groups (in order): `GET /api/groups`, **`GET /api/groups/discover`** (must come before `/:groupId`), `GET /api/groups/:groupId`, `POST /api/groups`, invite endpoints, `POST /api/groups/:groupId/join`, `POST /api/groups/:groupId/leave`, `POST /api/groups/:groupId/transfer`, `DELETE /api/groups/:groupId`, `POST /api/groups/:groupId/visibility`
@@ -411,6 +419,7 @@ Important properties:
 - **Uses a `tokenRef`** (not `token` directly) so the closure stays stable across renders while still seeing the latest token value.
 - **Auto-handles 401**: when an authenticated request returns 401, it clears the token via `handleSessionExpired` and throws a special `'Session expired'` error. Callers conventionally check `if (error.message !== 'Session expired')` before surfacing the error to the user, to avoid double-toasting.
 - **Tolerates empty responses** (`204` and zero-length bodies).
+- **Tier 5.4b**: every response's `X-Request-Id` header is captured and pushed into `setLastRequestId()` ([src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js)) so any subsequent client-error report carries the most recent server reqId. Thrown error objects also get a `.reqId` property attached, so handler `.catch()` sites can include it in their own error reports.
 
 ### 6.4 Tab Routing
 
@@ -427,9 +436,10 @@ There is **no global polling for game state** today (deferred Tier 4 feature). L
 ### 6.6 Component Hierarchy
 
 ```
-<App>
-├── (auth panel) <LoginForm> / <RegisterForm>
-└── (dashboard)
+<ErrorBoundary>                            // Tier 5.4b — render-error fallback wrapping the whole tree
+└── <App>
+    ├── (auth panel) <LoginForm> / <RegisterForm>
+    └── (dashboard)
     ├── header card
     ├── tabs row
     │   ├── <SearchBar>                  // Tier 8.4
@@ -469,6 +479,69 @@ Overlays (rendered above the dashboard):
 <CommentThread> (inside each GameCard) renders:
   <CommentRow>* — each with <Avatar>, edit form (author only), 5-emoji reaction strip
 ```
+
+### 6.7 Error Reporting (Tier 5.4b)
+
+Three failure modes, three UX paths, one logging sink.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Browser                                         │
+│                                                                              │
+│  1. React render throws ──▶ <ErrorBoundary>                                  │
+│     (component crash)          ├─ renders fallback (slate/rose card)         │
+│                                ├─ reportClientError(...)  ─┐                 │
+│                                └─ captureException(...)  ──┼─▶ Sentry        │
+│                                                            │  (if DSN set)   │
+│  2. window 'error' /        ──▶ clientErrorReporter        │                 │
+│     'unhandledrejection'        ├─ throttle (5 / min)      │                 │
+│     (uncaught async,            ├─ dispatch custom event ──┼──▶ App listener │
+│      raw throws, etc.)          │   'scorecast:client-error'      ▼          │
+│                                 │                            showStatus()    │
+│                                 └─ reportClientError() ─────┘  (cyan toast)  │
+│                                                                              │
+│  3. request() throws        ──▶ caller .catch() in App.jsx                   │
+│     (handled API error)        └─ showStatus(error.message)  (cyan toast)    │
+│                                                                              │
+└─────────────────────────┬───────────────────────────────────────────────────┘
+                          │ POST /api/client-errors
+                          │ (paths 1 + 2)
+                          ▼
+            ┌─────────────────────────────────────┐
+            │   server.js                          │
+            │   clientErrorLimiter (30 / 5min)     │
+            │   validate(clientErrorSchema)        │
+            │   soft-decode JWT → userId           │
+            │   req.log.error({clientError,        │
+            │                  userId},            │
+            │                 'client error')      │
+            │   → 204                              │
+            └─────────────────────────────────────┘
+                          │
+                          ▼ (Sentry server SDK also catches Express errors
+                                   via setupExpressErrorHandler if SENTRY_DSN set)
+```
+
+**Files touched**:
+- [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx): class component (React requires class for error boundaries). `getDerivedStateFromError` sets `hasError = true`; `componentDidCatch` calls `reportClientError` and Sentry `captureException`. Fallback UI matches the slate/cyan/rose theme, offers **Reload page** and **Try again**. Raw error message rendered **only when `import.meta.env.DEV` is true** — Vite strips the branch from the prod bundle so users never see `Cannot read properties of undefined…` style messages.
+- [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js): installs `window.error` and `unhandledrejection` listeners. Hard-throttled to **5 reports per 60 s window** (the rest are dropped silently — prevents runaway-error storms). `reportClientError` posts via `fetch({keepalive: true})` so reports complete even if the page is unloading. Clips `stack` and `componentStack` to **8 KB** each and `message` to 500 chars, matching the server's zod ceilings. Failures inside the reporter are swallowed (never re-feed the listener). Also dispatches a `scorecast:client-error` DOM event so App.jsx can show a toast.
+- [src/lib/sentry.js](src/lib/sentry.js): `initSentry()` is `async` — reads `import.meta.env.VITE_SENTRY_DSN` and, if set, does a dynamic `await import('@sentry/react')` then calls `init({dsn, environment, tracesSampleRate: 0})`. If unset, **the entire dynamic-import branch is dead-code-eliminated by Vite** — zero `@sentry/react` bytes in the bundle (verified: 0 occurrences of "sentry" in `dist/assets/*.js` when DSN unset).
+- [src/main.jsx](src/main.jsx): bootstrap order — `initSentry()` (fire-and-forget async), `installClientErrorReporter()` (synchronous), then `createRoot().render(<StrictMode><ErrorBoundary><App/></ErrorBoundary></StrictMode>)`.
+- [src/App.jsx](src/App.jsx): single `useEffect` listens for `scorecast:client-error` and triggers a *"Something went wrong — refresh if things look off."* toast via the existing `setStatus`/clearTimeout machinery.
+
+**Server-side wiring**:
+- [lib/instrument.js](lib/instrument.js): MUST be the **very first `require()`** in [server.js](server.js) (currently line 1). Loads `dotenv` then conditionally `require('@sentry/node').init({dsn, …})`. Required this early because `@sentry/node` v8+ uses OpenTelemetry, which needs to instrument Express/Sequelize/etc. **before** they're imported.
+- [lib/sentry.js](lib/sentry.js): exports `captureException` and `setupExpressErrorHandler(app)`. Both no-op if `SENTRY_DSN` is unset. `setupExpressErrorHandler(app)` is mounted **after** all routes including the catch-all `app.get('*')` so it sees errors propagated via `next(err)`.
+
+**Why three paths and not one**:
+- Render errors need the React tree to swap in a fallback — that's what `componentDidCatch` does and a window listener cannot.
+- Window errors / unhandled rejections happen outside React's render cycle — boundary doesn't see them; they need their own listener.
+- Handled API errors (`request()` throw) are caught by app code (e.g., `submitPick`) which already shows a contextual toast; piping them through the boundary or reporter would double-toast and lose context.
+
+**What's logged**:
+- Backend: every report becomes one structured `client error` log line with `reqId` (the server's own request id for the POST), `userId` (from soft-decoded token if present), and the full `clientError` object (`message`, `stack`, `componentStack`, `url`, the **client-side** `reqId` of the most recent server interaction, `userAgent`, `level`). Pino-formatted JSON in prod, pretty-printed in dev.
+
+**Sentry activation** (when ready): paste the project DSN(s) into `.env` as `SENTRY_DSN` (server) and `VITE_SENTRY_DSN` (browser); restart the server; rebuild the frontend (`VITE_SENTRY_DSN` is read at Vite build time). Verification trick: throw via `setTimeout(() => { throw new Error('test') }, 0)` — direct console throws are filtered by Sentry as "developer-intentional" in some browser builds.
 
 ---
 
@@ -1085,12 +1158,23 @@ DELETE /api/admin/users/<bobId>
 
 ### 10.1 Error Handling
 
-- **Server**: every route handler is wrapped in `try { ... } catch (error) { res.status(500).json({error: '...'}) }`. The catch blocks call `req.log.error({err}, 'handler error')` (Tier 5.4) and return a generic message; no stack trace leaks to the client. The structured log carries `reqId`, so a 500 returned to a user can be traced back to the exact handler invocation via the response's `X-Request-Id` header.
+**Server**:
+- Every route handler is wrapped in `try { ... } catch (error) { res.status(500).json({error: '...'}) }`. Catch blocks call `req.log.error({err}, 'handler error')` (Tier 5.4) and return a generic message; no stack trace leaks to the client. The structured log carries `reqId`, so a 500 returned to a user can be traced back to the exact handler invocation via the response's `X-Request-Id` header.
 - **zod validation errors** are 400 with the `issues` array (path + message).
 - **Specific business errors** (e.g. duplicate friend request) are 400 with a human-readable string.
-- **Frontend**: every `request()` call site catches and routes through `showStatus(error.message)` (which displays a transient toast). The `'Session expired'` error is special-cased and not re-shown (the toast was already triggered by `handleSessionExpired`).
+- **Sentry error middleware** (Tier 5.4b) is mounted via `sentry.setupExpressErrorHandler(app)` after all routes. It captures any error propagated via `next(err)` to Sentry — no-op when `SENTRY_DSN` is unset.
 
-There is **no centralized error handler middleware** on the server and **no global error boundary** on the client — a future Tier 5.4b item.
+**Frontend** (Tier 5.4b restructured this from "no error boundary" to a three-path strategy — see §6.7):
+1. **React render errors** → caught by [ErrorBoundary](src/components/ErrorBoundary.jsx) → fallback UI + report.
+2. **Window-level errors / unhandled rejections** → [clientErrorReporter](src/lib/clientErrorReporter.js) → POST `/api/client-errors` + custom DOM event → App.jsx shows a cyan toast.
+3. **Handled API errors** (anything `request()` throws) → caller's `.catch()` → `showStatus(error.message)`. The special `'Session expired'` error is not re-toasted (the session-expired handler already toasted).
+
+All three paths converge on the **server-side structured log** via `POST /api/client-errors`. Sentry sees paths 1 + 2 directly (its browser SDK installs its own `window.error` listener at `init`).
+
+**What users see** by failure type:
+- Render error → full-page fallback card (Reload / Try again buttons; raw error text only in dev builds).
+- Window/async error → 3.5 s cyan toast: *"Something went wrong — refresh if things look off."*
+- API error → contextual cyan toast with the server's `error` message (or *"Request failed"* fallback).
 
 ### 10.2 Security Posture
 
@@ -1136,12 +1220,14 @@ Not yet:
 - Skeleton loading states don't announce themselves to screen readers.
 - No WCAG color-contrast audit run formally.
 
-### 10.5 Observability (Tier 5.4)
+### 10.5 Observability (Tier 5.4 + 5.4b)
 
 - **Structured logging**: all backend logs go through pino via [lib/logger.js](lib/logger.js). JSON in production, `pino-pretty` colored output in development. Log level controlled by `LOG_LEVEL` env (`debug` in dev, `info` in prod by default).
 - **Request correlation**: [middleware/requestId.js](middleware/requestId.js) assigns `req.id` (UUID v4 or honored inbound `X-Request-Id`), echoes it back on the response, and attaches `req.log = logger.child({reqId})`. Every handler error log line carries the `reqId`, so a client error can be traced back to the exact request.
 - **Access log**: `pino-http` emits one structured line per request (`req`, `res`, `responseTime`). `customLogLevel` maps `>=500` to `error` and `>=400` to `warn`, so warn/error filters surface the bad requests automatically.
-- **No metrics / no APM / no Sentry**: there's no `/metrics` endpoint and no error-forwarding sink yet. The frontend has no telemetry. Sentry integration is a 5.4b follow-up.
+- **Client-error pipeline (Tier 5.4b)**: see §6.7. Browser failures of any kind flow to `POST /api/client-errors`, get a `req.log.error` line on the server side, and (if `SENTRY_DSN`/`VITE_SENTRY_DSN` are set) also flow into Sentry. The browser sends along the most recent server-side `reqId` it observed via `X-Request-Id`, so each client error can be tied back to the exact server request that rendered the failing page.
+- **Sentry (Tier 5.4b)**: opt-in via env. When unset, both server and browser ship without Sentry overhead (server-side `lib/sentry.js` exports no-ops; client-side Vite tree-shakes the dynamic `@sentry/react` import). When set, server uses `@sentry/node` with OpenTelemetry instrumentation (initialized in [lib/instrument.js](lib/instrument.js) *before* Express is required); browser uses `@sentry/react` with its own window listeners + the ErrorBoundary's explicit `captureException` calls.
+- **Still missing**: no `/metrics` endpoint, no APM beyond Sentry, no log shipping to a managed log aggregator (CloudWatch / Application Insights / Loki). Captured under Tier 10 — Observability & scale in the forward roadmap.
 
 ---
 
@@ -1156,6 +1242,8 @@ See [.env.example](.env.example):
 - **`NODE_ENV`** — `development` or `production`. Gates JWT_SECRET enforcement, logger format (pretty vs JSON), and migration auto-run behavior.
 - **`LOG_LEVEL`** — (Tier 5.4) pino level. Defaults to `debug` in dev and `info` in prod. Values: `fatal | error | warn | info | debug | trace | silent`.
 - **`MIGRATE_ON_BOOT`** — (Tier 5.1) `'true'` to apply pending migrations on server boot in production. Default off — production should run `npm run db:migrate` as an explicit deploy step. No effect in development (always auto-migrates).
+- **`SENTRY_DSN`** — (Tier 5.4b) Sentry server-side DSN. When unset, [lib/instrument.js](lib/instrument.js) skips Sentry init and [lib/sentry.js](lib/sentry.js) exports no-ops. When set, `@sentry/node` initializes at boot (before Express) and `setupExpressErrorHandler(app)` reports any `next(err)`-propagated error.
+- **`VITE_SENTRY_DSN`** — (Tier 5.4b) Sentry browser DSN. Read at **Vite build time**, not runtime — any change requires `npm run build`. When unset, Vite dead-code-eliminates the dynamic `@sentry/react` import (verified zero bytes added to the bundle). When set, `initSentry()` in [src/lib/sentry.js](src/lib/sentry.js) loads the SDK and calls `Sentry.init(...)` on app startup.
 
 ### 11.2 Local Setup
 
@@ -1209,6 +1297,10 @@ Or in one go: `npm start` (= `vite build && node server.js`). For production it'
 12. **Cascade transactions (Tier 5.3)**: `cascadeDeleteUser`, `cascadeDeleteGame`, `cascadeDeleteGroup` accept a `{transaction}` option and forward it to every internal `destroy()`. Callers wrap with `await sequelize.transaction(async (t) => { await cascadeFn(x, {transaction: t}); })`. **Don't move `notify()` calls inside the transaction** — they're synchronous Notification.create calls that should not be rolled back by a cascade failure. Keep notify calls before/after the tx block, never inside.
 13. **Logging (Tier 5.4)**: use `req.log.error({err}, 'msg')` inside handlers (never `console.*`). For boot-time code that has no request context, use the top-level `logger` from [lib/logger.js](lib/logger.js). The shape `req.log.error({err: error}, 'handler error')` is conventional and shows up structured in JSON output.
 14. **Verifying transaction rollback**: to confirm a new cascade path is genuinely atomic, monkey-patch one of the internal `destroy()` methods to throw and call the endpoint. Verify the parent row + all child rows are intact after the tx exception. See the 5.3 smoke-test recipe in the plan history.
+15. **Tier 5.4b — instrument.js ordering**: [lib/instrument.js](lib/instrument.js) **must remain the very first `require()`** in [server.js](server.js), before `dotenv` and before `express`. `@sentry/node` v8+ uses OpenTelemetry instrumentation that needs to wrap Express and Sequelize at import time. Moving this require down even one line silently disables Sentry's auto-instrumentation. The file itself calls `require('dotenv').config()` first so `SENTRY_DSN` is readable; the second `dotenv.config()` later in server.js is idempotent.
+16. **Tier 5.4b — VITE_SENTRY_DSN is build-time**: changing `VITE_SENTRY_DSN` in `.env` does nothing until you rebuild (`npm run build`) and the browser reloads the new bundle. Vite substitutes the value at build time. `SENTRY_DSN` (server) is read at process start so a server restart picks it up live.
+17. **Tier 5.4b — never `console.*` in new client code either**: window-level errors are already captured by `clientErrorReporter`. If you `console.error(...)` in client code to "log something," that line never reaches the server and never reaches Sentry. Call `reportClientError({message, level: 'warn' | 'error'})` from [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) instead.
+18. **Tier 5.4b — ErrorBoundary raw-message gate**: the boundary renders `this.state.message` (which can include sensitive details from the thrown error) **only** under `import.meta.env.DEV`. Do not remove the gate. If you need to surface a friendlier message in prod, set a separate state field with the curated text.
 
 ### 11.5 Backup / Restore
 
@@ -1234,8 +1326,10 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 | Helmet / security headers | Not applied | 6.5 |
 | Profile privacy | Every authenticated user can view every profile | 8.6 |
 | Notification spam | Bulk-setResult can produce many notifications in one request; no batching/dedup | 7 |
-| Cache scope | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Today the app runs single-process so this is fine | future |
-| Frontend telemetry | No error boundary, no `/api/client-errors`, no Sentry | 5.4b |
+| Cache scope | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Today the app runs single-process so this is fine | future / Tier 10.4 (Redis backend) |
+| Server-side log shipping | pino → stdout only; no managed log aggregator (CloudWatch / Application Insights / Loki). Sentry covers errors but not access logs | Tier 10.6 |
+| Health / readiness probes | No `/healthz` or `/readyz` endpoint; load balancers / Container Apps probes have nothing to hit | Tier 10.1 |
+| Metrics | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters | Tier 10.3 |
 
 ---
 
@@ -1251,7 +1345,8 @@ Summary:
 - ✅ **Tier 4a** — Admin UI for game CRUD + user moderation.
 - 🟡 **Tier 4b** — Game-data quality remainder: external API integration, live scores, leagues/seasons, additional pick types, streaks, audit log. **All deferred** (requires API-Football key + schema additions).
 - ✅ **Tier 5 (core)** — Ops & reliability: migrations framework (5.1), leaderboard caching (5.2), transactional cascades (5.3), structured logging (5.4), N+1 elimination (5.7), HTTP compression (5.6).
-- 🟡 **Tier 5 (remainder)** — 5.5 Playwright E2E (deferred — needs Docker / Tier 9.4); 5.4b Sentry + frontend error boundary (deferred follow-up).
+- ✅ **Tier 5.4b** — Frontend error reporting: React `ErrorBoundary`, `POST /api/client-errors`, window listeners + reporter, `X-Request-Id` capture, Sentry SDK opt-in. See §6.7.
+- 🟡 **Tier 5 (remainder)** — 5.5 Playwright E2E (deferred — needs Docker / Tier 9.4).
 - ❌ **Tier 6** — Security hardening for production: CORS, CSRF, password reset, account lockout, helmet, refresh tokens, 2FA.
 - ❌ **Tier 7** — Real-time & engagement: scheduler-driven notifications, WebSocket/SSE, web push, email, prefs.
 - ✅ **Tier 8** (minus 8.6) — User capabilities: group lifecycle (leave/transfer/delete), pick deletion, avatars, search, profile bio + displayName, comment edit + reactions, leaderboard sort + pagination, bulk admin actions.
@@ -1281,3 +1376,7 @@ Summary:
 | **Cascade transaction** | (Tier 5.3) A `sequelize.transaction()` block wrapping a `cascadeDeleteUser/Game/Group()` call, so a mid-cascade failure rolls back every prior `destroy()` rather than leaving orphans. |
 | **Leaderboard cache key** | `'overall'` for the global block; `group:<groupId>` per group. Invalidated on every mutation that affects standings. See §8.14. |
 | **Request ID** | A UUID v4 assigned by [middleware/requestId.js](middleware/requestId.js) on every request, attached to `req.id`, echoed in the response's `X-Request-Id` header, and included in every log line produced by `req.log`. Honored inbound `X-Request-Id` headers (≤200 chars) are reused instead of generating a new one — useful for client-side correlation. |
+| **ErrorBoundary** | (Tier 5.4b) React class component in [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx) that wraps `<App />` in `main.jsx`. Catches *render-phase* errors below it via `componentDidCatch`, swaps in a slate/rose fallback card, and reports through `reportClientError` + Sentry `captureException`. Does **not** catch errors thrown from event handlers, async code, or `setTimeout` callbacks — those go through the window-level listeners in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js). |
+| **clientErrorReporter** | (Tier 5.4b) Module in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) that installs `window.error` and `unhandledrejection` listeners, throttles reports to 5 per 60 s, posts to `POST /api/client-errors`, and dispatches a `scorecast:client-error` DOM event for App.jsx to toast. Exports `reportClientError({...})` for explicit calls and `setLastRequestId(id)` to record the most recent server reqId observed via response headers. |
+| **`/api/client-errors`** | (Tier 5.4b) Public endpoint accepting `{message, stack?, componentStack?, url?, reqId?, userAgent?, level?}` (zod-validated, all string fields capped — stack at 8 KB). Soft-decodes the JWT to attach `userId` if present, else logs anonymously. Rate-limited 30/5 min per IP. Always returns 204. |
+| **`SENTRY_DSN` / `VITE_SENTRY_DSN`** | (Tier 5.4b) Opt-in env vars enabling server-side and browser-side Sentry capture respectively. Both are no-ops when unset (server exports stubs; Vite tree-shakes the dynamic `@sentry/react` import). `VITE_SENTRY_DSN` is read at Vite build time — change requires `npm run build`. |

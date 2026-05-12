@@ -15,6 +15,7 @@ import FriendsList from './components/FriendsList';
 import NotificationBell from './components/NotificationBell';
 import AdminPanel from './components/admin/AdminPanel';
 import SearchBar from './components/SearchBar';
+import { setLastRequestId } from './lib/clientErrorReporter';
 
 const initialAuthData = {
   loginUsername: '',
@@ -121,16 +122,23 @@ function App() {
       headers: { ...(options.headers || {}), ...headers },
     });
 
+    const reqId = response.headers.get('X-Request-Id');
+    if (reqId) setLastRequestId(reqId);
+
     if (response.status === 401 && tokenRef.current) {
       handleSessionExpired();
-      throw new Error('Session expired');
+      const err = new Error('Session expired');
+      err.reqId = reqId;
+      throw err;
     }
 
     if (response.status === 204) return null;
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
     if (!response.ok) {
-      throw new Error((data && data.error) || 'Request failed');
+      const err = new Error((data && data.error) || 'Request failed');
+      err.reqId = reqId;
+      throw err;
     }
     return data;
   }, []);
@@ -227,6 +235,20 @@ function App() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let timer;
+    const handler = () => {
+      setStatus('Something went wrong — refresh if things look off.');
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setStatus(''), 3500);
+    };
+    window.addEventListener('scorecast:client-error', handler);
+    return () => {
+      window.removeEventListener('scorecast:client-error', handler);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     if (!token) return;

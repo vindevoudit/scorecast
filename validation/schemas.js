@@ -19,6 +19,36 @@ const friendRequestSchema = z.object({ username });
 const visibilitySchema = z.object({ visibility: z.enum(['private', 'public']) });
 const commentSchema = z.object({ body: z.string().trim().min(1).max(500) });
 
+const teamName = z.string().trim().min(1).max(80);
+const probability = z.number().min(0).max(1);
+
+const createGameSchema = z.object({
+  homeTeam: teamName,
+  awayTeam: teamName,
+  date: z.string().datetime({ offset: true }),
+  homeProbability: probability,
+  awayProbability: probability,
+}).refine(
+  (g) => Math.abs(g.homeProbability + g.awayProbability - 1) <= 0.01,
+  { message: 'homeProbability + awayProbability must sum to 1.0' }
+);
+
+const updateGameSchema = z.object({
+  homeTeam: teamName.optional(),
+  awayTeam: teamName.optional(),
+  date: z.string().datetime({ offset: true }).optional(),
+  homeProbability: probability.optional(),
+  awayProbability: probability.optional(),
+}).refine(
+  (g) => g.homeProbability === undefined && g.awayProbability === undefined
+    ? true
+    : g.homeProbability !== undefined && g.awayProbability !== undefined
+      && Math.abs(g.homeProbability + g.awayProbability - 1) <= 0.01,
+  { message: 'When updating probabilities, both must be provided and sum to 1.0' }
+);
+
+const roleSchema = z.object({ role: z.enum(['user', 'admin']) });
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -29,4 +59,7 @@ module.exports = {
   friendRequestSchema,
   visibilitySchema,
   commentSchema,
+  createGameSchema,
+  updateGameSchema,
+  roleSchema,
 };

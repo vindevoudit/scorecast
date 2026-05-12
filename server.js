@@ -21,6 +21,9 @@ const {
   friendRequestSchema,
   visibilitySchema,
   commentSchema,
+  createGameSchema,
+  updateGameSchema,
+  roleSchema,
 } = require('./validation/schemas');
 const { BADGE_CATALOG } = require('./badges/catalog');
 
@@ -336,7 +339,7 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 
   const joinedGroups = await getJoinedGroupIds(user.id);
   const pendingInvites = await getPendingInvites(user.id);
-  res.json({ id: user.id, username: user.username, joinedGroups, pendingInvites });
+  res.json({ id: user.id, username: user.username, role: user.role, joinedGroups, pendingInvites });
 });
 
 app.get('/api/games', authMiddleware, async (req, res) => {
@@ -964,6 +967,112 @@ app.post('/api/notifications/read-all', authMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to mark notifications' });
+  }
+});
+
+app.post('/api/admin/games', authMiddleware, requireAdmin, validate(createGameSchema), async (req, res) => {
+  try {
+    const game = await Game.create(req.body);
+    res.json(game);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to create game' });
+  }
+});
+
+app.put('/api/admin/games/:id', authMiddleware, requireAdmin, validate(updateGameSchema), async (req, res) => {
+  try {
+    const game = await Game.findByPk(req.params.id);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+    Object.assign(game, req.body);
+    await game.save();
+    res.json(game);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update game' });
+  }
+});
+
+app.delete('/api/admin/games/:id', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const game = await Game.findByPk(req.params.id);
+    if (!game) return res.status(404).json({ error: 'Game not found' });
+    await Pick.destroy({ where: { gameId: game.id } });
+    await Comment.destroy({ where: { gameId: game.id } });
+    await game.destroy();
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete game' });
+  }
+});
+
+app.get('/api/admin/users', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const users = await User.findAll({ order: [['createdAt', 'ASC']] });
+    const userIds = users.map((u) => u.id);
+    const picks = await Pick.findAll({ where: { userId: userIds } });
+    const memberships = await GroupMember.findAll({ where: { userId: userIds } });
+    const picksByUser = new Map();
+    for (const p of picks) picksByUser.set(p.userId, (picksByUser.get(p.userId) || 0) + 1);
+    const groupsByUser = new Map();
+    for (const m of memberships) groupsByUser.set(m.userId, (groupsByUser.get(m.userId) || 0) + 1);
+    res.json(
+      users.map((u) => ({
+        id: u.id,
+        username: u.username,
+        role: u.role,
+        createdAt: u.createdAt,
+        picksCount: picksByUser.get(u.id) || 0,
+        groupsCount: groupsByUser.get(u.id) || 0,
+      }))
+    );
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.post('/api/admin/users/:id/role', authMiddleware, requireAdmin, validate(roleSchema), async (req, res) => {
+  try {
+    if (req.params.id === req.user.id && req.body.role !== 'admin') {
+      return res.status(400).json({ error: 'You cannot demote yourself' });
+    }
+    const target = await User.findByPk(req.params.id);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    target.role = req.body.role;
+    await target.save({ hooks: false });
+    res.json({ success: true, role: target.role });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot delete yourself' });
+    }
+    const target = await User.findByPk(req.params.id);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    const ownedGroups = await Group.findAll({ where: { ownerId: target.id } });
+    const ownedGroupIds = ownedGroups.map((g) => g.id);
+    if (ownedGroupIds.length > 0) {
+      await GroupMember.destroy({ where: { groupId: ownedGroupIds } });
+      await GroupInvite.destroy({ where: { groupId: ownedGroupIds } });
+      await Group.destroy({ where: { id: ownedGroupIds } });
+    }
+    await Pick.destroy({ where: { userId: target.id } });
+    await Comment.destroy({ where: { userId: target.id } });
+    await Friendship.destroy({
+      where: { [Op.or]: [{ requesterId: target.id }, { addresseeId: target.id }] },
+    });
+    await GroupMember.destroy({ where: { userId: target.id } });
+    await GroupInvite.destroy({ where: { username: target.username } });
+    await target.destroy();
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 

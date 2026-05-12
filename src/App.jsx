@@ -13,6 +13,7 @@ import ProfileView from './components/ProfileView';
 import ProfileDrawer from './components/ProfileDrawer';
 import FriendsList from './components/FriendsList';
 import NotificationBell from './components/NotificationBell';
+import AdminPanel from './components/admin/AdminPanel';
 
 const initialAuthData = {
   loginUsername: '',
@@ -23,13 +24,14 @@ const initialAuthData = {
   groupVisibility: 'private',
 };
 
-const TABS = [
+const BASE_TABS = [
   { id: 'games', kicker: 'Games', label: 'Upcoming Matches' },
   { id: 'mypicks', kicker: 'My Picks', label: 'Your History' },
   { id: 'groups', kicker: 'Groups', label: 'My Groups' },
   { id: 'leaderboard', kicker: 'Leaderboards', label: 'Rankings' },
   { id: 'profile', kicker: 'Profile', label: 'Your Stats' },
 ];
+const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -61,6 +63,11 @@ function App() {
   const pickMap = useMemo(
     () => new Map(picks.map((pick) => [pick.gameId, pick.choice])),
     [picks]
+  );
+
+  const tabs = useMemo(
+    () => (user?.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS),
+    [user?.role]
   );
 
   const { upcomingGames, liveGames, completedGames } = useMemo(() => {
@@ -479,7 +486,7 @@ function App() {
 
       <section className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
         <div className="-mx-1 flex flex-1 gap-3 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Dashboard sections">
-          {TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               role="tab"
@@ -777,6 +784,18 @@ function App() {
               onSelectUser={openProfile}
             />
           </div>
+        )}
+
+        {view === 'admin' && user?.role === 'admin' && (
+          <AdminPanel
+            request={request}
+            currentUserId={user?.id}
+            onAfterGameChange={async () => {
+              await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
+            }}
+            onError={(msg) => msg && msg !== 'Session expired' && showStatus(msg)}
+            onSuccess={(msg) => msg && showStatus(msg)}
+          />
         )}
       </section>
 

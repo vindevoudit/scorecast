@@ -13,6 +13,18 @@ function RegisterForm({ authData, setAuthData, onSubmit }) {
           onChange={(event) => setAuthData((prev) => ({ ...prev, registerUsername: event.target.value }))}
           className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
         />
+        <label htmlFor="register-email" className="block text-sm font-semibold text-slate-300">Email</label>
+        <input
+          id="register-email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          maxLength={254}
+          value={authData.registerEmail}
+          onChange={(event) => setAuthData((prev) => ({ ...prev, registerEmail: event.target.value }))}
+          className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+        />
         <label htmlFor="register-password" className="block text-sm font-semibold text-slate-300">Password</label>
         <input
           id="register-password"

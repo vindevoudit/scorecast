@@ -12,16 +12,21 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const { Op } = require('sequelize');
 
-const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, sequelize, initDatabase } = require('./models');
+const crypto = require('crypto');
+const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, EmailVerificationToken, PasswordResetToken, sequelize, initDatabase } = require('./models');
 const logger = require('./lib/logger');
 const requestId = require('./middleware/requestId');
 const leaderboardCache = require('./lib/leaderboardCache');
 const sentry = require('./lib/sentry');
+const email = require('./lib/email');
 const pinoHttp = require('pino-http');
 const { validate } = require('./validation/middleware');
 const {
   registerSchema,
   loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  setEmailSchema,
   createGroupSchema,
   inviteSchema,
   pickSchema,
@@ -51,6 +56,32 @@ if (!RAW_JWT_SECRET) {
 }
 const JWT_SECRET = RAW_JWT_SECRET || 'scorecast-dev-only-do-not-use';
 const PORT = process.env.PORT || 3000;
+const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || `http://localhost:${PORT}`;
+
+function generateRawToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+async function sendVerificationEmail(user) {
+  if (!user?.email) return;
+  const raw = generateRawToken();
+  await EmailVerificationToken.create({
+    userId: user.id,
+    tokenHash: hashToken(raw),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  });
+  const link = `${PUBLIC_APP_URL}/?verifyToken=${raw}`;
+  await email.send({
+    to: user.email,
+    subject: 'Verify your ScoreCast email',
+    text: `Welcome to ScoreCast, ${user.username}.\n\nConfirm your email by opening this link:\n${link}\n\nThe link expires in 24 hours.`,
+    html: `<p>Welcome to ScoreCast, ${user.username}.</p><p>Confirm your email by opening this link:</p><p><a href="${link}">${link}</a></p><p>The link expires in 24 hours.</p>`,
+  });
+}
 
 function createToken(user) {
   return jwt.sign(
@@ -451,17 +482,28 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.post('/api/register', registerLimiter, validate(registerSchema), async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, email: emailAddress } = req.body;
 
   const existingUser = await getUserByUsername(username);
   if (existingUser) {
     return res.status(400).json({ error: 'That username is already taken' });
   }
 
+  const existingEmail = await User.findOne({
+    where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
+  });
+  if (existingEmail) {
+    return res.status(400).json({ error: 'That email is already in use' });
+  }
+
   try {
-    const newUser = await User.create({ username, password });
+    const newUser = await User.create({ username, password, email: emailAddress });
+    sendVerificationEmail(newUser).catch((err) => {
+      req.log.warn({ err: err.message, userId: newUser.id }, 'failed to send verification email');
+    });
     res.json({ token: createToken(newUser), user: { id: newUser.id, username: newUser.username } });
   } catch (error) {
+    req.log.error({ err: error.message }, 'registration failed');
     res.status(500).json({ error: 'Registration failed' });
   }
 });
@@ -492,6 +534,90 @@ app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => 
   }
 
   res.json({ token: createToken(user), user: { id: user.id, username: user.username } });
+});
+
+app.post('/api/auth/verify-email', async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token : '';
+  if (!token || token.length < 20 || token.length > 200) {
+    return res.status(400).json({ error: 'Invalid token' });
+  }
+  try {
+    const row = await EmailVerificationToken.findOne({
+      where: {
+        tokenHash: hashToken(token),
+        consumedAt: null,
+        expiresAt: { [Op.gt]: new Date() },
+      },
+    });
+    if (!row) return res.status(400).json({ error: 'Token is invalid or expired' });
+    const user = await User.findByPk(row.userId);
+    if (!user) return res.status(400).json({ error: 'Token is invalid or expired' });
+    user.emailVerifiedAt = new Date();
+    await user.save({ hooks: false });
+    row.consumedAt = new Date();
+    await row.save({ hooks: false });
+    res.json({ ok: true, email: user.email });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'verify-email failed');
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+app.post('/api/auth/forgot-password', forgotPasswordLimiter, validate(forgotPasswordSchema), async (req, res) => {
+  const { email: emailAddress } = req.body;
+  try {
+    const user = await User.findOne({
+      where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
+    });
+    if (user && user.emailVerifiedAt) {
+      const raw = generateRawToken();
+      await PasswordResetToken.create({
+        userId: user.id,
+        tokenHash: hashToken(raw),
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      });
+      const link = `${PUBLIC_APP_URL}/?resetToken=${raw}`;
+      email.send({
+        to: user.email,
+        subject: 'Reset your ScoreCast password',
+        text: `Open this link to reset your password:\n${link}\n\nThe link expires in 15 minutes. If you didn't request this, ignore this email.`,
+        html: `<p>Open this link to reset your password:</p><p><a href="${link}">${link}</a></p><p>The link expires in 15 minutes. If you didn't request this, ignore this email.</p>`,
+      }).catch((err) => {
+        req.log.warn({ err: err.message, userId: user.id }, 'failed to send reset email');
+      });
+    }
+  } catch (error) {
+    req.log.error({ err: error.message }, 'forgot-password failed');
+  }
+  res.status(204).end();
+});
+
+app.post('/api/auth/reset-password', validate(resetPasswordSchema), async (req, res) => {
+  const { token, password } = req.body;
+  try {
+    const row = await PasswordResetToken.findOne({
+      where: {
+        tokenHash: hashToken(token),
+        consumedAt: null,
+        expiresAt: { [Op.gt]: new Date() },
+      },
+    });
+    if (!row) return res.status(400).json({ error: 'Token is invalid or expired' });
+    const user = await User.findByPk(row.userId);
+    if (!user) return res.status(400).json({ error: 'Token is invalid or expired' });
+    user.password = password;
+    await user.save();
+    row.consumedAt = new Date();
+    await row.save({ hooks: false });
+    user.loginAttempts = 0;
+    user.lockedUntil = null;
+    await user.save({ hooks: false });
+    // TODO Chunk 3 (6.8): revoke all refresh tokens for user.id
+    res.json({ ok: true });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'reset-password failed');
+    res.status(500).json({ error: 'Password reset failed' });
+  }
 });
 
 app.post('/api/client-errors', clientErrorLimiter, validate(clientErrorSchema), (req, res) => {
@@ -528,6 +654,8 @@ app.get('/api/me', authMiddleware, async (req, res) => {
     role: user.role,
     displayName: user.displayName || null,
     bio: user.bio || null,
+    email: user.email || null,
+    emailVerifiedAt: user.emailVerifiedAt || null,
     joinedGroups,
     pendingInvites,
   });
@@ -554,6 +682,30 @@ app.put('/api/me', authMiddleware, validate(editProfileSchema), async (req, res)
   } catch (error) {
     req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+app.patch('/api/me/email', authMiddleware, validate(setEmailSchema), async (req, res) => {
+  const { email: emailAddress } = req.body;
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const existing = await User.findOne({
+      where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
+    });
+    if (existing && existing.id !== user.id) {
+      return res.status(400).json({ error: 'That email is already in use' });
+    }
+    user.email = emailAddress;
+    user.emailVerifiedAt = null;
+    await user.save({ hooks: false });
+    sendVerificationEmail(user).catch((err) => {
+      req.log.warn({ err: err.message, userId: user.id }, 'failed to send verification email');
+    });
+    res.json({ email: user.email, emailVerifiedAt: null });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'set-email failed');
+    res.status(500).json({ error: 'Failed to set email' });
   }
 });
 

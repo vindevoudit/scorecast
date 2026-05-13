@@ -26,6 +26,8 @@ const Friendship = require('./Friendship')(sequelize);
 const Comment = require('./Comment')(sequelize);
 const Notification = require('./Notification')(sequelize);
 const CommentReaction = require('./CommentReaction')(sequelize);
+const EmailVerificationToken = require('./EmailVerificationToken')(sequelize);
+const PasswordResetToken = require('./PasswordResetToken')(sequelize);
 
 // Define associations
 User.hasMany(Pick, { foreignKey: 'userId', as: 'picks' });
@@ -62,6 +64,12 @@ Notification.belongsTo(User, { foreignKey: 'userId' });
 
 Comment.hasMany(CommentReaction, { foreignKey: 'commentId', as: 'reactions' });
 CommentReaction.belongsTo(Comment, { foreignKey: 'commentId' });
+
+EmailVerificationToken.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(EmailVerificationToken, { foreignKey: 'userId', as: 'emailVerificationTokens' });
+
+PasswordResetToken.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(PasswordResetToken, { foreignKey: 'userId', as: 'passwordResetTokens' });
 
 // Initialize database
 async function initDatabase() {
@@ -200,5 +208,7 @@ module.exports = {
   Comment,
   Notification,
   CommentReaction,
+  EmailVerificationToken,
+  PasswordResetToken,
   initDatabase,
 };

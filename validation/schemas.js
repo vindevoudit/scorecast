@@ -2,10 +2,14 @@ const { z } = require('zod');
 
 const username = z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9_]+$/, 'Username may only contain letters, numbers, and underscores');
 const password = z.string().min(8).max(200);
+const email = z.string().trim().toLowerCase().email().max(254);
 const uuid = z.string().uuid();
 
-const registerSchema = z.object({ username, password });
+const registerSchema = z.object({ username, password, email });
 const loginSchema = z.object({ username, password: z.string().min(1).max(200) });
+const forgotPasswordSchema = z.object({ email });
+const resetPasswordSchema = z.object({ token: z.string().min(20).max(200), password });
+const setEmailSchema = z.object({ email });
 
 const createGroupSchema = z.object({
   name: z.string().trim().min(1).max(60),
@@ -83,6 +87,9 @@ const clientErrorSchema = z.object({
 module.exports = {
   registerSchema,
   loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+  setEmailSchema,
   createGroupSchema,
   inviteSchema,
   pickSchema,

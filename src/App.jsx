@@ -3,6 +3,8 @@ import GameCard from './components/GameCard';
 import LeaderboardCard, { LeaderboardRow } from './components/LeaderboardCard';
 import LoginForm from './components/LoginForm';
 import RegisterForm from './components/RegisterForm';
+import ForgotPasswordForm from './components/ForgotPasswordForm';
+import ResetPasswordForm from './components/ResetPasswordForm';
 import GroupCard from './components/GroupCard';
 import GroupLeaderboardCard from './components/GroupLeaderboardCard';
 import PicksHistory from './components/PicksHistory';
@@ -22,6 +24,10 @@ const initialAuthData = {
   loginPassword: '',
   registerUsername: '',
   registerPassword: '',
+  registerEmail: '',
+  forgotEmail: '',
+  resetPassword: '',
+  resetToken: '',
   groupName: '',
   groupVisibility: 'private',
 };
@@ -53,6 +59,8 @@ function App() {
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [authData, setAuthData] = useState(initialAuthData);
+  const [authView, setAuthView] = useState('auth');
+  const [forgotSent, setForgotSent] = useState(false);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
   const [profileUsername, setProfileUsername] = useState('');
@@ -251,6 +259,40 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const verifyToken = params.get('verifyToken');
+    const resetToken = params.get('resetToken');
+    if (verifyToken) {
+      fetch('/api/auth/verify-email', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: verifyToken }),
+      })
+        .then((res) => {
+          if (res.ok) {
+            setStatus('Email verified — you\'re all set.');
+          } else {
+            setStatus('That verification link is invalid or expired.');
+          }
+          setTimeout(() => setStatus(''), 4000);
+        })
+        .catch(() => {});
+      params.delete('verifyToken');
+      const next = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
+    }
+    if (resetToken) {
+      setAuthData((prev) => ({ ...prev, resetToken }));
+      setAuthView('reset');
+      params.delete('resetToken');
+      const next = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!token) return;
     localStorage.setItem('scorecastToken', token);
     loadDashboard().catch((error) => {
@@ -324,13 +366,46 @@ function App() {
     try {
       const data = await request('/api/register', {
         method: 'POST',
-        body: JSON.stringify({ username: authData.registerUsername, password: authData.registerPassword }),
+        body: JSON.stringify({
+          username: authData.registerUsername,
+          password: authData.registerPassword,
+          email: authData.registerEmail,
+        }),
       });
       setToken(data.token);
       setUser(data.user);
       setAuthData(initialAuthData);
+      showStatus('Check your email for a verification link.');
     } catch (error) {
       showStatus(error.message);
+    }
+  };
+
+  const handleForgotPassword = async (event) => {
+    event.preventDefault();
+    try {
+      await request('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: authData.forgotEmail }),
+      });
+      setForgotSent(true);
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
+    }
+  };
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault();
+    try {
+      await request('/api/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token: authData.resetToken, password: authData.resetPassword }),
+      });
+      setAuthData((prev) => ({ ...prev, resetPassword: '', resetToken: '' }));
+      setAuthView('auth');
+      showStatus('Password updated. Sign in with your new password.');
+    } catch (error) {
+      if (error.message !== 'Session expired') showStatus(error.message);
     }
   };
 
@@ -956,9 +1031,43 @@ function App() {
     </div>
   );
 
-  const authPanel = (
+  const authPanel = authView === 'reset' ? (
+    <div className="mx-auto max-w-lg">
+      <ResetPasswordForm
+        authData={authData}
+        setAuthData={setAuthData}
+        onSubmit={handleResetPassword}
+        onCancel={() => {
+          setAuthData((prev) => ({ ...prev, resetPassword: '', resetToken: '' }));
+          setAuthView('auth');
+        }}
+      />
+    </div>
+  ) : authView === 'forgot' ? (
+    <div className="mx-auto max-w-lg">
+      <ForgotPasswordForm
+        authData={authData}
+        setAuthData={setAuthData}
+        onSubmit={handleForgotPassword}
+        sent={forgotSent}
+        onCancel={() => {
+          setForgotSent(false);
+          setAuthData((prev) => ({ ...prev, forgotEmail: '' }));
+          setAuthView('auth');
+        }}
+      />
+    </div>
+  ) : (
     <div className="grid gap-6 lg:grid-cols-2">
-      <LoginForm authData={authData} setAuthData={setAuthData} onSubmit={handleLogin} />
+      <LoginForm
+        authData={authData}
+        setAuthData={setAuthData}
+        onSubmit={handleLogin}
+        onForgotPassword={() => {
+          setForgotSent(false);
+          setAuthView('forgot');
+        }}
+      />
       <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
     </div>
   );

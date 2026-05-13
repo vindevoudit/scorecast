@@ -5,6 +5,7 @@ import LoginForm from './components/LoginForm';
 import RegisterForm from './components/RegisterForm';
 import ForgotPasswordForm from './components/ForgotPasswordForm';
 import ResetPasswordForm from './components/ResetPasswordForm';
+import TwoFactorChallenge from './components/TwoFactorChallenge';
 import GroupCard from './components/GroupCard';
 import GroupLeaderboardCard from './components/GroupLeaderboardCard';
 import PicksHistory from './components/PicksHistory';
@@ -388,12 +389,46 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ username: authData.loginUsername, password: authData.loginPassword }),
       });
+      if (data?.challenge) {
+        setAuthData((prev) => ({ ...prev, loginPassword: '' }));
+        setAuthView('twofa');
+        return;
+      }
       setUser(data.user);
       setAuthData(initialAuthData);
       await loadDashboard().catch(() => {});
     } catch (error) {
       showStatus(error.message);
     }
+  };
+
+  const handle2faVerify = async (payload) => {
+    const data = await request('/api/auth/2fa/verify', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    setUser(data.user);
+    setAuthData(initialAuthData);
+    setAuthView('auth');
+    await loadDashboard().catch(() => {});
+  };
+
+  const handle2faSetup = async () => {
+    return await request('/api/me/2fa/setup', { method: 'POST', body: JSON.stringify({}) });
+  };
+
+  const handle2faConfirm = async (code) => {
+    await request('/api/me/2fa/confirm', { method: 'POST', body: JSON.stringify({ code }) });
+    setUser((u) => (u ? { ...u, twoFactorEnabled: true } : u));
+    showStatus('Two-factor authentication enabled.');
+    return true;
+  };
+
+  const handle2faDisable = async (payload) => {
+    await request('/api/me/2fa/disable', { method: 'POST', body: JSON.stringify(payload) });
+    setUser((u) => (u ? { ...u, twoFactorEnabled: false } : u));
+    showStatus('Two-factor authentication disabled.');
+    return true;
   };
 
   const handleRegister = async (event) => {
@@ -1002,6 +1037,10 @@ function App() {
                 profile={ownProfile}
                 editable
                 onSaveProfile={handleSaveProfile}
+                twoFactorEnabled={Boolean(user?.twoFactorEnabled)}
+                on2faSetup={handle2faSetup}
+                on2faConfirm={handle2faConfirm}
+                on2faDisable={handle2faDisable}
               />
             )}
           </div>
@@ -1066,7 +1105,15 @@ function App() {
     </div>
   );
 
-  const authPanel = authView === 'reset' ? (
+  const authPanel = authView === 'twofa' ? (
+    <TwoFactorChallenge
+      onSubmit={handle2faVerify}
+      onCancel={() => {
+        setAuthView('auth');
+        setAuthData(initialAuthData);
+      }}
+    />
+  ) : authView === 'reset' ? (
     <div className="mx-auto max-w-lg">
       <ResetPasswordForm
         authData={authData}

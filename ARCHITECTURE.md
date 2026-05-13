@@ -42,8 +42,11 @@ The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between 
 │                            Browser (Client)                           │
 │                                                                       │
 │   React SPA  ─── fetch('/api/...') ───▶  request() helper            │
-│   localStorage:                          (Bearer token, JSON)         │
-│     scorecastToken                                                    │
+│   Cookies (no localStorage):           (credentials: include,         │
+│     sc_access   (HttpOnly, 15min)        X-CSRF-Token on mutations)   │
+│     sc_refresh  (HttpOnly, 30d,                                       │
+│                  Path=/api/auth)                                      │
+│     sc_csrf     (readable)                                            │
 │                                                                       │
 └────────────────────────┬─────────────────────────────────────────────┘
                          │ HTTPS (production) / HTTP (dev)
@@ -53,22 +56,26 @@ The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between 
 │                        Express server (server.js)                     │
 │                                                                       │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │ requestId → pino-http → compression → cors → bodyParser →     │   │
-│  │ cookieParser → express.static(dist/)                          │   │
+│  │ requestId → pino-http → compression → helmet → cors          │   │
+│  │ → bodyParser → cookieParser → csrfMiddleware                 │   │
+│  │ → express.static(dist/)                                       │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
 │  │ rate-limit   │  │ authMiddleware│ │ validate(zodSchema)       │  │
-│  │ (login/regr.)│  │ requireAdmin │ │                            │  │
+│  │ (per-route)  │  │ requireAdmin │ │                            │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │
 │                                                                       │
 │  Route handlers ─── Sequelize models ─── helper fns                  │
 │                          │             (scorePick, notify,           │
 │                          │              evaluateBadges,              │
 │                          │              cascadeDelete*,              │
+│                          │              setAuthCookies,              │
+│                          │              sendVerificationEmail,       │
 │                          │              leaderboardCache, …)         │
 │  ┌──────────────────────┴──────────────────────────────────────┐   │
 │  │ lib/leaderboardCache (in-process Map, 30s TTL)              │   │
+│  │ lib/email (Resend transport — log-only fallback)            │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 └─────────────────────────┬────────────────────────────────────────────┘
                           │ Sequelize (TCP, transactional for cascades)
@@ -79,6 +86,9 @@ The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between 
             │  group_members, group_invites,      │
             │  badges, friendships, comments,     │
             │  comment_reactions, notifications,  │
+            │  email_verification_tokens,         │
+            │  password_reset_tokens,             │
+            │  refresh_tokens,                    │
             │  SequelizeMeta (umzug bookkeeping)  │
             └─────────────────────────────────────┘
 ```
@@ -100,10 +110,15 @@ There is **one server process**, **one database**, **no message queue**, **no wo
 | ORM | **Sequelize 6** | Predictable, supports raw SQL escape hatches |
 | Migrations | **sequelize-cli + umzug** (Tier 5.1) | sequelize-cli for `npm run db:*` scripts; umzug for programmatic dev-boot execution. Versioned files under `migrations/`. See §7.3 |
 | DB | **PostgreSQL** | Need ENUMs, partial unique indexes, and `LEAST/GREATEST` functional indexes — all Postgres-specific |
-| Auth | **JWT (HS256) via `jsonwebtoken`** | Stateless, 7-day expiry, no session table |
+| Auth | **HttpOnly cookie auth** (Tier 6.8): 15-min access JWT (HS256) + 30-day rotating refresh token, both via `res.cookie()`. Refresh tokens are SHA-256 hashed in `refresh_tokens` table. Bearer-header auth was removed in the same tier — there is **no token in the body** of login/register/refresh responses. |
+| 2FA | **TOTP** (Tier 6.9) via `speakeasy` + `qrcode`. Opt-in per user. 10 single-use recovery codes (bcrypt-hashed, rounds 8). 5-min `sc_challenge` cookie issued between password-OK and code-OK. |
 | Password hashing | **bcryptjs** (cost 10) | Pure-JS, no native build step needed on Windows |
+| CSRF | **Double-submit cookie** (Tier 6.7) via [middleware/csrf.js](middleware/csrf.js). `sc_csrf` cookie (readable) must match `X-CSRF-Token` header on POST/PUT/PATCH/DELETE; constant-time compare. Exempt list for unauthenticated mutation endpoints (login, register, password-reset, etc.). See §5.3 + §10.x. |
+| Security headers | **helmet** (Tier 6.2) — CSP tuned for Vite/Tailwind (inline styles allowed; `data:` URIs for Avatars and fonts; Sentry endpoints in `connectSrc`; HMR `ws://localhost:5173` in dev only), HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. COEP/COOP/CORP disabled to avoid breaking third-party assets. |
+| CORS | **Env allowlist** (Tier 6.1) via `CORS_ORIGINS` (comma-separated). Server **throws on boot** when unset in production. Dev falls back to `origin: true` if unset. `credentials: true` always. |
+| Email | **Resend SaaS** behind a pluggable abstraction at [lib/email.js](lib/email.js) (Tier 6.3). When `RESEND_API_KEY` is unset, `send()` logs the rendered payload to stdout — dev users grab verify/reset links from the server log. `send()` **never throws** (failures only log). |
 | Validation | **zod** | Schema-first request validation; emits structured error JSON |
-| Rate limiting | **express-rate-limit** | In-memory, per-IP; only applied to `/api/login` and `/api/register` |
+| Rate limiting | **express-rate-limit** | Per-IP, in-memory. Limiters: `loginLimiter` (5/15min), `registerLimiter` (3/h), `clientErrorLimiter` (30/5min), `commentLimiter` (10/min), `friendRequestLimiter` (10/5min), `pickLimiter` (30/min), `forgotPasswordLimiter` (3/h). Account lockout (5 fails → 15-min lock) layered on top — see §8.x. |
 | Logging | **pino + pino-http** (Tier 5.4) | Structured JSON in prod, `pino-pretty` in dev. Every request gets `req.id` (UUID or inbound `X-Request-Id`) and a `req.log` child logger |
 | HTTP compression | **`compression`** (Tier 5.6) | Gzip middleware mounted before static + body parser; ~75% size reduction on the JS bundle |
 | Leaderboard cache | **In-memory Map** with 30 s TTL (Tier 5.2) | No Redis dependency; appropriate for the current single-process deployment. See §8.14 |
@@ -137,7 +152,13 @@ ScoreCast/
 │   ├── 20260513000004-friendship-pair-unique.js
 │   ├── 20260513000005-user-displayname-bio.js
 │   ├── 20260513000006-comment-edited-at.js
-│   └── 20260513000007-comment-reactions-table.js
+│   ├── 20260513000007-comment-reactions-table.js
+│   ├── 20260513000008-user-login-attempts.js       # Tier 6.6: loginAttempts + lockedUntil columns
+│   ├── 20260513000009-user-email-columns.js        # Tier 6.5: email + emailVerifiedAt (unique LOWER(email) index)
+│   ├── 20260513000010-email-verification-tokens.js # Tier 6.5: token table (SHA-256 hash, 24h expiry)
+│   ├── 20260513000011-password-reset-tokens.js     # Tier 6.4: token table (SHA-256 hash, 15min expiry)
+│   ├── 20260513000012-refresh-tokens.js            # Tier 6.8: token table (SHA-256 hash, 30d expiry, revokedAt)
+│   └── 20260513000013-user-totp.js                 # Tier 6.9: totpSecret + totpEnabledAt + totpRecoveryCodes JSONB
 │
 ├── seeders/                             # Tier 5.1: idempotent seeders
 │   └── 20260513000001-seed-password-backfill.js   # re-hashes any plaintext seed password matching data.json
@@ -146,14 +167,16 @@ ScoreCast/
 │   ├── logger.js                        # Tier 5.4: pino instance (pretty in dev, JSON in prod, LOG_LEVEL env)
 │   ├── leaderboardCache.js              # Tier 5.2: getOrBuild/invalidate/stats; 30s TTL in-memory Map
 │   ├── instrument.js                    # Tier 5.4b: Sentry.init() — MUST be the very first require() in server.js
-│   └── sentry.js                        # Tier 5.4b: captureException + setupExpressErrorHandler wrappers (no-ops if SENTRY_DSN unset)
+│   ├── sentry.js                        # Tier 5.4b: captureException + setupExpressErrorHandler wrappers (no-ops if SENTRY_DSN unset)
+│   └── email.js                         # Tier 6.3: send({to, subject, html, text}) — Resend transport when RESEND_API_KEY set, log-only otherwise. NEVER throws.
 │
 ├── middleware/
-│   └── requestId.js                     # Tier 5.4: assigns req.id + req.log child; echoes X-Request-Id header
+│   ├── requestId.js                     # Tier 5.4: assigns req.id + req.log child; echoes X-Request-Id header
+│   └── csrf.js                          # Tier 6.7: double-submit (sc_csrf cookie + X-CSRF-Token header). EXEMPT_PATHS for unauth mutations. timingSafeEqual compare.
 │
 ├── models/                              # Sequelize models — one file per table
 │   ├── index.js                         # Sequelize init + associations + initDatabase + umzug shim (runMigrations) + seedDatabase
-│   ├── User.js                          # bcrypt beforeCreate/beforeUpdate hooks; displayName + bio
+│   ├── User.js                          # bcrypt beforeCreate/beforeUpdate hooks; displayName, bio, email, emailVerifiedAt, loginAttempts, lockedUntil, totpSecret, totpEnabledAt, totpRecoveryCodes
 │   ├── Game.js
 │   ├── Group.js                         # visibility ENUM('private'|'public')
 │   ├── GroupMember.js                   # composite PK (groupId, userId)
@@ -163,7 +186,10 @@ ScoreCast/
 │   ├── Friendship.js                    # pending|accepted; unique pair via functional index
 │   ├── Comment.js                       # indexed by gameId; editedAt (Tier 8)
 │   ├── CommentReaction.js               # unique (commentId, userId, emoji); indexed by commentId (Tier 8)
-│   └── Notification.js                  # indexed by (userId, read, createdAt)
+│   ├── Notification.js                  # indexed by (userId, read, createdAt)
+│   ├── EmailVerificationToken.js        # Tier 6.5: userId FK ON DELETE CASCADE, tokenHash unique, expiresAt, consumedAt
+│   ├── PasswordResetToken.js            # Tier 6.4: same shape as EmailVerificationToken
+│   └── RefreshToken.js                  # Tier 6.8: userId FK ON DELETE CASCADE, tokenHash unique, expiresAt, revokedAt, userAgent
 │
 ├── badges/
 │   └── catalog.js                       # Source of truth for badge slugs/names/emojis (server + frontend)
@@ -178,7 +204,8 @@ ScoreCast/
 │   ├── index.css                        # @tailwind base/components/utilities
 │   ├── lib/
 │   │   ├── clientErrorReporter.js       # Tier 5.4b: window error + unhandledrejection listeners; throttled POST to /api/client-errors; dispatches scorecast:client-error DOM event
-│   │   └── sentry.js                    # Tier 5.4b: dynamic import('@sentry/react') gated on VITE_SENTRY_DSN (Vite tree-shakes when unset)
+│   │   ├── sentry.js                    # Tier 5.4b: dynamic import('@sentry/react') gated on VITE_SENTRY_DSN (Vite tree-shakes when unset)
+│   │   └── cookies.js                   # Tier 6.7: getCookie(name) — reads document.cookie for X-CSRF-Token header injection
 │   ├── utils/
 │   │   ├── scoring.js                   # MIRROR of server's scorePick; see §8.1
 │   │   └── time.js                      # formatCountdown, useCountdown hook, timeAgo
@@ -189,8 +216,12 @@ ScoreCast/
 │       ├── GroupLeaderboardCard.jsx     # Sort select + pagination + viewer-row anchor
 │       ├── LeaderboardCard.jsx          # Exports LeaderboardRow (Avatar + clickable for profile drawer)
 │       ├── InviteRow.jsx
-│       ├── LoginForm.jsx
-│       ├── RegisterForm.jsx
+│       ├── LoginForm.jsx                # Tier 6: 'Forgot password?' link + handoff to 2FA challenge on login response
+│       ├── RegisterForm.jsx              # Tier 6.5: email field required
+│       ├── ForgotPasswordForm.jsx        # Tier 6.4: email input → POST /api/auth/forgot-password → static success message (no enumeration)
+│       ├── ResetPasswordForm.jsx         # Tier 6.4: new-password input + token from URL → POST /api/auth/reset-password
+│       ├── TwoFactorSetup.jsx            # Tier 6.9: Profile section; idle → setup (QR + recovery codes + .txt download) → confirm; also handles disable flow
+│       ├── TwoFactorChallenge.jsx        # Tier 6.9: login challenge UI; TOTP code OR recovery code toggle
 │       ├── PicksHistory.jsx
 │       ├── EmptyState.jsx
 │       ├── Skeleton.jsx                 # SkeletonGameCard + SkeletonLeaderboardRow
@@ -236,13 +267,17 @@ For every request:
                                                          //           (method, url, statusCode, responseTime, reqId).
 3. compression()                                         // Tier 5.6: gzip when Accept-Encoding includes gzip
                                                          //           and the body exceeds the default 1 KB threshold.
-4. cors({ origin: true, credentials: true })             // permissive in dev; tighten for prod (Tier 6.1)
-5. bodyParser.json()                                     // parses application/json
-6. cookieParser()                                        // populates req.cookies
-7. express.static(dist/)                                 // serves built assets if path matches
-8. (per-route) rate-limit | authMiddleware | requireAdmin | validate(schema)
-9. Route handler                                         // typically async; uses Sequelize models + req.log
-10. Response: res.json({...}) or res.status(N).json({error: '...'})
+4. helmet({ contentSecurityPolicy, frameguard:DENY, ...}) // Tier 6.2: CSP + HSTS + X-Frame-Options + nosniff.
+5. cors({ origin: CORS_ORIGINS||true, credentials:true }) // Tier 6.1: env allowlist; throws on boot in prod when empty.
+6. bodyParser.json()                                     // parses application/json
+7. cookieParser()                                        // populates req.cookies
+8. csrfMiddleware                                        // Tier 6.7: sets sc_csrf cookie if missing; enforces
+                                                         //           X-CSRF-Token == sc_csrf on POST/PUT/PATCH/DELETE
+                                                         //           unless path is in EXEMPT_PATHS.
+9. express.static(dist/)                                 // serves built assets if path matches
+10. (per-route) rate-limit | authMiddleware | requireAdmin | validate(schema)
+11. Route handler                                        // typically async; uses Sequelize models + req.log
+12. Response: res.json({...}) or res.status(N).json({error: '...'})
                                                          // pino-http logs the response with the same reqId
                                                          // and a level mapped from status (>=500 error, >=400 warn).
 ```
@@ -259,17 +294,29 @@ Defined in [middleware/requestId.js](middleware/requestId.js). Runs **before eve
 
 Then `pino-http` runs to emit a single structured access log per request (`req: {id, method, url}`, `res: {statusCode}`, `responseTime`). Its `customLogLevel` maps `>=500` → `error`, `>=400` → `warn`, else `info`.
 
-#### Authentication — `authMiddleware`
-Defined inline in [server.js](server.js). Tries both auth strategies:
-- `req.cookies.token` (if present)
-- `Authorization: Bearer <jwt>` header (fallback)
+#### Authentication — `authMiddleware` (Tier 6.8: cookie-only)
+Defined inline in [server.js](server.js). Reads `req.cookies.sc_access` only — **Bearer-header auth was removed in Tier 6.8**.
 
 Verifies the JWT with `jwt.verify(token, JWT_SECRET)`. On success, attaches the decoded payload `{id, username, role}` to `req.user`. On failure, returns `401 {error: 'Invalid token'}` or `401 {error: 'Authentication required'}`.
 
-**Token issuance** happens in `createToken(user)`:
+**Cookies issued by `setAuthCookies(res, user, {userAgent})`** (called by login, register, refresh, and 2FA verify):
+
+| Cookie | Type | Path | HttpOnly | TTL | Contents |
+| --- | --- | --- | --- | --- | --- |
+| `sc_access` | JWT (HS256) | `/` | yes | 15 min | `{id, username, role}` |
+| `sc_refresh` | opaque random (32 bytes hex) | `/api/auth` | yes | 30 days | raw value; SHA-256 hash stored in `refresh_tokens` |
+| `sc_csrf` | random 32-byte hex | `/` | **no** (frontend must read it) | 30 days | rotates only on explicit `clearCookie` |
+
+`Secure: true` is set on all three in production (`NODE_ENV === 'production'`); `false` in dev so HTTP works.
+
+**Access JWT** is created by `createAccessToken(user)`:
 ```js
-jwt.sign({ id, username, role }, JWT_SECRET, { expiresIn: '7d' })
+jwt.sign({ id, username, role }, JWT_SECRET, { expiresIn: 900 })   // 15 minutes
 ```
+
+**Refresh token rotation**: every `POST /api/auth/refresh` revokes the inbound row (`refresh_tokens.revokedAt = NOW()`) and issues a fresh pair. Multiple concurrent sessions (different devices) each have their own active chain; logging in on a new device does **not** revoke other sessions.
+
+**Force-logout-everywhere** uses `revokeAllUserRefreshTokens(userId)`, currently called only from password reset.
 
 `JWT_SECRET` resolution:
 - Read from `process.env.JWT_SECRET`.
@@ -287,24 +334,87 @@ Factory in [validation/middleware.js](validation/middleware.js). Runs `schema.sa
 ```
 On success it **replaces `req.body` with the parsed (sanitized, defaulted) value** so handlers can trust it. All input mutations from zod (`.trim()`, `.toLowerCase()`, coercions) take effect here.
 
-Schemas live in [validation/schemas.js](validation/schemas.js): `registerSchema`, `loginSchema`, `createGroupSchema` (with optional `visibility`), `inviteSchema`, `pickSchema`, `resultSchema`, `friendRequestSchema`, `visibilitySchema`, `commentSchema`, `createGameSchema`, `updateGameSchema`, `roleSchema`, `transferOwnerSchema`, `editProfileSchema`, `reactionSchema` (emoji ∈ `ALLOWED_EMOJIS`), `bulkGameSchema`, `bulkUserSchema`.
+Schemas live in [validation/schemas.js](validation/schemas.js): `registerSchema` (now includes `email`), `loginSchema`, `forgotPasswordSchema`, `resetPasswordSchema`, `setEmailSchema`, `totpConfirmSchema`, `totpVerifySchema`, `createGroupSchema` (with optional `visibility`), `inviteSchema`, `pickSchema`, `resultSchema`, `friendRequestSchema`, `visibilitySchema`, `commentSchema`, `createGameSchema`, `updateGameSchema`, `roleSchema`, `transferOwnerSchema`, `editProfileSchema`, `reactionSchema` (emoji ∈ `ALLOWED_EMOJIS`), `bulkGameSchema`, `bulkUserSchema`, `clientErrorSchema`.
 
-#### Rate limiting
-Three limiters from `express-rate-limit`, all configured `standardHeaders: true, legacyHeaders: false`:
-- `loginLimiter`: 5 requests / 15 min per IP. Applied to `POST /api/login`.
-- `registerLimiter`: 3 requests / hour per IP. Applied to `POST /api/register`.
-- `clientErrorLimiter` (Tier 5.4b): 30 requests / 5 min per IP. Applied to `POST /api/client-errors`. Tuned so a runaway client-side throw can't flood the server log.
+#### Rate limiting (Tier 6.10 expanded the original three)
+Seven limiters from `express-rate-limit`, all configured `standardHeaders: true, legacyHeaders: false`:
+- `loginLimiter`: 5 / 15 min per IP. `POST /api/login`.
+- `registerLimiter`: 3 / hour per IP. `POST /api/register`.
+- `clientErrorLimiter` (Tier 5.4b): 30 / 5 min per IP. `POST /api/client-errors`. Tuned so a runaway client-side throw can't flood the server log.
+- `commentLimiter` (Tier 6.10): 10 / min per IP. `POST /api/games/:gameId/comments`.
+- `friendRequestLimiter` (Tier 6.10): 10 / 5 min per IP. `POST /api/friends/request`.
+- `pickLimiter` (Tier 6.10): 30 / min per IP. `POST /api/picks`, `DELETE /api/picks/:id`.
+- `forgotPasswordLimiter` (Tier 6.10): 3 / hour per IP. `POST /api/auth/forgot-password`.
 
 In-memory store, so a server restart wipes the counters. Acceptable for a single-instance deployment; would need Redis-backed limits for horizontal scaling.
 
-#### CORS
-`cors({ origin: true, credentials: true })`. `origin: true` reflects the request's `Origin` header — i.e. allows any origin, which is too permissive for production. Documented in [CLAUDE.md](CLAUDE.md) and tracked as a known issue.
+**Account lockout (Tier 6.6)** is layered on top of `loginLimiter`. After 5 failed password attempts against a single user, `users.lockedUntil` is set 15 min in the future. Subsequent attempts return the same generic 401 regardless of password correctness. Counter clears on successful login or password reset.
+
+#### CORS (Tier 6.1)
+Allowlist driven by `CORS_ORIGINS` (comma-separated). Server **throws on boot** when `NODE_ENV=production` and the env is unset:
+
+```js
+const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+if (process.env.NODE_ENV === 'production' && corsOrigins.length === 0) {
+  throw new Error('CORS_ORIGINS env var is required in production');
+}
+app.use(cors({ origin: corsOrigins.length ? corsOrigins : true, credentials: true }));
+```
+
+Dev with `CORS_ORIGINS` unset falls back to `origin: true` so the Vite dev server (`:5173`) and direct curl both work without setup. `credentials: true` is always on — required so the browser sends `sc_access`/`sc_refresh` cookies on cross-origin XHRs.
+
+#### Security headers — `helmet` (Tier 6.2)
+Wired before `cors` in the middleware chain. CSP directives tuned for the current asset surface:
+
+```
+defaultSrc: 'self'
+scriptSrc:  'self'
+styleSrc:   'self', 'unsafe-inline'     // Tailwind injects inline <style>
+imgSrc:     'self', data:               // Avatar.jsx generates data: SVG URIs
+connectSrc: 'self', https://*.sentry.io, https://*.ingest.sentry.io
+            (+ 'ws://localhost:5173', 'http://localhost:5173' in dev for Vite HMR)
+fontSrc:    'self', data:
+frameAncestors: 'none'
+objectSrc:  'none'
+```
+
+`frameguard: 'deny'` overrides helmet's default `SAMEORIGIN` to `X-Frame-Options: DENY`. `crossOriginEmbedderPolicy` / `crossOriginOpenerPolicy` / `crossOriginResourcePolicy` are disabled because the strict defaults break embedded third-party assets (Sentry, future CDN images).
+
+#### CSRF — `csrfMiddleware` (Tier 6.7)
+Defined in [middleware/csrf.js](middleware/csrf.js). Implements **double-submit cookie**:
+
+1. On every request, if `sc_csrf` cookie is absent, generate 32 random bytes (hex), set as a non-HttpOnly cookie (`Secure` in prod, `SameSite=Lax`, `Path=/`).
+2. On state-changing methods (POST/PUT/PATCH/DELETE), require the cookie value to match the `X-CSRF-Token` header via `crypto.timingSafeEqual`. Mismatch → 403 `{error: 'CSRF token missing or invalid'}`.
+3. Exempt routes (`EXEMPT_PATHS`):
+   - `/api/login`, `/api/register` — pre-auth, set cookie on response.
+   - `/api/auth/refresh` — same-site cookie path scoping is sufficient; no body.
+   - `/api/auth/verify-email`, `/api/auth/forgot-password`, `/api/auth/reset-password` — pre-auth flows reached from an email link.
+   - `/api/client-errors` — anonymous, append-only.
+
+The CSRF cookie is intentionally readable by JavaScript (no `HttpOnly`) — the double-submit pattern relies on the same-origin policy preventing attackers from reading it cross-origin. `SameSite=Lax` already blocks the easy cross-origin POST attack vector; CSRF is the belt-and-braces.
+
+Frontend reads the cookie via [src/lib/cookies.js](src/lib/cookies.js) `getCookie('sc_csrf')` and sends it as `X-CSRF-Token` on every state-changing `request()` call.
 
 ### 5.4 Route Catalogue
 
 Routes are registered in [server.js](server.js) in roughly this order:
-1. Auth: `POST /api/register`, `POST /api/login`, **`POST /api/client-errors`** (Tier 5.4b — soft-auth: logs `userId` if token is valid, anonymous otherwise; structured-logs `clientError` payload at `error` or `warn` level per `level` field)
-2. Identity: `GET /api/me`, `PUT /api/me` (displayName + bio edit)
+1. **Auth (Tier 6 expanded)**:
+   - `POST /api/register` — accepts `{username, password, email}`. Body response: `{user}` only (auth cookies set via `setAuthCookies`). Fires `sendVerificationEmail` fire-and-forget.
+   - `POST /api/login` — accepts `{username, password}`. On lockout, on bad pw, and on unknown user, returns identical 401 `{error: 'Invalid credentials'}`. Lockout state mutates `users.loginAttempts` / `lockedUntil` (Tier 6.6). If `user.totpEnabledAt` is set, issues `sc_challenge` cookie and returns `{challenge: true}` instead of auth cookies (Tier 6.9).
+   - **`POST /api/auth/verify-email`** (Tier 6.5) — body `{token}`. Finds the matching `email_verification_tokens` row by SHA-256 hash; sets `users.emailVerifiedAt`; marks the token consumed.
+   - **`POST /api/auth/forgot-password`** (Tier 6.4, rate-limited) — body `{email}`. **Always 204** regardless of whether the user exists or is verified; only sends email if both are true. Prevents user enumeration.
+   - **`POST /api/auth/reset-password`** (Tier 6.4) — body `{token, password}`. Updates password (hook re-hashes), clears lockout state, **revokes all refresh tokens** for the user.
+   - **`POST /api/auth/refresh`** (Tier 6.8) — reads `sc_refresh` cookie; revokes the row; issues a fresh pair. Returns 204 on success, 401 with cookies cleared on failure.
+   - **`POST /api/auth/logout`** (Tier 6.8) — reads `sc_refresh`, marks the row revoked, clears both auth cookies. 204.
+   - **`POST /api/auth/2fa/verify`** (Tier 6.9) — reads `sc_challenge` cookie (5-min JWT) + body `{code}` or `{recoveryCode}`. On success: clears `sc_challenge`, calls `setAuthCookies`, returns `{user}`. Used recovery codes are spliced out of `users.totpRecoveryCodes`.
+   - **`POST /api/client-errors`** (Tier 5.4b) — soft-auth: logs `userId` if cookie token is valid, anonymous otherwise; structured-logs `clientError` payload at `error` or `warn` level per `level` field.
+2. **Identity / account management**:
+   - `GET /api/me` — returns `{id, username, role, displayName, bio, email, emailVerifiedAt, twoFactorEnabled, joinedGroups, pendingInvites}`. Drives auth-state inference on the client.
+   - `PUT /api/me` — displayName + bio edit.
+   - **`PATCH /api/me/email`** (Tier 6.5) — body `{email}`. Updates `users.email`, clears `emailVerifiedAt`, fires fresh `sendVerificationEmail`. Used for existing-user remediation banner (`email=null` legacy rows).
+   - **`POST /api/me/2fa/setup`** (Tier 6.9) — generates `speakeasy.generateSecret()`, returns `{qrCodeDataUrl, secret, recoveryCodes}`. Stores secret + bcrypt-hashed codes; `totpEnabledAt` stays null.
+   - **`POST /api/me/2fa/confirm`** (Tier 6.9) — body `{code}`. Verifies against the pending secret; sets `totpEnabledAt`.
+   - **`POST /api/me/2fa/disable`** (Tier 6.9) — body `{code}` or `{recoveryCode}`. Nulls all three `totp*` columns.
 3. Games: `GET /api/games`
 4. Groups (in order): `GET /api/groups`, **`GET /api/groups/discover`** (must come before `/:groupId`), `GET /api/groups/:groupId`, `POST /api/groups`, invite endpoints, `POST /api/groups/:groupId/join`, `POST /api/groups/:groupId/leave`, `POST /api/groups/:groupId/transfer`, `DELETE /api/groups/:groupId`, `POST /api/groups/:groupId/visibility`
 5. Picks: `POST /api/picks`, `GET /api/picks`, **`DELETE /api/picks/:id`** (Tier 8 — undo pick)
@@ -338,6 +448,12 @@ These are pure-Node helpers, not endpoints. They live inside `server.js` and are
 | `cascadeDeleteUser(target, {transaction})` | 9-step user cascade (groups owned, picks, comments, friendships, memberships, invites, then user). Tier 5.3: accepts `{transaction}` and forwards to every internal `destroy()`. | `DELETE /api/admin/users/:id`, `POST /api/admin/users/bulk` |
 | `cascadeDeleteGame(game, {transaction})` | Pick + comment cleanup, then game. Tier 5.3: tx-aware. | `DELETE /api/admin/games/:id`, `POST /api/admin/games/bulk` |
 | `cascadeDeleteGroup(group, {transaction})` | (Tier 5.3) Members + invites + group. Extracted from the inline body of `DELETE /api/groups/:groupId`. | `DELETE /api/groups/:groupId` |
+| `createAccessToken(user)` (Tier 6.8) | 15-min HS256 JWT with `{id, username, role}`. Replaces the 7-day `createToken` from before Tier 6. | `setAuthCookies` only |
+| `setAuthCookies(res, user, {userAgent})` (Tier 6.8) | Signs access JWT, generates random refresh token, inserts a `RefreshToken` row, sets both cookies on `res`. Async (writes DB). | `POST /api/login`, `/api/register`, `/api/auth/refresh`, `/api/auth/2fa/verify` |
+| `clearAuthCookies(res)` (Tier 6.8) | `res.clearCookie` for `sc_access` + `sc_refresh` at their correct paths. | `POST /api/auth/logout`, refresh-failure paths |
+| `revokeAllUserRefreshTokens(userId)` (Tier 6.8) | Sets `revokedAt = NOW()` on every non-revoked row for the user. | `POST /api/auth/reset-password` |
+| `generateRawToken()` / `hashToken(raw)` (Tier 6) | 32 random hex bytes; SHA-256 hex digest. Used for high-entropy single-use tokens (verify-email, password-reset, refresh). | All three token issuers + verifiers |
+| `sendVerificationEmail(user)` (Tier 6.5) | Generates a token row + dispatches verify email via `lib/email`. Fire-and-forget at the caller. | `POST /api/register`, `PATCH /api/me/email` |
 
 `notify` and `evaluateBadges` are **fire-and-forget with `.catch(() => {})`** — a failure inside them never breaks the user-facing response. They also fire **outside** every cascade transaction so a rollback never produces ghost notifications. The trade-off is silent failures; the structured `req.log.warn`/`logger.warn` calls inside `notify()` and `evaluateBadges()` (Tier 5.4) at least leave a trail.
 
@@ -375,13 +491,17 @@ src/App.jsx + components/  →  Vite (esbuild + Rollup)  →  dist/index.html, d
 `src/App.jsx` is the **single source of truth** for all client state. There is no Context, no Redux, no Zustand. State is held in roughly two dozen `useState` hooks at the top of the component:
 
 ```
-token, user, games, groups, picks, pendingInvites,
+user, bootDone,                                // Tier 6.8: no more `token` — cookies are the source of truth
+games, groups, picks, pendingInvites,
 leaderboard, selectedGroupId, view, status, loading,
-authData, confirmingLogout, showCompleted,
+authData, authView, forgotSent,                // Tier 6.4/6.5/6.9: 'auth'|'forgot'|'reset'|'twofa'
+confirmingLogout, showCompleted,
 profileUsername, profile, profileLoading, profileBusy,
 friends, discoverGroups, ownProfile,
 groupOrderBy, groupOffset                      // Tier 8.8: leaderboard sort + pagination
 ```
+
+**No localStorage** (Tier 6.8). Auth state is inferred from `user` (which is set by a successful `/api/me` boot fetch); the cookies that actually authenticate the user are HttpOnly and invisible to JS. `bootDone` tracks whether the initial `/api/me` round-trip completed so the UI shows the skeleton view until then (instead of briefly flashing the login form to an authenticated user).
 
 Derived state uses `useMemo` (`pickMap`, `upcomingGames/liveGames/completedGames`, `tabs`).
 
@@ -391,35 +511,66 @@ Derived state uses `useMemo` (`pickMap`, `upcomingGames/liveGames/completedGames
 
 ### 6.3 The `request()` Helper
 
-The heart of frontend-backend communication. Single function, ~20 lines:
+The heart of frontend-backend communication. Rewritten in Tier 6.8 to handle cookie auth, CSRF, and transparent token refresh:
 
 ```js
 const request = useCallback(async (path, options = {}) => {
-  const headers = { 'Content-Type': 'application/json' };
-  if (tokenRef.current) headers.Authorization = `Bearer ${tokenRef.current}`;
-  const response = await fetch(path, {
-    credentials: 'include',
-    ...options,
-    headers: { ...(options.headers || {}), ...headers },
-  });
-  if (response.status === 401 && tokenRef.current) {
-    handleSessionExpired();
-    throw new Error('Session expired');
+  const method = (options.method || 'GET').toUpperCase();
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (method !== 'GET' && method !== 'HEAD') {
+    const csrf = getCookie('sc_csrf');
+    if (csrf) headers['X-CSRF-Token'] = csrf;
   }
-  if (response.status === 204) return null;
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error((data && data.error) || 'Request failed');
-  return data;
+
+  const doFetch = () => fetch(path, { credentials: 'include', ...options, headers });
+
+  let response = await doFetch();
+  let reqId = response.headers.get('X-Request-Id');
+  if (reqId) setLastRequestId(reqId);
+
+  // Refresh-then-retry: on 401, try POST /api/auth/refresh once and retry.
+  // /api/auth/* are exempt to prevent recursion.
+  if (response.status === 401 && !path.startsWith('/api/auth/')) {
+    const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (refreshResp.status === 204) {
+      response = await doFetch();
+      const newReqId = response.headers.get('X-Request-Id');
+      if (newReqId) { setLastRequestId(newReqId); reqId = newReqId; }
+    }
+  }
+
+  if (response.status === 401) {
+    if (userRef.current) { handleSessionExpired(); throw new Error('Session expired'); }
+    const err = new Error('Authentication required'); err.reqId = reqId; err.status = 401; throw err;
+  }
+  // ... 204 / non-ok / JSON parsing as before
 }, []);
 ```
 
 Important properties:
-- **Always sends JSON content-type.** Callers responsible for `JSON.stringify`-ing the body.
-- **Uses a `tokenRef`** (not `token` directly) so the closure stays stable across renders while still seeing the latest token value.
-- **Auto-handles 401**: when an authenticated request returns 401, it clears the token via `handleSessionExpired` and throws a special `'Session expired'` error. Callers conventionally check `if (error.message !== 'Session expired')` before surfacing the error to the user, to avoid double-toasting.
+- **Always sends `credentials: 'include'`** so the browser attaches `sc_access`/`sc_refresh`/`sc_csrf` cookies. No `Authorization` header is ever set.
+- **CSRF auto-injection**: state-changing methods read `sc_csrf` via [src/lib/cookies.js](src/lib/cookies.js) and send it as `X-CSRF-Token`. The cookie is set by the server's CSRF middleware on the first request of any session — so by the time the SPA needs to send a mutation, the cookie is already present.
+- **Refresh-then-retry**: a 401 on a non-`/api/auth/*` path triggers one `POST /api/auth/refresh`. On success (204 + new cookies), the original request is retried. On failure, the original 401 is surfaced. This is what lets the user keep using the app for 30 days without re-logging-in, even though access tokens expire every 15 minutes.
+- **No retry loop**: `/api/auth/refresh` itself is exempted from refresh-retry; if refresh returns 401, we drop straight to the session-expired path.
+- **Auto-handles 401**: when the (possibly-retried) response is still 401 **and** there is a `user` in state (`userRef.current`), it clears the user via `handleSessionExpired` and throws `'Session expired'`. Without a user (first boot, no cookies), it throws `'Authentication required'` instead — used by the boot flow to silently fall to the login screen.
 - **Tolerates empty responses** (`204` and zero-length bodies).
 - **Tier 5.4b**: every response's `X-Request-Id` header is captured and pushed into `setLastRequestId()` ([src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js)) so any subsequent client-error report carries the most recent server reqId. Thrown error objects also get a `.reqId` property attached, so handler `.catch()` sites can include it in their own error reports.
+
+**Boot flow** (replaces the old `useEffect([token])`):
+
+```js
+useEffect(() => {
+  loadDashboard()
+    .catch((error) => {
+      // 401 or "Authentication required" → no session, silently show login
+      if (error.status === 401 || error.message === 'Session expired' || error.message === 'Authentication required') return;
+      showStatus(error.message);
+    })
+    .finally(() => setBootDone(true));
+}, []);
+```
+
+The first paint is always the skeleton view; once `bootDone` flips, the UI resolves to dashboard (if `user` got set) or auth panel (if not).
 
 ### 6.4 Tab Routing
 
@@ -438,7 +589,11 @@ There is **no global polling for game state** today (deferred Tier 4 feature). L
 ```
 <ErrorBoundary>                            // Tier 5.4b — render-error fallback wrapping the whole tree
 └── <App>
-    ├── (auth panel) <LoginForm> / <RegisterForm>
+    ├── (auth panel — switches on `authView` state, Tier 6)
+    │     authView === 'auth':    <LoginForm> / <RegisterForm>     // login has 'Forgot password?' button
+    │     authView === 'forgot':  <ForgotPasswordForm>             // 6.4
+    │     authView === 'reset':   <ResetPasswordForm>              // 6.4 (entered via ?resetToken=)
+    │     authView === 'twofa':   <TwoFactorChallenge>             // 6.9 (entered when login returns {challenge: true})
     └── (dashboard)
     ├── header card
     ├── tabs row
@@ -463,7 +618,8 @@ There is **no global polling for game state** today (deferred Tier 4 feature). L
     │     <LeaderboardCard>  <GroupLeaderboardCard>  (sort + pagination)
     │
     ├── view === 'profile' (self):
-    │     <ProfileView editable onSaveProfile> (Avatar header, displayName/bio edit form)
+    │     <ProfileView editable onSaveProfile twoFactorEnabled on2faSetup on2faConfirm on2faDisable>
+    │       Avatar header, displayName/bio edit form, <TwoFactorSetup> section (Tier 6.9)
     │
     └── view === 'admin' (admin only): <AdminPanel>
                                          ├── <GameManager>  (checkbox column + bulk action bar)
@@ -604,6 +760,12 @@ seeders/                     → idempotent seeders (e.g. password backfill)
 | `20260513000005-user-displayname-bio.js` | `users.displayName VARCHAR(60)` + `users.bio TEXT` |
 | `20260513000006-comment-edited-at.js` | `comments.editedAt TIMESTAMPTZ` |
 | `20260513000007-comment-reactions-table.js` | `CREATE TABLE comment_reactions IF NOT EXISTS` (existing DBs already had it from `sync({alter:false})`) |
+| `20260513000008-user-login-attempts.js` | Tier 6.6: `users.loginAttempts` + `users.lockedUntil` |
+| `20260513000009-user-email-columns.js` | Tier 6.5: `users.email` + `users.emailVerifiedAt` + functional unique index `users_email_lower_unique` on `LOWER(email)` |
+| `20260513000010-email-verification-tokens.js` | Tier 6.5: `CREATE TABLE email_verification_tokens` |
+| `20260513000011-password-reset-tokens.js` | Tier 6.4: `CREATE TABLE password_reset_tokens` |
+| `20260513000012-refresh-tokens.js` | Tier 6.8: `CREATE TABLE refresh_tokens` + partial active-rows index |
+| `20260513000013-user-totp.js` | Tier 6.9: `users.totpSecret`, `users.totpEnabledAt`, `users.totpRecoveryCodes` JSONB |
 
 **Seeder set**:
 | File | Effect |
@@ -631,6 +793,13 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 | `role` | ENUM('user','admin') NOT NULL DEFAULT 'user' | Added via migration |
 | `displayName` | VARCHAR(60) NULLABLE | Tier 8. Used in place of username everywhere when set |
 | `bio` | TEXT NULLABLE | Tier 8. Length-capped at 280 by zod, no DB-level constraint |
+| `email` | VARCHAR(254) NULLABLE | Tier 6.5. Private (not exposed except on `GET /api/me`). Functional unique index `users_email_lower_unique` on `LOWER(email) WHERE email IS NOT NULL` for case-insensitive uniqueness that tolerates legacy null rows |
+| `emailVerifiedAt` | TIMESTAMPTZ NULLABLE | Tier 6.5. Required to be non-null before `/api/auth/forgot-password` will dispatch a reset link |
+| `loginAttempts` | INTEGER NOT NULL DEFAULT 0 | Tier 6.6. Incremented per bad password; cleared on success or password reset |
+| `lockedUntil` | TIMESTAMPTZ NULLABLE | Tier 6.6. When `> NOW()`, login returns generic 401 |
+| `totpSecret` | TEXT NULLABLE | Tier 6.9. base32-encoded TOTP secret. Populated by `/api/me/2fa/setup` but enabled only after `/api/me/2fa/confirm` |
+| `totpEnabledAt` | TIMESTAMPTZ NULLABLE | Tier 6.9. `IS NOT NULL` ⇔ 2FA is required for this user's logins |
+| `totpRecoveryCodes` | JSONB NULLABLE | Tier 6.9. Array of bcrypt-hashed (rounds 8) single-use recovery codes. Used codes are spliced out |
 | `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
 
 #### `games`
@@ -731,6 +900,34 @@ Composite primary key `(groupId, userId)`. No additional columns.
 | `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
 
 **Index**: `notifications_user_read_idx (userId, read, createdAt)`.
+
+#### `email_verification_tokens` (Tier 6.5)
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `userId` | UUID NOT NULL → users(id) ON DELETE CASCADE | |
+| `tokenHash` | VARCHAR(64) UNIQUE NOT NULL | SHA-256 hex of the raw token. Raw value only exists in the email link |
+| `expiresAt` | TIMESTAMPTZ NOT NULL | 24h after issue |
+| `consumedAt` | TIMESTAMPTZ NULLABLE | Set on first successful verify. Single-use semantics |
+| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
+
+**Index**: `email_verification_tokens_user_idx (userId)`.
+
+#### `password_reset_tokens` (Tier 6.4)
+Same shape as `email_verification_tokens` — `id`, `userId` FK cascade, `tokenHash` unique, `expiresAt` (15-min), `consumedAt`, `createdAt`. Indexed by `userId`.
+
+#### `refresh_tokens` (Tier 6.8)
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK | |
+| `userId` | UUID NOT NULL → users(id) ON DELETE CASCADE | |
+| `tokenHash` | VARCHAR(64) UNIQUE NOT NULL | SHA-256 hex of the raw refresh token (sent only via `sc_refresh` cookie) |
+| `expiresAt` | TIMESTAMPTZ NOT NULL | 30 days after issue |
+| `revokedAt` | TIMESTAMPTZ NULLABLE | Set by `/api/auth/refresh` rotation, `/api/auth/logout`, and `/api/auth/reset-password` (revokes all rows for the user) |
+| `userAgent` | TEXT NULLABLE | Truncated to 500 chars; informational only |
+| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
+
+**Indexes**: `refresh_tokens_user_idx (userId)`, partial `refresh_tokens_active_idx (userId) WHERE revokedAt IS NULL`.
 
 ### 7.5 Cascade Behavior Summary
 
@@ -1023,6 +1220,84 @@ cache.stats();                                         // { size, hits, misses, 
 - **No background refresh**: invalidation is purely mutation-driven; expired entries are rebuilt lazily on the next read.
 - **`viewerRow` is not cached** — it's per-caller, computed downstream of the cached array.
 
+### 8.15 Auth & Account Security (Tier 6)
+
+The full auth surface assembled in Tier 6. Each piece is independently optional but interlocks with the others.
+
+**Session lifecycle**:
+
+```
+┌─────────────────┐     correct pw + (if 2FA) code      ┌──────────────────┐
+│ unauthenticated │ ─────────────────────────────────▶  │   authenticated  │
+│  (no cookies)   │                                      │  (sc_access +    │
+│                 │ ◀── 401 → /api/auth/refresh ───────  │   sc_refresh)    │
+└─────────────────┘                                      └──────────────────┘
+        ▲                                                         │
+        │                                                         │
+        │            /api/auth/logout                              │
+        └──────────────────────────────────────────────────────────┘
+```
+
+- The access JWT lives 15 minutes. Once it expires, the next API call returns 401 and the frontend transparently calls `POST /api/auth/refresh` (which only sees `sc_refresh` because of path scoping) to get a new pair, then retries the original request. The user sees nothing.
+- The refresh token lives 30 days, rotates on every use, and is **revoked** on `/api/auth/logout` and on `/api/auth/reset-password` (the latter revokes **all** refresh rows for the user — a forced-logout-everywhere primitive that we can re-use later for "sign me out of all devices").
+- Login on a new device does NOT revoke other sessions; each device has its own active refresh row. Listing/revoking-by-device is not implemented today but the `userAgent` column on `refresh_tokens` is there to support it.
+
+**Login flow with and without 2FA**:
+
+```
+POST /api/login {username, password}
+        │
+        ▼
+  bcrypt.compare(password, user.password)
+        │
+   ┌────┴────┐
+   │ wrong   │── increment loginAttempts; if ≥5, set lockedUntil = NOW+15min ──▶ 401 (generic)
+   │ correct │
+   └────┬────┘
+        │
+        ▼
+   loginAttempts/lockedUntil cleared
+        │
+   ┌────┴────────────────┐
+   │ user.totpEnabledAt? │
+   │  ┌─yes─▶ sign sc_challenge JWT (5min), Path=/api/auth, HttpOnly         │
+   │  │                                                                       │
+   │  │     return { challenge: true } (NO auth cookies)                      │
+   │  │                                                                       │
+   │  │     frontend renders <TwoFactorChallenge>                             │
+   │  │     POST /api/auth/2fa/verify {code | recoveryCode}                   │
+   │  │                                                                       │
+   │  │     verify code (speakeasy.totp.verify, window=1) or bcrypt-compare   │
+   │  │     each recoveryCode hash; if recovery, splice it out of the array  │
+   │  │                                                                       │
+   │  │     clearCookie(sc_challenge); setAuthCookies(); return { user }     │
+   │  │                                                                       │
+   │  └─no──▶ setAuthCookies(); return { user }                              │
+   └─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Token storage patterns** — used consistently across verify-email, password-reset, and refresh:
+
+- 32 random bytes (hex) generated by `generateRawToken()` — that's the **raw value** sent to the user (in an email link or cookie).
+- `crypto.createHash('sha256').update(raw).digest('hex')` is the **stored value** in `tokenHash`. The column has a `UNIQUE` index for O(1) lookup.
+- We do **not** bcrypt these tokens: the entropy is already 256 bits (brute-force infeasible), and bcrypt-comparing every candidate row on every verify call would be a needless per-request cost.
+- Recovery codes are the exception — they're human-typable 10-character strings, much lower entropy, so they go through `bcrypt.hash(code, 8)` and are looped through on verify. There are only 10 per user, so the loop cost is bounded.
+
+**Email service** ([lib/email.js](lib/email.js)):
+
+- Single export: `send({ to, subject, html, text })`. Resolves to `{delivered: bool, ...}` — **never throws**.
+- When `process.env.RESEND_API_KEY` is set, the Resend SDK is loaded lazily and used as the transport. Failures log `email send failed` at error level but don't propagate.
+- When unset, `send()` instead emits a structured info-level log (`email (dev log mode — no transport configured)`) carrying the rendered `text` body. Local dev users copy the verify/reset link from server logs to test the flow without setting up an email account.
+- `EMAIL_FROM` defaults to `'ScoreCast <onboarding@resend.dev>'` (Resend's sandbox sender, deliverable only to your own signup email). For real-user delivery, point it at a domain you've verified in Resend.
+- `PUBLIC_APP_URL` is baked into outbound links (`${PUBLIC_APP_URL}/?verifyToken=…` etc.). Must be the URL users actually load in their browser — Vite dev server (`http://localhost:5173`) in dev, your deployed URL in prod.
+
+**Per-route rate limits + lockout** combine to bound brute force:
+
+- 5/15min IP rate limit on `/api/login` is the first wall.
+- After 5 wrong-password attempts against a single user, that user's account is locked for 15 min — a per-username brake that survives switching IPs.
+- 3/hour IP rate limit on `/api/auth/forgot-password` is the email-flood brake; the always-204 response shape is the enumeration-defence.
+- 30/5min on `/api/client-errors` keeps an infinite-loop client from filling the log.
+
 ---
 
 ## 9. End-to-End Data Flows
@@ -1035,12 +1310,16 @@ Browser:                              Server:                            DB:
 1. POST /api/login   ─────────────▶  loginLimiter
    { username,password }              validate(loginSchema)
                                       getUserByUsername(name)  ──────▶  SELECT * FROM users WHERE iLike
+                                      [Tier 6.6] check lockedUntil
                                       bcrypt.compare(pw, hash)
-                                      createToken(user)
-   { token, user } ◀───────────────  jwt.sign(...)
+                                      [Tier 6.6] reset loginAttempts on success
+                                      [Tier 6.9] if totpEnabledAt: issue sc_challenge cookie + return {challenge:true}
+                                      [Tier 6.8] setAuthCookies(res, user) ─▶  INSERT INTO refresh_tokens
+   { user } ◀──────────────────────  Set-Cookie: sc_access; sc_refresh; sc_csrf
+                                      (no token in body)
 
-2. setItem('scorecastToken', token)
-3. useEffect on token → loadDashboard()
+2. (cookies are HttpOnly; SPA cannot read them — only `user` is stored in component state)
+3. handleLogin → setUser → loadDashboard()
 
 4. Parallel fetches (in loadDashboard order):
    GET /api/me ──────────────────▶  authMiddleware  ──────────────▶  SELECT user, joined groups, pending invites
@@ -1176,25 +1455,28 @@ All three paths converge on the **server-side structured log** via `POST /api/cl
 - Window/async error → 3.5 s cyan toast: *"Something went wrong — refresh if things look off."*
 - API error → contextual cyan toast with the server's `error` message (or *"Request failed"* fallback).
 
-### 10.2 Security Posture
+### 10.2 Security Posture (post-Tier 6)
 
 | Concern | Status |
 | --- | --- |
 | Password storage | bcrypt cost 10, enforced via model hooks |
 | Auth secret | JWT_SECRET required in prod; insecure dev fallback never reaches prod |
-| Token transport | Both Authorization header and `token` cookie supported (cookie is read but never written by the server today — header is the primary path) |
-| Brute force | Login + register rate-limited; no rate-limit on other endpoints |
+| Session transport | **HttpOnly cookie auth** (Tier 6.8): `sc_access` (15-min JWT) + `sc_refresh` (30-day opaque, rotating, hashed in DB). Bearer-header path removed. XSS payloads can't lift either cookie |
+| Token storage in DB | SHA-256 hashes of high-entropy random tokens (refresh, verify-email, password-reset); bcrypt for low-entropy recovery codes |
+| Brute force | Per-route rate limits across login, register, comments, friend-requests, picks, forgot-password, client-errors (Tier 6.10); per-user lockout after 5 failed logins (Tier 6.6); generic 401 to avoid enumeration |
 | Input validation | zod on every body; no trust placed in client-side validation |
-| SQL injection | Sequelize parameterizes everything; the raw SQL in `runMigrations()` has no user input |
+| SQL injection | Sequelize parameterizes everything; raw SQL in migrations has no user input |
 | RBAC | `requireAdmin` middleware; admin endpoints under `/api/admin/*` plus the legacy `POST /api/games/:gameId/result` |
 | Self-protection | Admin cannot demote or delete self (server-side, not just UI) |
-| XSS | React's default escaping; no `dangerouslySetInnerHTML` anywhere |
-| CSRF | Not protected. Cookie+credentials are accepted but the primary auth is the Authorization header, which is not auto-sent cross-origin. CSRF tokens are Tier 5 |
-| CORS | `origin: true` is too permissive — flagged for tightening before prod |
-| Audit log | None |
-| Account lockout | None |
-| 2FA | None |
-| Password reset | No flow |
+| XSS | React's default escaping; no `dangerouslySetInnerHTML` anywhere. CSP `default-src 'self'` blocks inline `<script>` injection |
+| CSRF | **Double-submit cookie** (Tier 6.7): `sc_csrf` cookie + `X-CSRF-Token` header, `crypto.timingSafeEqual` compare. SameSite=Lax is the first wall; double-submit is belt-and-braces |
+| CORS | **Env allowlist** (Tier 6.1) via `CORS_ORIGINS`; server throws on boot in prod when empty |
+| Security headers | **helmet** (Tier 6.2) with CSP tuned for Vite+Tailwind+Sentry; HSTS; `X-Frame-Options: DENY`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff` |
+| Password reset | **Email-based** (Tier 6.4): 15-min single-use tokens, always-204 response shape (no enumeration). Reset additionally revokes all refresh tokens (force-logout-everywhere) |
+| Email verification | **Required at register** (Tier 6.5): 24h single-use tokens. `forgot-password` only sends to verified emails |
+| 2FA | **Opt-in TOTP** (Tier 6.9) via speakeasy. 10 single-use recovery codes (bcrypt-hashed). 5-min `sc_challenge` cookie between password-OK and code-OK |
+| Audit log | None — captured under Tier 4b in the roadmap |
+| Multi-device session listing | Not implemented today; `refresh_tokens.userAgent` is captured to support a future "active sessions" UI |
 
 ### 10.3 Performance
 
@@ -1237,13 +1519,17 @@ Not yet:
 
 See [.env.example](.env.example):
 - **`JWT_SECRET`** — must be set in production; generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Server refuses to start in `NODE_ENV=production` without it.
+- **`CORS_ORIGINS`** — (Tier 6.1) comma-separated allowlist of origins permitted with `credentials: true`. **Required in production** — server throws on boot when empty. In dev, falls back to `origin: true`. Example: `CORS_ORIGINS=https://scorecast.com,https://www.scorecast.com`.
 - **`DATABASE_URL`** — Postgres connection string. Optional; defaults to `postgres://postgres:postgres@localhost/scorecast_db` (see [config/database.js](config/database.js)).
 - **`PORT`** — defaults to 3000.
-- **`NODE_ENV`** — `development` or `production`. Gates JWT_SECRET enforcement, logger format (pretty vs JSON), and migration auto-run behavior.
+- **`NODE_ENV`** — `development` or `production`. Gates JWT_SECRET + CORS_ORIGINS enforcement, logger format (pretty vs JSON), cookie `Secure` flag, and migration auto-run behavior.
 - **`LOG_LEVEL`** — (Tier 5.4) pino level. Defaults to `debug` in dev and `info` in prod. Values: `fatal | error | warn | info | debug | trace | silent`.
 - **`MIGRATE_ON_BOOT`** — (Tier 5.1) `'true'` to apply pending migrations on server boot in production. Default off — production should run `npm run db:migrate` as an explicit deploy step. No effect in development (always auto-migrates).
 - **`SENTRY_DSN`** — (Tier 5.4b) Sentry server-side DSN. When unset, [lib/instrument.js](lib/instrument.js) skips Sentry init and [lib/sentry.js](lib/sentry.js) exports no-ops. When set, `@sentry/node` initializes at boot (before Express) and `setupExpressErrorHandler(app)` reports any `next(err)`-propagated error.
 - **`VITE_SENTRY_DSN`** — (Tier 5.4b) Sentry browser DSN. Read at **Vite build time**, not runtime — any change requires `npm run build`. When unset, Vite dead-code-eliminates the dynamic `@sentry/react` import (verified zero bytes added to the bundle). When set, `initSentry()` in [src/lib/sentry.js](src/lib/sentry.js) loads the SDK and calls `Sentry.init(...)` on app startup.
+- **`RESEND_API_KEY`** — (Tier 6.3) Resend API key for outbound email (verification, password reset). When unset, [lib/email.js](lib/email.js) falls back to log-only mode (emits the rendered payload via pino instead of dispatching). Get one at resend.com; free tier covers 100/day, 3k/month.
+- **`EMAIL_FROM`** — (Tier 6.3) `From:` header on outbound mail. Defaults to `ScoreCast <onboarding@resend.dev>` (Resend's sandbox sender, deliverable only to the account's signup email). For real users, point at a domain you've verified in Resend.
+- **`PUBLIC_APP_URL`** — (Tier 6.3) base URL baked into outbound email links (`${PUBLIC_APP_URL}/?verifyToken=…` and `${PUBLIC_APP_URL}/?resetToken=…`). Defaults to `http://localhost:${PORT}` so dev works without setup; set to `http://localhost:5173` for Vite-dev testing, or your deployed URL in prod.
 
 ### 11.2 Local Setup
 
@@ -1301,6 +1587,19 @@ Or in one go: `npm start` (= `vite build && node server.js`). For production it'
 16. **Tier 5.4b — VITE_SENTRY_DSN is build-time**: changing `VITE_SENTRY_DSN` in `.env` does nothing until you rebuild (`npm run build`) and the browser reloads the new bundle. Vite substitutes the value at build time. `SENTRY_DSN` (server) is read at process start so a server restart picks it up live.
 17. **Tier 5.4b — never `console.*` in new client code either**: window-level errors are already captured by `clientErrorReporter`. If you `console.error(...)` in client code to "log something," that line never reaches the server and never reaches Sentry. Call `reportClientError({message, level: 'warn' | 'error'})` from [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) instead.
 18. **Tier 5.4b — ErrorBoundary raw-message gate**: the boundary renders `this.state.message` (which can include sensitive details from the thrown error) **only** under `import.meta.env.DEV`. Do not remove the gate. If you need to surface a friendlier message in prod, set a separate state field with the curated text.
+19. **Tier 6.1 — CORS_ORIGINS production throw**: `CORS_ORIGINS` empty + `NODE_ENV=production` makes the server **refuse to boot**. Same pattern as `JWT_SECRET`. In dev with `CORS_ORIGINS` unset, falls back to permissive `origin: true` so the Vite dev server keeps working. Don't quietly add a production fallback to `origin: true` — the failure-loud behavior is the whole point.
+20. **Tier 6.2 — CSP and Vite HMR**: helmet's CSP `connectSrc` includes `ws://localhost:5173, http://localhost:5173` **only when `NODE_ENV !== 'production'`** so HMR works in dev. If you change `connectSrc` for any reason (e.g., to allow a new third-party host), keep the dev-only HMR entry, or you'll see "Refused to connect" errors in the browser console and HMR will silently fail.
+21. **Tier 6.6 — Lockout response generic-401 invariant**: locked accounts return exactly the same `401 {error: 'Invalid credentials'}` body and status as wrong-password and unknown-user. Don't add "Account is locked" messages anywhere user-visible — that's a username-enumeration leak. The lock is observable internally via `users.lockedUntil` and via the access logs.
+22. **Tier 6.7 — CSRF EXEMPT_PATHS additions**: when adding a state-changing endpoint that runs **before** the user has a session (login, register-time, email-link landing pages), you must add the path to `EXEMPT_PATHS` in [middleware/csrf.js](middleware/csrf.js) or callers will get blanket 403. The current exemption list covers all pre-auth and anonymous mutation endpoints — adding more in the same category is fine; adding any **post-auth** endpoint to the list is a security mistake.
+23. **Tier 6.8 — Cookie auth + frontend request() refresh-retry**: `request()` retries a 401 exactly once after `POST /api/auth/refresh`. It exempts `/api/auth/*` paths so refresh can't recurse on itself. **Don't add another retry layer at a caller** — if the post-refresh attempt still 401s, the user is genuinely logged out and we want to fall through to `handleSessionExpired`. Wrapping calls in retry loops would mask that.
+24. **Tier 6.8 — Bearer-header clean break**: `authMiddleware` reads `req.cookies.sc_access` only. If you're tempted to "support both" again for backwards compatibility (e.g., during a migration window), don't — the original `localStorage.scorecastToken` from before Tier 6 was invalidated client-side at deploy time. Adding bearer-header support back would re-expose the XSS-readable-session attack surface.
+25. **Tier 6.8 — `Path=/api/auth` on refresh cookie**: `sc_refresh` is path-scoped so it isn't sent on `/api/picks`, `/api/me`, etc. Don't bring it back to `Path=/` — the whole point is that the high-value cookie is only exposed on the (small) auth endpoint surface. Same logic for `sc_challenge`.
+26. **Tier 6.8 — Multi-device login semantics**: `/api/login` does NOT revoke prior refresh tokens. Multiple devices can be logged in simultaneously, each with its own active refresh chain. Only `/api/auth/logout` (current device) and `/api/auth/reset-password` (all devices) revoke. If you ever add "sign out all devices" UI, call `revokeAllUserRefreshTokens(userId)`.
+27. **Tier 6.5 — Login response shape on 2FA-enabled users**: returns `{challenge: true}` instead of `{user}`. Frontend (`handleLogin`) must branch on this before calling `setUser`. Don't try to "fix" the inconsistency — that's the only signal the client gets before the 2FA challenge.
+28. **Tier 6.9 — Recovery codes are one-shot**: once shown at setup, they cannot be re-displayed. The DB only has bcrypt hashes. Don't add an endpoint that "shows the codes again" — that requires storing them in plaintext, which defeats the whole pattern. Users who lose their codes must disable + re-enable 2FA to regenerate.
+29. **Tier 6.9 — `users.totpEnabledAt` is the source of truth**: `totpSecret` may be populated without `totpEnabledAt` (= pending-but-unconfirmed setup). The login flow checks `totpEnabledAt`, not `totpSecret`. Don't gate behavior on `totpSecret` alone.
+30. **Tier 6.4 — `forgot-password` is always 204**: regardless of whether the email exists, is verified, or has a recently-issued token. The shape difference between "email exists" and "doesn't" is **only** in whether a server-side email-send log line appears. Don't ever return a different status or body for the existence case — that's the classic user-enumeration leak.
+31. **Tier 6.3 — `lib/email.send()` never throws**: failures log and return `{delivered: false, ...}`. Callers should treat email as best-effort. **Don't wrap email calls in transactions that depend on send success** — emails are not transactional and never will be. The flow is always: do the DB work first, then dispatch the email after-the-fact.
 
 ### 11.5 Backup / Restore
 
@@ -1312,7 +1611,6 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 
 | Area | Issue | Tier |
 | --- | --- | --- |
-| CORS | `origin: true` — accept-all | 6.1 |
 | Tests | No automated tests at all (Playwright deferred from 5.5 because it needs Docker) | 5.5 / 9.4 |
 | External data | No football API integration; admin enters games manually | 4b (deferred) |
 | Live scores | No live score display; no auto-poll | 4b (deferred) |
@@ -1321,21 +1619,20 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 | Streaks | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits after 4b adds season ordering) | 4b |
 | Real-time | No WebSocket; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time | 7 |
 | Audit log | No record of admin actions (single or bulk) | 4b.6 |
-| Password reset | No flow; no account lockout; no 2FA | 6 |
-| CSRF | Not protected | 6 |
-| Helmet / security headers | Not applied | 6.5 |
-| Profile privacy | Every authenticated user can view every profile | 8.6 |
+| Profile privacy | Every authenticated user can view every profile | 8.6 (parked) |
 | Notification spam | Bulk-setResult can produce many notifications in one request; no batching/dedup | 7 |
-| Cache scope | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Today the app runs single-process so this is fine | future / Tier 10.4 (Redis backend) |
+| Cache scope | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so they survive a restart, but the rate-limit + lockout counters are in-memory. Today the app runs single-process so this is fine | Tier 10.4 (Redis backend) |
 | Server-side log shipping | pino → stdout only; no managed log aggregator (CloudWatch / Application Insights / Loki). Sentry covers errors but not access logs | Tier 10.6 |
 | Health / readiness probes | No `/healthz` or `/readyz` endpoint; load balancers / Container Apps probes have nothing to hit | Tier 10.1 |
 | Metrics | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters | Tier 10.3 |
+| Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset today | future |
+| Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code | future |
 
 ---
 
 ## 13. Roadmap
 
-The live forward roadmap is in `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` (Tiers 4b → 9). The original tier plan lives at `C:\Users\vinde\.claude\plans\go-through-this-codebase-warm-cloud.md` for historical context.
+The live forward roadmap is in `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` (Tiers 4b → 10). The original tier plan lives at `C:\Users\vinde\.claude\plans\go-through-this-codebase-warm-cloud.md` for historical context.
 
 Summary:
 
@@ -1347,11 +1644,12 @@ Summary:
 - ✅ **Tier 5 (core)** — Ops & reliability: migrations framework (5.1), leaderboard caching (5.2), transactional cascades (5.3), structured logging (5.4), N+1 elimination (5.7), HTTP compression (5.6).
 - ✅ **Tier 5.4b** — Frontend error reporting: React `ErrorBoundary`, `POST /api/client-errors`, window listeners + reporter, `X-Request-Id` capture, Sentry SDK opt-in. See §6.7.
 - 🟡 **Tier 5 (remainder)** — 5.5 Playwright E2E (deferred — needs Docker / Tier 9.4).
-- ❌ **Tier 6** — Security hardening for production: CORS, CSRF, password reset, account lockout, helmet, refresh tokens, 2FA.
-- ❌ **Tier 7** — Real-time & engagement: scheduler-driven notifications, WebSocket/SSE, web push, email, prefs.
+- ✅ **Tier 6** — Security hardening: CORS allowlist (6.1), helmet (6.2), email service (6.3), password reset (6.4), email verification on register (6.5), account lockout (6.6), CSRF double-submit (6.7), HttpOnly cookie auth + rotating refresh tokens (6.8), TOTP 2FA (6.9), per-route rate limits (6.10), dropped `nedb-promises` (6.11). See §8.15.
+- ❌ **Tier 7** — Real-time & engagement: scheduler-driven notifications, WebSocket/SSE, web push, email digests, prefs.
 - ✅ **Tier 8** (minus 8.6) — User capabilities: group lifecycle (leave/transfer/delete), pick deletion, avatars, search, profile bio + displayName, comment edit + reactions, leaderboard sort + pagination, bulk admin actions.
 - ❌ **Tier 8.6** — Profile privacy (parked; small isolated change).
-- ❌ **Tier 9** — DX: TypeScript, OpenAPI, CI, Docker, code-splitting, Storybook.
+- ❌ **Tier 9** — DX, packaging & cloud deploy: ESLint, code-splitting, Docker, CI/CD, IaC, domain + TLS, secrets, TypeScript (parked at end), Storybook (parked).
+- ❌ **Tier 10** — Observability & scale: health probes, Prometheus metrics, managed Redis (replaces single-process leaderboard cache), graceful shutdown, cloud log shipping.
 
 ---
 
@@ -1380,3 +1678,12 @@ Summary:
 | **clientErrorReporter** | (Tier 5.4b) Module in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) that installs `window.error` and `unhandledrejection` listeners, throttles reports to 5 per 60 s, posts to `POST /api/client-errors`, and dispatches a `scorecast:client-error` DOM event for App.jsx to toast. Exports `reportClientError({...})` for explicit calls and `setLastRequestId(id)` to record the most recent server reqId observed via response headers. |
 | **`/api/client-errors`** | (Tier 5.4b) Public endpoint accepting `{message, stack?, componentStack?, url?, reqId?, userAgent?, level?}` (zod-validated, all string fields capped — stack at 8 KB). Soft-decodes the JWT to attach `userId` if present, else logs anonymously. Rate-limited 30/5 min per IP. Always returns 204. |
 | **`SENTRY_DSN` / `VITE_SENTRY_DSN`** | (Tier 5.4b) Opt-in env vars enabling server-side and browser-side Sentry capture respectively. Both are no-ops when unset (server exports stubs; Vite tree-shakes the dynamic `@sentry/react` import). `VITE_SENTRY_DSN` is read at Vite build time — change requires `npm run build`. |
+| **`sc_access` / `sc_refresh` / `sc_csrf` / `sc_challenge`** | (Tier 6.8 / 6.7 / 6.9) The four cookies that drive auth. `sc_access` is a 15-min HttpOnly access JWT (Path=/). `sc_refresh` is a 30-day HttpOnly opaque token (Path=/api/auth) whose SHA-256 hash is stored in `refresh_tokens`. `sc_csrf` is JS-readable 30-day random token used by the double-submit pattern. `sc_challenge` is a 5-min HttpOnly JWT issued between password-OK and 2FA-code-OK when the user has 2FA enabled. |
+| **Refresh-then-retry** | (Tier 6.8) The frontend `request()` helper's behavior on 401: try `POST /api/auth/refresh` once, then re-fetch the original. `/api/auth/*` paths are exempted from the retry to prevent recursion. This is what makes 15-min access tokens invisible to the user — they live 30 days from one login. |
+| **CSRF double-submit** | (Tier 6.7) Defence against cross-site request forgery. The frontend reads the (non-HttpOnly) `sc_csrf` cookie via `getCookie('sc_csrf')` and echoes it as the `X-CSRF-Token` header on every state-changing request. Server compares the two via `crypto.timingSafeEqual`. Relies on same-origin policy preventing cross-origin reads of the cookie. |
+| **EXEMPT_PATHS** | (Tier 6.7) The set in [middleware/csrf.js](middleware/csrf.js) listing routes that skip CSRF enforcement. Only **pre-auth or anonymous** mutation endpoints belong here (login, register, refresh, verify-email, forgot/reset, client-errors). Adding any **post-auth** endpoint to this set is a security mistake. |
+| **Token storage pattern** | (Tier 6) Single-use tokens (verify-email, password-reset, refresh) are 32 random bytes hex, SHA-256-hashed on insert (`tokenHash` column), and looked up via that hash's unique index. Raw values only exist in transit. Recovery codes are the exception (low entropy → bcrypt). |
+| **Account lockout** | (Tier 6.6) After 5 failed password attempts against a single user, `users.lockedUntil = NOW + 15min`. Subsequent attempts return a generic 401 regardless of password correctness. State clears on successful login or password reset. |
+| **TOTP challenge cookie** | (Tier 6.9) `sc_challenge` — a short-lived signed JWT (`{id, type: '2fa-pending'}`) issued by `POST /api/login` when the user has 2FA enabled. The next step in the flow, `POST /api/auth/2fa/verify`, reads this cookie + a TOTP code or recovery code, and only on success issues the real auth cookies. |
+| **Recovery code** | (Tier 6.9) A human-typable 10-character string (format `XXXXX-XXXXX`). 10 codes generated at 2FA setup, shown once, bcrypt-hashed (rounds 8) in `users.totpRecoveryCodes` JSONB. Single-use — consumed codes are spliced out of the array. |
+| **`lib/email.send()`** | (Tier 6.3) Pluggable transport wrapper. Loads Resend lazily when `RESEND_API_KEY` is set; otherwise emits structured `info`-level logs with the email payload (dev-log mode). **Never throws** — failures are logged and signaled by the returned `{delivered: false}` shape, so calling code can fire-and-forget. |

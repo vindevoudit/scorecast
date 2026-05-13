@@ -11,6 +11,14 @@ const forgotPasswordSchema = z.object({ email });
 const resetPasswordSchema = z.object({ token: z.string().min(20).max(200), password });
 const setEmailSchema = z.object({ email });
 
+const totpConfirmSchema = z.object({ code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits') });
+const totpVerifySchema = z.object({
+  code: z.string().regex(/^\d{6}$/).optional(),
+  recoveryCode: z.string().trim().min(8).max(60).optional(),
+}).refine((d) => Boolean(d.code) || Boolean(d.recoveryCode), {
+  message: 'Provide either code or recoveryCode',
+});
+
 const createGroupSchema = z.object({
   name: z.string().trim().min(1).max(60),
   visibility: z.enum(['private', 'public']).optional(),
@@ -90,6 +98,8 @@ module.exports = {
   forgotPasswordSchema,
   resetPasswordSchema,
   setEmailSchema,
+  totpConfirmSchema,
+  totpVerifySchema,
   createGroupSchema,
   inviteSchema,
   pickSchema,

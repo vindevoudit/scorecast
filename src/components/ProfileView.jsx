@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
+import TwoFactorSetup from './TwoFactorSetup';
 
 function formatDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
@@ -24,7 +25,7 @@ function friendButtonProps(friendStatus) {
   }
 }
 
-function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable }) {
+function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, twoFactorEnabled, on2faSetup, on2faConfirm, on2faDisable }) {
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
   const [bio, setBio] = useState(profile?.bio || '');
@@ -169,6 +170,16 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable })
             {profile.headToHead.ties > 0 && ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`}
           </p>
         </div>
+      )}
+
+      {showEdit && on2faSetup && (
+        <TwoFactorSetup
+          enabled={Boolean(twoFactorEnabled)}
+          busy={busy}
+          onSetupRequest={on2faSetup}
+          onConfirm={on2faConfirm}
+          onDisable={on2faDisable}
+        />
       )}
 
       <div>

@@ -58,6 +58,18 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       allowNull: true,
     },
+    totpSecret: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    totpEnabledAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    totpRecoveryCodes: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+    },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,

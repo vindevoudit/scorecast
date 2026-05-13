@@ -13,6 +13,8 @@ const rateLimit = require('express-rate-limit');
 const { Op } = require('sequelize');
 
 const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const qrcode = require('qrcode');
 const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, EmailVerificationToken, PasswordResetToken, RefreshToken, sequelize, initDatabase } = require('./models');
 const logger = require('./lib/logger');
 const requestId = require('./middleware/requestId');
@@ -28,6 +30,8 @@ const {
   forgotPasswordSchema,
   resetPasswordSchema,
   setEmailSchema,
+  totpConfirmSchema,
+  totpVerifySchema,
   createGroupSchema,
   inviteSchema,
   pickSchema,
@@ -86,8 +90,10 @@ async function sendVerificationEmail(user) {
 
 const ACCESS_COOKIE = 'sc_access';
 const REFRESH_COOKIE = 'sc_refresh';
+const CHALLENGE_COOKIE = 'sc_challenge';
 const ACCESS_TTL_MS = 15 * 60 * 1000;
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const COOKIE_SECURE = process.env.NODE_ENV === 'production';
 
 function createAccessToken(user) {
@@ -578,6 +584,22 @@ app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => 
     await user.save({ hooks: false });
   }
 
+  if (user.totpEnabledAt) {
+    const challengeJwt = jwt.sign(
+      { id: user.id, type: '2fa-pending' },
+      JWT_SECRET,
+      { expiresIn: Math.floor(CHALLENGE_TTL_MS / 1000) }
+    );
+    res.cookie(CHALLENGE_COOKIE, challengeJwt, {
+      httpOnly: true,
+      secure: COOKIE_SECURE,
+      sameSite: 'lax',
+      path: '/api/auth',
+      maxAge: CHALLENGE_TTL_MS,
+    });
+    return res.json({ challenge: true });
+  }
+
   await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
   res.json({ user: { id: user.id, username: user.username } });
 });
@@ -719,6 +741,62 @@ app.post('/api/auth/logout', async (req, res) => {
   res.status(204).end();
 });
 
+app.post('/api/auth/2fa/verify', validate(totpVerifySchema), async (req, res) => {
+  const challengeToken = req.cookies?.[CHALLENGE_COOKIE];
+  if (!challengeToken) {
+    return res.status(401).json({ error: 'No 2FA challenge in progress' });
+  }
+  let payload;
+  try {
+    payload = jwt.verify(challengeToken, JWT_SECRET);
+    if (payload?.type !== '2fa-pending') throw new Error('not a challenge');
+  } catch (_) {
+    res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });
+    return res.status(401).json({ error: 'Challenge invalid or expired' });
+  }
+  try {
+    const user = await User.findByPk(payload.id);
+    if (!user || !user.totpEnabledAt || !user.totpSecret) {
+      res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });
+      return res.status(400).json({ error: 'No 2FA enabled' });
+    }
+    const { code, recoveryCode } = req.body;
+    let valid = false;
+    let usedRecoveryIndex = -1;
+    if (typeof code === 'string') {
+      valid = speakeasy.totp.verify({
+        secret: user.totpSecret,
+        encoding: 'base32',
+        token: code,
+        window: 1,
+      });
+    } else if (typeof recoveryCode === 'string') {
+      const normalized = recoveryCode.trim().toUpperCase();
+      const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
+      for (let i = 0; i < codes.length; i++) {
+        if (await bcrypt.compare(normalized, codes[i])) {
+          valid = true;
+          usedRecoveryIndex = i;
+          break;
+        }
+      }
+    }
+    if (!valid) return res.status(400).json({ error: 'Code did not match' });
+    if (usedRecoveryIndex >= 0) {
+      const codes = [...user.totpRecoveryCodes];
+      codes.splice(usedRecoveryIndex, 1);
+      user.totpRecoveryCodes = codes;
+      await user.save({ hooks: false });
+    }
+    res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });
+    await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
+    res.json({ user: { id: user.id, username: user.username } });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa verify failed');
+    res.status(500).json({ error: '2FA verification failed' });
+  }
+});
+
 app.post('/api/client-errors', clientErrorLimiter, validate(clientErrorSchema), (req, res) => {
   let userId = null;
   try {
@@ -754,6 +832,7 @@ app.get('/api/me', authMiddleware, async (req, res) => {
     bio: user.bio || null,
     email: user.email || null,
     emailVerifiedAt: user.emailVerifiedAt || null,
+    twoFactorEnabled: Boolean(user.totpEnabledAt),
     joinedGroups,
     pendingInvites,
   });
@@ -780,6 +859,93 @@ app.put('/api/me', authMiddleware, validate(editProfileSchema), async (req, res)
   } catch (error) {
     req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+app.post('/api/me/2fa/setup', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.totpEnabledAt) {
+      return res.status(400).json({ error: '2FA is already enabled — disable it first to regenerate' });
+    }
+    const secret = speakeasy.generateSecret({ name: `ScoreCast:${user.username}`, length: 20 });
+    const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
+    const recoveryCodes = Array.from({ length: 10 }, () => {
+      const raw = crypto.randomBytes(5).toString('hex').toUpperCase();
+      return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`;
+    });
+    const hashedRecoveryCodes = await Promise.all(recoveryCodes.map((c) => bcrypt.hash(c, 8)));
+    user.totpSecret = secret.base32;
+    user.totpEnabledAt = null;
+    user.totpRecoveryCodes = hashedRecoveryCodes;
+    await user.save({ hooks: false });
+    res.json({ qrCodeDataUrl, secret: secret.base32, recoveryCodes });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa setup failed');
+    res.status(500).json({ error: '2FA setup failed' });
+  }
+});
+
+app.post('/api/me/2fa/confirm', authMiddleware, validate(totpConfirmSchema), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user || !user.totpSecret) {
+      return res.status(400).json({ error: 'No pending 2FA setup' });
+    }
+    if (user.totpEnabledAt) {
+      return res.status(400).json({ error: '2FA already enabled' });
+    }
+    const valid = speakeasy.totp.verify({
+      secret: user.totpSecret,
+      encoding: 'base32',
+      token: req.body.code,
+      window: 1,
+    });
+    if (!valid) return res.status(400).json({ error: 'Code did not match — try the next one in your authenticator' });
+    user.totpEnabledAt = new Date();
+    await user.save({ hooks: false });
+    res.json({ ok: true, totpEnabledAt: user.totpEnabledAt });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa confirm failed');
+    res.status(500).json({ error: '2FA confirm failed' });
+  }
+});
+
+app.post('/api/me/2fa/disable', authMiddleware, validate(totpVerifySchema), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user || !user.totpEnabledAt) {
+      return res.status(400).json({ error: '2FA is not enabled' });
+    }
+    const { code, recoveryCode } = req.body;
+    let valid = false;
+    if (typeof code === 'string') {
+      valid = speakeasy.totp.verify({
+        secret: user.totpSecret,
+        encoding: 'base32',
+        token: code,
+        window: 1,
+      });
+    } else if (typeof recoveryCode === 'string') {
+      const normalized = recoveryCode.trim().toUpperCase();
+      const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
+      for (const hash of codes) {
+        if (await bcrypt.compare(normalized, hash)) {
+          valid = true;
+          break;
+        }
+      }
+    }
+    if (!valid) return res.status(400).json({ error: 'Code did not match' });
+    user.totpSecret = null;
+    user.totpEnabledAt = null;
+    user.totpRecoveryCodes = null;
+    await user.save({ hooks: false });
+    res.json({ ok: true });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa disable failed');
+    res.status(500).json({ error: '2FA disable failed' });
   }
 });
 

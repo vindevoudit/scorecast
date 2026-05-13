@@ -28,6 +28,7 @@ const Notification = require('./Notification')(sequelize);
 const CommentReaction = require('./CommentReaction')(sequelize);
 const EmailVerificationToken = require('./EmailVerificationToken')(sequelize);
 const PasswordResetToken = require('./PasswordResetToken')(sequelize);
+const RefreshToken = require('./RefreshToken')(sequelize);
 
 // Define associations
 User.hasMany(Pick, { foreignKey: 'userId', as: 'picks' });
@@ -70,6 +71,9 @@ User.hasMany(EmailVerificationToken, { foreignKey: 'userId', as: 'emailVerificat
 
 PasswordResetToken.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(PasswordResetToken, { foreignKey: 'userId', as: 'passwordResetTokens' });
+
+RefreshToken.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens' });
 
 // Initialize database
 async function initDatabase() {
@@ -210,5 +214,6 @@ module.exports = {
   CommentReaction,
   EmailVerificationToken,
   PasswordResetToken,
+  RefreshToken,
   initDatabase,
 };

@@ -13,12 +13,13 @@ const rateLimit = require('express-rate-limit');
 const { Op } = require('sequelize');
 
 const crypto = require('crypto');
-const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, EmailVerificationToken, PasswordResetToken, sequelize, initDatabase } = require('./models');
+const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, EmailVerificationToken, PasswordResetToken, RefreshToken, sequelize, initDatabase } = require('./models');
 const logger = require('./lib/logger');
 const requestId = require('./middleware/requestId');
 const leaderboardCache = require('./lib/leaderboardCache');
 const sentry = require('./lib/sentry');
 const email = require('./lib/email');
+const csrfMiddleware = require('./middleware/csrf');
 const pinoHttp = require('pino-http');
 const { validate } = require('./validation/middleware');
 const {
@@ -83,17 +84,59 @@ async function sendVerificationEmail(user) {
   });
 }
 
-function createToken(user) {
+const ACCESS_COOKIE = 'sc_access';
+const REFRESH_COOKIE = 'sc_refresh';
+const ACCESS_TTL_MS = 15 * 60 * 1000;
+const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const COOKIE_SECURE = process.env.NODE_ENV === 'production';
+
+function createAccessToken(user) {
   return jwt.sign(
     { id: user.id, username: user.username, role: user.role },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: Math.floor(ACCESS_TTL_MS / 1000) }
+  );
+}
+
+async function setAuthCookies(res, user, { userAgent } = {}) {
+  const accessJwt = createAccessToken(user);
+  const rawRefresh = crypto.randomBytes(32).toString('hex');
+  await RefreshToken.create({
+    userId: user.id,
+    tokenHash: crypto.createHash('sha256').update(rawRefresh).digest('hex'),
+    expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
+    userAgent: typeof userAgent === 'string' ? userAgent.slice(0, 500) : null,
+  });
+  res.cookie(ACCESS_COOKIE, accessJwt, {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: ACCESS_TTL_MS,
+  });
+  res.cookie(REFRESH_COOKIE, rawRefresh, {
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: 'lax',
+    path: '/api/auth',
+    maxAge: REFRESH_TTL_MS,
+  });
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie(ACCESS_COOKIE, { path: '/' });
+  res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
+}
+
+async function revokeAllUserRefreshTokens(userId) {
+  await RefreshToken.update(
+    { revokedAt: new Date() },
+    { where: { userId, revokedAt: null }, hooks: false }
   );
 }
 
 function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const token = req.cookies?.token || (authHeader && authHeader.split(' ')[1]);
+  const token = req.cookies?.[ACCESS_COOKIE];
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -479,6 +522,7 @@ app.use(cors({
 }));
 app.use(bodyParser.json());
 app.use(cookieParser());
+app.use(csrfMiddleware);
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.post('/api/register', registerLimiter, validate(registerSchema), async (req, res) => {
@@ -501,7 +545,8 @@ app.post('/api/register', registerLimiter, validate(registerSchema), async (req,
     sendVerificationEmail(newUser).catch((err) => {
       req.log.warn({ err: err.message, userId: newUser.id }, 'failed to send verification email');
     });
-    res.json({ token: createToken(newUser), user: { id: newUser.id, username: newUser.username } });
+    await setAuthCookies(res, newUser, { userAgent: req.headers['user-agent'] });
+    res.json({ user: { id: newUser.id, username: newUser.username } });
   } catch (error) {
     req.log.error({ err: error.message }, 'registration failed');
     res.status(500).json({ error: 'Registration failed' });
@@ -533,7 +578,8 @@ app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => 
     await user.save({ hooks: false });
   }
 
-  res.json({ token: createToken(user), user: { id: user.id, username: user.username } });
+  await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
+  res.json({ user: { id: user.id, username: user.username } });
 });
 
 app.post('/api/auth/verify-email', async (req, res) => {
@@ -612,7 +658,7 @@ app.post('/api/auth/reset-password', validate(resetPasswordSchema), async (req, 
     user.loginAttempts = 0;
     user.lockedUntil = null;
     await user.save({ hooks: false });
-    // TODO Chunk 3 (6.8): revoke all refresh tokens for user.id
+    await revokeAllUserRefreshTokens(user.id);
     res.json({ ok: true });
   } catch (error) {
     req.log.error({ err: error.message }, 'reset-password failed');
@@ -620,11 +666,63 @@ app.post('/api/auth/reset-password', validate(resetPasswordSchema), async (req, 
   }
 });
 
+app.post('/api/auth/refresh', async (req, res) => {
+  const raw = req.cookies?.[REFRESH_COOKIE];
+  if (!raw) {
+    clearAuthCookies(res);
+    return res.status(401).json({ error: 'No refresh token' });
+  }
+  try {
+    const row = await RefreshToken.findOne({
+      where: {
+        tokenHash: crypto.createHash('sha256').update(raw).digest('hex'),
+        revokedAt: null,
+        expiresAt: { [Op.gt]: new Date() },
+      },
+    });
+    if (!row) {
+      clearAuthCookies(res);
+      return res.status(401).json({ error: 'Refresh token invalid or expired' });
+    }
+    const user = await User.findByPk(row.userId);
+    if (!user) {
+      clearAuthCookies(res);
+      return res.status(401).json({ error: 'User not found' });
+    }
+    row.revokedAt = new Date();
+    await row.save({ hooks: false });
+    await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
+    res.status(204).end();
+  } catch (error) {
+    req.log.error({ err: error.message }, 'refresh failed');
+    clearAuthCookies(res);
+    res.status(500).json({ error: 'Refresh failed' });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  const raw = req.cookies?.[REFRESH_COOKIE];
+  if (raw) {
+    try {
+      const row = await RefreshToken.findOne({
+        where: { tokenHash: crypto.createHash('sha256').update(raw).digest('hex'), revokedAt: null },
+      });
+      if (row) {
+        row.revokedAt = new Date();
+        await row.save({ hooks: false });
+      }
+    } catch (error) {
+      req.log.warn({ err: error.message }, 'logout refresh-revoke failed');
+    }
+  }
+  clearAuthCookies(res);
+  res.status(204).end();
+});
+
 app.post('/api/client-errors', clientErrorLimiter, validate(clientErrorSchema), (req, res) => {
   let userId = null;
   try {
-    const authHeader = req.headers.authorization;
-    const token = req.cookies?.token || (authHeader && authHeader.split(' ')[1]);
+    const token = req.cookies?.[ACCESS_COOKIE];
     if (token) {
       const payload = jwt.verify(token, JWT_SECRET);
       userId = payload?.id || null;

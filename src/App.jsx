@@ -18,6 +18,7 @@ import NotificationBell from './components/NotificationBell';
 import AdminPanel from './components/admin/AdminPanel';
 import SearchBar from './components/SearchBar';
 import { setLastRequestId } from './lib/clientErrorReporter';
+import { getCookie } from './lib/cookies';
 
 const initialAuthData = {
   loginUsername: '',
@@ -44,8 +45,8 @@ const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function App() {
-  const [token, setToken] = useState(localStorage.getItem('scorecastToken') || '');
   const [user, setUser] = useState(null);
+  const [bootDone, setBootDone] = useState(false);
   const [games, setGames] = useState([]);
   const [groups, setGroups] = useState([]);
   const [picks, setPicks] = useState([]);
@@ -70,8 +71,8 @@ function App() {
   const [friends, setFriends] = useState({ friends: [], incoming: [], outgoing: [] });
   const [discoverGroups, setDiscoverGroups] = useState([]);
   const [ownProfile, setOwnProfile] = useState(null);
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
+  const userRef = useRef(user);
+  userRef.current = user;
 
   const pickMap = useMemo(
     () => new Map(picks.map((pick) => [pick.gameId, pick])),
@@ -107,7 +108,6 @@ function App() {
   };
 
   const handleSessionExpired = () => {
-    setToken('');
     setUser(null);
     setGames([]);
     setGroups([]);
@@ -116,27 +116,49 @@ function App() {
     setPendingInvites([]);
     setSelectedGroupId('');
     setView('games');
-    localStorage.removeItem('scorecastToken');
     showStatus('Session expired — please sign in again.');
   };
 
   const request = useCallback(async (path, options = {}) => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (tokenRef.current) headers.Authorization = `Bearer ${tokenRef.current}`;
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+    if (method !== 'GET' && method !== 'HEAD') {
+      const csrf = getCookie('sc_csrf');
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+    }
 
-    const response = await fetch(path, {
+    const doFetch = () => fetch(path, {
       credentials: 'include',
       ...options,
-      headers: { ...(options.headers || {}), ...headers },
+      headers,
     });
 
-    const reqId = response.headers.get('X-Request-Id');
+    let response = await doFetch();
+    let reqId = response.headers.get('X-Request-Id');
     if (reqId) setLastRequestId(reqId);
 
-    if (response.status === 401 && tokenRef.current) {
-      handleSessionExpired();
-      const err = new Error('Session expired');
+    if (response.status === 401 && !path.startsWith('/api/auth/')) {
+      const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+      if (refreshResp.status === 204) {
+        response = await doFetch();
+        const newReqId = response.headers.get('X-Request-Id');
+        if (newReqId) {
+          setLastRequestId(newReqId);
+          reqId = newReqId;
+        }
+      }
+    }
+
+    if (response.status === 401) {
+      if (userRef.current) {
+        handleSessionExpired();
+        const err = new Error('Session expired');
+        err.reqId = reqId;
+        throw err;
+      }
+      const err = new Error('Authentication required');
       err.reqId = reqId;
+      err.status = 401;
       throw err;
     }
 
@@ -293,12 +315,15 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
-    localStorage.setItem('scorecastToken', token);
-    loadDashboard().catch((error) => {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    });
-  }, [token]);
+    loadDashboard()
+      .catch((error) => {
+        if (error.status === 401 || error.message === 'Session expired' || error.message === 'Authentication required') {
+          return;
+        }
+        showStatus(error.message);
+      })
+      .finally(() => setBootDone(true));
+  }, []);
 
   useEffect(() => {
     if (view !== 'profile' || !user?.username) return;
@@ -309,8 +334,19 @@ function App() {
       });
   }, [view, user?.username, picks, games, request]);
 
-  const performLogout = () => {
-    setToken('');
+  const performLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: (() => {
+          const csrf = getCookie('sc_csrf');
+          return csrf ? { 'X-CSRF-Token': csrf } : {};
+        })(),
+      });
+    } catch (_) {
+      // best-effort; still clear local state
+    }
     setUser(null);
     setGames([]);
     setGroups([]);
@@ -318,7 +354,6 @@ function App() {
     setLeaderboard({ overall: [], group: [] });
     setPendingInvites([]);
     setSelectedGroupId('');
-    localStorage.removeItem('scorecastToken');
     setView('games');
     setConfirmingLogout(false);
   };
@@ -353,9 +388,9 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ username: authData.loginUsername, password: authData.loginPassword }),
       });
-      setToken(data.token);
       setUser(data.user);
       setAuthData(initialAuthData);
+      await loadDashboard().catch(() => {});
     } catch (error) {
       showStatus(error.message);
     }
@@ -372,10 +407,10 @@ function App() {
           email: authData.registerEmail,
         }),
       });
-      setToken(data.token);
       setUser(data.user);
       setAuthData(initialAuthData);
       showStatus('Check your email for a verification link.');
+      await loadDashboard().catch(() => {});
     } catch (error) {
       showStatus(error.message);
     }
@@ -1120,9 +1155,9 @@ function App() {
           )}
         </div>
 
-        {loading && (!user || games.length === 0) ? (
+        {!bootDone || (loading && (!user || games.length === 0)) ? (
           skeletonView
-        ) : token && user ? (
+        ) : user ? (
           dashboard
         ) : (
           authPanel

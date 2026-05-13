@@ -4,6 +4,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
+const helmet = require('helmet');
 const compression = require('compression');
 const path = require('path');
 const jwt = require('jsonwebtoken');
@@ -105,6 +106,38 @@ const clientErrorLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many error reports' },
+});
+
+const commentLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Slow down — too many comments' },
+});
+
+const friendRequestLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many friend requests' },
+});
+
+const pickLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many pick changes — slow down' },
+});
+
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many password reset requests' },
 });
 
 function scorePick(pick, game) {
@@ -382,7 +415,37 @@ app.use(pinoHttp({
   },
 }));
 app.use(compression());
-app.use(cors({ origin: true, credentials: true }));
+
+const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+if (process.env.NODE_ENV === 'production' && corsOrigins.length === 0) {
+  throw new Error('CORS_ORIGINS env var is required in production');
+}
+const cspConnectSrc = ["'self'", 'https://*.sentry.io', 'https://*.ingest.sentry.io'];
+if (process.env.NODE_ENV !== 'production') {
+  cspConnectSrc.push('ws://localhost:5173', 'http://localhost:5173');
+}
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: cspConnectSrc,
+      fontSrc: ["'self'", 'data:'],
+      frameAncestors: ["'none'"],
+      objectSrc: ["'none'"],
+    },
+  },
+  frameguard: { action: 'deny' },
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginResourcePolicy: false,
+}));
+app.use(cors({
+  origin: corsOrigins.length ? corsOrigins : true,
+  credentials: true,
+}));
 app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -407,8 +470,25 @@ app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => 
   const { username, password } = req.body;
   const user = await getUserByUsername(username);
 
-  if (!user || !(await bcrypt.compare(password, user.password))) {
+  if (user?.lockedUntil && user.lockedUntil > new Date()) {
     return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (user) {
+      user.loginAttempts = (user.loginAttempts || 0) + 1;
+      if (user.loginAttempts >= 5) {
+        user.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      }
+      await user.save({ hooks: false });
+    }
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  if (user.loginAttempts > 0 || user.lockedUntil) {
+    user.loginAttempts = 0;
+    user.lockedUntil = null;
+    await user.save({ hooks: false });
   }
 
   res.json({ token: createToken(user), user: { id: user.id, username: user.username } });
@@ -669,7 +749,7 @@ app.post('/api/groups/:groupId/invite/:inviteId/decline', authMiddleware, async 
   }
 });
 
-app.post('/api/picks', authMiddleware, validate(pickSchema), async (req, res) => {
+app.post('/api/picks', pickLimiter, authMiddleware, validate(pickSchema), async (req, res) => {
   const { gameId, choice } = req.body;
 
   try {
@@ -787,7 +867,7 @@ app.get('/api/search', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/picks/:id', authMiddleware, async (req, res) => {
+app.delete('/api/picks/:id', pickLimiter, authMiddleware, async (req, res) => {
   try {
     const pick = await Pick.findByPk(req.params.id);
     if (!pick) return res.status(404).json({ error: 'Pick not found' });
@@ -964,7 +1044,7 @@ app.get('/api/users/:username/profile', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/friends/request', authMiddleware, validate(friendRequestSchema), async (req, res) => {
+app.post('/api/friends/request', friendRequestLimiter, authMiddleware, validate(friendRequestSchema), async (req, res) => {
   try {
     const target = await getUserByUsername(req.body.username);
     if (!target) return res.status(404).json({ error: 'User not found' });
@@ -1248,7 +1328,7 @@ app.get('/api/games/:gameId/comments', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/games/:gameId/comments', authMiddleware, validate(commentSchema), async (req, res) => {
+app.post('/api/games/:gameId/comments', commentLimiter, authMiddleware, validate(commentSchema), async (req, res) => {
   try {
     const game = await Game.findByPk(req.params.gameId);
     if (!game) return res.status(404).json({ error: 'Game not found' });

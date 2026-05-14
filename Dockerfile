@@ -45,7 +45,7 @@ RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built frontend + every backend file the server requires at runtime.
 COPY --from=build /app/dist ./dist
-COPY server.js db-config.js ./
+COPY server.js db-config.js .sequelizerc ./
 COPY lib ./lib
 COPY middleware ./middleware
 COPY models ./models

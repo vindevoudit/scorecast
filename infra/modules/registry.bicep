@@ -7,9 +7,11 @@
 param location string
 
 @description('Short app name.')
+@minLength(3)
 param appName string
 
-@description('Suffix appended to globally-scoped resource names.')
+@description('Suffix appended to globally-scoped resource names. `uniqueString()` always returns 13 chars.')
+@minLength(8)
 param nameSuffix string
 
 @description('Tags applied to every resource.')
@@ -28,7 +30,6 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   properties: {
     adminUserEnabled: false
     publicNetworkAccess: 'Enabled'
-    anonymousPullEnabled: false
     dataEndpointEnabled: false
     networkRuleBypassOptions: 'AzureServices'
     zoneRedundancy: 'Disabled'

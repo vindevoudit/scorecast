@@ -1,0 +1,184 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required for Azure OIDC federation (no long-lived secrets).
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_RESOURCE_GROUP: scorecast-prod
+  AZURE_CONTAINER_APP: scorecast-app
+  AZURE_MIGRATE_JOB: scorecast-migrate
+  ACR_NAME: scorecastacrp3aaelev7xp52
+  ACR_LOGIN_SERVER: scorecastacrp3aaelev7xp52.azurecr.io
+  IMAGE_REPO: scorecast
+  HEALTH_URL: https://scorecast-app.victoriouspebble-d2a0e9ef.eastus2.azurecontainerapps.io/healthz
+
+jobs:
+  build-and-push:
+    name: Build + push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          HUSKY: '0'
+
+      - name: Lint (defense in depth — PR CI should have caught this)
+        run: npm run lint
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build + push image
+        run: |
+          set -euo pipefail
+          IMAGE="$ACR_LOGIN_SERVER/$IMAGE_REPO:${{ steps.tag.outputs.tag }}"
+          IMAGE_LATEST="$ACR_LOGIN_SERVER/$IMAGE_REPO:latest"
+          docker build -t "$IMAGE" -t "$IMAGE_LATEST" .
+          docker push "$IMAGE"
+          docker push "$IMAGE_LATEST"
+          echo "Pushed $IMAGE"
+
+  migrate:
+    name: Run DB migrations
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update migrate Job image
+        run: |
+          set -euo pipefail
+          IMAGE="$ACR_LOGIN_SERVER/$IMAGE_REPO:${{ needs.build-and-push.outputs.image_tag }}"
+          az containerapp job update \
+            --name "$AZURE_MIGRATE_JOB" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE" \
+            --output none
+
+      - name: Start migrate Job
+        id: start
+        run: |
+          set -euo pipefail
+          EXEC=$(az containerapp job start \
+            --name "$AZURE_MIGRATE_JOB" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "id" -o tsv)
+          EXEC_NAME=$(basename "$EXEC")
+          echo "execution=$EXEC_NAME" >> "$GITHUB_OUTPUT"
+          echo "Started migration execution: $EXEC_NAME"
+
+      - name: Wait for completion
+        run: |
+          set -euo pipefail
+          EXEC_NAME="${{ steps.start.outputs.execution }}"
+          for i in {1..60}; do
+            STATUS=$(az containerapp job execution show \
+              --name "$AZURE_MIGRATE_JOB" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --job-execution-name "$EXEC_NAME" \
+              --query "properties.status" -o tsv)
+            echo "  attempt $i: $STATUS"
+            case "$STATUS" in
+              Succeeded) echo "Migrations applied."; exit 0 ;;
+              Failed|Degraded) echo "Migration failed."; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "Timed out waiting for migration."
+          exit 1
+
+  deploy:
+    name: Roll out new revision
+    needs: [build-and-push, migrate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update Container App image
+        run: |
+          set -euo pipefail
+          IMAGE="$ACR_LOGIN_SERVER/$IMAGE_REPO:${{ needs.build-and-push.outputs.image_tag }}"
+          az containerapp update \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE" \
+            --output none
+
+      - name: Wait for the new revision to be Running
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            STATE=$(az containerapp revision list \
+              --name "$AZURE_CONTAINER_APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "sort_by([],&properties.createdTime)[-1].properties.runningState" \
+              -o tsv)
+            echo "  attempt $i: latest revision runningState=$STATE"
+            if [ "$STATE" = "Running" ]; then exit 0; fi
+            if [ "$STATE" = "Failed" ] || [ "$STATE" = "Degraded" ]; then
+              echo "New revision is unhealthy."; exit 1
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for revision."
+          exit 1
+
+      - name: Smoke /healthz
+        run: |
+          set -euo pipefail
+          for i in {1..12}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || true)
+            echo "  attempt $i: HTTP $CODE"
+            if [ "$CODE" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Healthz never reached 200."
+          exit 1

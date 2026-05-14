@@ -11,9 +11,6 @@ param location string
 @description('Short app name.')
 param appName string
 
-@description('Suffix appended to globally-scoped resource names (unused here but kept for consistency).')
-param nameSuffix string
-
 @description('Tags applied to every resource.')
 param tags object
 
@@ -67,7 +64,7 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
       secrets: imageTag == 'placeholder' ? [] : [
         {
           name: 'database-url'
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/database-url'
+          keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/database-url'
           identity: 'system'
         }
       ]

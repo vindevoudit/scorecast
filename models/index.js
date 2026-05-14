@@ -5,15 +5,27 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../lib/logger');
 
-// Initialize Sequelize
+// Initialize Sequelize. Managed Postgres (Azure DB, RDS) requires TLS; signal
+// that by adding `?sslmode=require` to the DATABASE_URL. The local
+// docker-compose Postgres URL doesn't set it, so SSL stays off there.
+const databaseUrl = process.env.DATABASE_URL || '';
+const requireSsl = databaseUrl.includes('sslmode=require');
 const sequelize = new Sequelize(
-  process.env.DATABASE_URL || {
+  databaseUrl || {
     host: 'localhost',
     database: 'scorecast_db',
     username: 'postgres',
     password: 'postgres',
     dialect: 'postgres',
   },
+  requireSsl
+    ? {
+        dialect: 'postgres',
+        dialectOptions: {
+          ssl: { require: true, rejectUnauthorized: false },
+        },
+      }
+    : {},
 );
 
 // Import models

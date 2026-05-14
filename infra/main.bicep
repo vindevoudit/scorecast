@@ -124,7 +124,6 @@ module migrateJob 'modules/migrate-job.bicep' = {
   params: {
     location: location
     appName: appName
-    nameSuffix: nameSuffix
     tags: tags
     imageTag: imageTag
     containerAppsEnvId: app.outputs.environmentId
@@ -146,5 +145,5 @@ output containerAppName string = app.outputs.containerAppName
 output containerAppFqdn string = app.outputs.containerAppFqdn
 output migrateJobName string = migrateJob.outputs.jobName
 output postgresServerName string = db.outputs.serverName
-output dnsZoneName string = !empty(customDomain) ? dns.outputs.zoneName : ''
-output dnsNameServers array = !empty(customDomain) ? dns.outputs.nameServers : []
+output dnsZoneName string = dns.?outputs.zoneName ?? ''
+output dnsNameServers array = dns.?outputs.nameServers ?? []

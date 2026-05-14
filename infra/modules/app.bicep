@@ -49,6 +49,12 @@ param customDomain string
 var environmentName = '${appName}-env-${nameSuffix}'
 var containerAppName = '${appName}-app'
 
+// Public URL used by CORS_ORIGINS + PUBLIC_APP_URL. Defaults to the Container
+// Apps environment's HTTPS hostname when no custom domain is bound (Chunk 3),
+// and switches to https://<customDomain> once Chunk 4 adds the apex domain.
+var defaultPublicUrl = 'https://${containerAppName}.${environment.properties.defaultDomain}'
+var publicAppUrl = empty(customDomain) ? defaultPublicUrl : 'https://${customDomain}'
+
 // Use a placeholder MCR image on the first deploy so the Container App
 // resource provisions successfully without a built scorecast image in ACR yet.
 // Chunk 4 updates this to the real ACR image via `az containerapp update`.
@@ -114,17 +120,17 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       secrets: imageTag == 'placeholder' ? [] : [
         {
           name: 'jwt-secret'
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/jwt-secret'
+          keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/jwt-secret'
           identity: 'system'
         }
         {
           name: 'database-url'
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/database-url'
+          keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/database-url'
           identity: 'system'
         }
         {
           name: 'resend-api-key'
-          keyVaultUrl: 'https://${keyVaultName}.vault.azure.net/secrets/resend-api-key'
+          keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/resend-api-key'
           identity: 'system'
         }
       ]
@@ -138,13 +144,14 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          // env wired up post-deploy via `az containerapp update` once the
-          // real image is in ACR; the placeholder image ignores them.
+          // Env vars only get attached once we're past the placeholder image
+          // (which doesn't know how to consume them). publicAppUrl falls back
+          // to the Azure-issued FQDN when no custom domain is bound.
           env: imageTag == 'placeholder' ? [] : [
             { name: 'NODE_ENV', value: 'production' }
             { name: 'PORT', value: '3000' }
-            { name: 'PUBLIC_APP_URL', value: empty(customDomain) ? '' : 'https://${customDomain}' }
-            { name: 'CORS_ORIGINS', value: empty(customDomain) ? '' : 'https://${customDomain}' }
+            { name: 'PUBLIC_APP_URL', value: publicAppUrl }
+            { name: 'CORS_ORIGINS', value: publicAppUrl }
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
             { name: 'JWT_SECRET', secretRef: 'jwt-secret' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }

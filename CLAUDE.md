@@ -2,6 +2,8 @@
 
 Full-stack football prediction web app. React 18 + Vite frontend, Node/Express backend, PostgreSQL via Sequelize. Users make picks on games, join groups, send friend requests, comment + react on games, earn badges, and compete on probability-weighted leaderboards. Admins manage games and users from an in-app panel.
 
+**Live**: https://bantryx.com (Azure Container Apps + Cloudflare DNS + Azure managed TLS). CD auto-deploys on push to `main` via [.github/workflows/deploy.yml](.github/workflows/deploy.yml).
+
 ## Where to find more
 
 | Doc                                          | Use for                                                                                                                                                                                                       |
@@ -11,7 +13,9 @@ Full-stack football prediction web app. React 18 + Vite frontend, Node/Express b
 | [MIGRATIONS_PRIMER.md](MIGRATIONS_PRIMER.md) | Plain-language explainer of the migrations framework.                                                                                                                                                         |
 | [DATABASE_SETUP.md](DATABASE_SETUP.md)       | Local Postgres install + setup.                                                                                                                                                                               |
 | [README.md](README.md)                       | Feature overview, demo users, npm scripts.                                                                                                                                                                    |
-| Forward roadmap                              | `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` — Tiers 4b, 7, 8.6, 9 (Tiers 5, 5.4b, 6 shipped).                                                                                       |
+| [infra/](infra/)                             | Bicep IaC for the Azure deployment. See `main.bicep` + `modules/*.bicep`. `az deployment group create -g scorecast-prod -f infra/main.bicep -p pgAdminPassword=<pw>` redeploys.                               |
+| [.github/workflows/](.github/workflows/)     | `ci.yml` (lint + build + migrations smoke on PRs) and `deploy.yml` (build → migrate → roll out on push to main, OIDC-authed).                                                                                 |
+| Forward roadmap                              | `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` — Tiers 4b, 7, 8.6, 10 (Tiers 5, 5.4b, 6, 9 shipped).                                                                                   |
 
 ## Tech stack at a glance
 
@@ -30,6 +34,14 @@ Full-stack football prediction web app. React 18 + Vite frontend, Node/Express b
 - **HTTP**: gzip via `compression` middleware
 - **Leaderboard cache**: in-memory `Map` with 30s TTL
 - **State**: React hooks — `App.jsx` is the single state owner (no Redux/Context)
+- **Lint + format (Tier 9.1)**: ESLint 9 flat config + Prettier 3 + `husky` v9 + `lint-staged`. Pre-commit runs `lint-staged`; pre-push runs `npm run build`
+- **Code-splitting (Tier 9.2)**: `React.lazy` + `<Suspense>` around AdminPanel, ProfileView, PicksHistory. Vite `manualChunks` splits `react`/`react-dom` (vendor) and `@sentry/*` (sentry) chunks. Build emits hidden sourcemaps for Sentry release upload
+- **API docs (Tier 9.3)**: `GET /api/openapi.json` + `GET /api/docs` (Swagger UI) generated from zod via `@asteasolutions/zod-to-openapi`. **Dev-only** (`NODE_ENV !== 'production'`) — gated for attack-surface reasons
+- **Container (Tier 9.4)**: multi-stage `Dockerfile` (`node:20-alpine`, non-root uid 1001, `tini`, `HEALTHCHECK /healthz`); `docker-compose.yml` for local stack (app + Postgres 16 + Redis 7)
+- **CI (Tier 9.5)**: `.github/workflows/ci.yml` on PRs — lint + format-check + build + migrations smoke (Postgres 16 service, `db:migrate` → `db:migrate:undo:all` → `db:migrate` idempotency check)
+- **Cloud deploy (Tier 9.6–9.9)**: Azure Container Apps (Consumption, scale 0→3) + Azure DB for PostgreSQL Flexible Server (B1ms) + Azure Container Registry + Key Vault (RBAC mode) + Log Analytics + App Insights. IaC via Bicep in [infra/](infra/). Secrets resolved at app boot via system-assigned managed identity → Key Vault. **No Redis in prod yet** — Tier 10.4 will add managed Redis
+- **CD (Tier 9.7)**: `.github/workflows/deploy.yml` on push to main — build image → push to ACR → `az containerapp job start scorecast-migrate` (one-shot migration) → `az containerapp update --image` (rolls new revision) → smoke `https://bantryx.com/healthz`. Auth via GitHub OIDC federated credential → Azure AD app `scorecast-github-cd` (no long-lived secrets)
+- **Custom domain + TLS (Tier 9.8)**: `bantryx.com` apex on Cloudflare (DNS only, grey-cloud), `www.bantryx.com` → apex via Cloudflare 301 redirect rule. Free Azure managed cert (HTTP-01 ACME validation, auto-renews every 6 months)
 
 ## Key entry points
 
@@ -45,17 +57,38 @@ Full-stack football prediction web app. React 18 + Vite frontend, Node/Express b
 - Auth UI: [LoginForm.jsx](src/components/LoginForm.jsx), [RegisterForm.jsx](src/components/RegisterForm.jsx), [ForgotPasswordForm.jsx](src/components/ForgotPasswordForm.jsx), [ResetPasswordForm.jsx](src/components/ResetPasswordForm.jsx), [TwoFactorSetup.jsx](src/components/TwoFactorSetup.jsx) (Profile section), [TwoFactorChallenge.jsx](src/components/TwoFactorChallenge.jsx) (login flow)
 - Token models: [models/EmailVerificationToken.js](models/EmailVerificationToken.js), [models/PasswordResetToken.js](models/PasswordResetToken.js), [models/RefreshToken.js](models/RefreshToken.js)
 - [migrations/](migrations/), [seeders/](seeders/) — versioned schema + data changes
+- [lib/openapi.js](lib/openapi.js) — OpenAPI 3.0 doc generator (zod → spec); registered paths cover auth/me/games/picks/groups/friends/leaderboard/comments/admin/misc
+- [eslint.config.js](eslint.config.js), [.prettierrc.json](.prettierrc.json), [.prettierignore](.prettierignore), [.husky/pre-commit](.husky/pre-commit), [.husky/pre-push](.husky/pre-push)
+- [Dockerfile](Dockerfile), [.dockerignore](.dockerignore), [docker-compose.yml](docker-compose.yml)
+- [.github/workflows/ci.yml](.github/workflows/ci.yml), [.github/workflows/deploy.yml](.github/workflows/deploy.yml)
+- [infra/main.bicep](infra/main.bicep) + [infra/modules/](infra/modules/) — Azure IaC (logs, registry, secrets, db, app, migrate-job, dns)
 
 Full repo layout: [ARCHITECTURE.md §4](ARCHITECTURE.md).
 
 ## Running
 
 ```bash
+# Local dev (two terminals, hot reload):
 node server.js       # backend on :3000 (auto-migrates in dev)
 npm run dev          # Vite frontend on :5173 (proxies /api → :3000)
+
+# Build + prod-like single-process:
 npm run build        # produce dist/
 npm start            # build + node server.js
-npm run db:migrate   # apply pending migrations (required step in prod deploys)
+
+# Migrations:
+npm run db:migrate   # apply pending migrations (CD runs this as a one-shot job)
+
+# Lint/format:
+npm run lint         # ESLint flat config
+npm run format       # Prettier --write
+npm run format:check # Prettier --check (used by CI)
+
+# Containerized local stack (matches prod image; uses NODE_ENV=production
+# inside the container, so login cookies are Secure → won't transmit over
+# http://localhost. For full-app dev with hot reload, use the two-terminal
+# flow above):
+docker compose up --build
 ```
 
 ## Configuration
@@ -89,6 +122,11 @@ Every item below is a load-bearing invariant or gotcha that **isn't obvious from
 - **Email service (Tier 6.3)**: [lib/email.js](lib/email.js) `send({to, subject, html, text})` **never throws** — a failed transport must not break registration or password reset. When `RESEND_API_KEY` is unset, it logs the payload to stdout in dev (handy for grabbing verify/reset links from server logs). Wire new outbound emails through this module, not raw transport calls.
 - **2FA (Tier 6.9)**: opt-in TOTP via `speakeasy` + `qrcode`. **Setup is two-step**: `POST /api/me/2fa/setup` stores an _unconfirmed_ `totpSecret` + 10 bcrypt-hashed recovery codes, returns raw codes ONCE. User must then `POST /api/me/2fa/confirm` with a valid code to set `totpEnabledAt`. Login with `totpEnabledAt` set issues `sc_challenge` cookie (HttpOnly, 5-min JWT, Path=/api/auth) and returns `{challenge: true}` **instead** of auth cookies — auth cookies are only issued by `POST /api/auth/2fa/verify` after a valid code or recovery code. Used recovery codes are **spliced out** of the array; no regenerate-without-disable endpoint.
 - **Password reset cascading (Tier 6.4 + 6.8)**: `POST /api/auth/reset-password` does three things atomically — updates the password (Sequelize `beforeUpdate` re-hashes), clears lockout state, and revokes **all** refresh tokens for the user (`revokeAllUserRefreshTokens`). Any new "force-logout-everywhere" trigger should reuse that helper.
+- **Bicep ↔ custom domain caveat (Tier 9.8)**: the `bantryx.com` hostname binding and managed cert were attached via `az containerapp hostname add` + `bind` — they live **outside** Bicep. Bicep doesn't know the cert's name (it has a random suffix Bicep can't predict), and the current Bicep doesn't write the `customDomains` array on the Container App. **Day-to-day CD is safe** — `deploy.yml` only runs `az containerapp update --image`, which preserves both. **Risk fires** only on a manual `az deployment group create -f infra/main.bicep` without `customDomain=bantryx.com` AND a cert ID — that would un-bind the cert and revert `CORS_ORIGINS`/`PUBLIC_APP_URL` to the Azure FQDN. To re-bind: `az containerapp hostname bind --hostname bantryx.com --validation-method HTTP ...` and re-run `az containerapp update --set-env-vars CORS_ORIGINS=https://bantryx.com PUBLIC_APP_URL=https://bantryx.com`.
+- **Managed Postgres SSL (Tier 9.6)**: Azure DB for PostgreSQL requires TLS. The `DATABASE_URL` written into Key Vault by [infra/modules/db.bicep](infra/modules/db.bicep) appends `?sslmode=require`. Both [config/database.js](config/database.js) (sequelize-cli) and [models/index.js](models/index.js) (runtime) check for that string and opt into `dialectOptions: { ssl: { require: true, rejectUnauthorized: false } }`. **Don't drop the `sslmode=require` from production URLs** — connections will reject with "no pg_hba.conf entry ... no encryption." Local docker-compose Postgres URLs omit `sslmode` so SSL stays off there.
+- **Docker .sequelizerc (Tier 9.4)**: the runtime image must `COPY .sequelizerc` alongside `server.js` and the source dirs — without it sequelize-cli looks for the default `config/config.json` and fails with `Cannot find "/app/config/config.json"`. Audit [Dockerfile:47](Dockerfile#L47) if you reorganize the COPY block.
+- **OpenAPI dev-gating (Tier 9.3)**: `GET /api/openapi.json` and `GET /api/docs` are mounted **only when `NODE_ENV !== 'production'`** so the API surface isn't published in prod. The `app.use('/api', 404)` sentinel above the SPA fallback ensures unknown `/api/*` paths return JSON 404 instead of the SPA HTML. Don't move that sentinel above the dev-only block.
+- **CD pipeline image tags (Tier 9.7)**: every push to `main` builds an image tagged with `${{ github.sha }}` AND `latest`. The migration Job is updated to the new image **before** the app, so migrations always apply before the new revision serves traffic. If a migration fails, the `migrate` job exits non-zero and CD halts — no traffic shift. To recover: revert the bad migration and re-push.
 
 ---
 
@@ -114,7 +152,11 @@ Detailed handler references and existing patterns: [ARCHITECTURE.md §5](ARCHITE
 - **No "game starting soon" cron** — Tier 7
 - **No profile privacy** (every authed user can view every profile) — Tier 8.6 (parked)
 - **No real-time updates** — everything polls at 30 s — Tier 7
-- **No automated E2E tests** (Playwright deferred, needs Docker) — Tier 5.5 / 9.4
-- **Single-process leaderboard cache + refresh-token store** — fine today; needs Redis for multi-instance — Tier 10
+- **No automated E2E tests** (Playwright deferred) — Tier 5.5 (Docker is now available; unblocked)
+- **Single-process leaderboard cache** — fine today; needs managed Redis for multi-instance scale — Tier 10.4
+- **No `/readyz` endpoint** — `/healthz` is liveness only; readiness with DB + Redis pings — Tier 10.1
+- **No graceful SIGTERM shutdown** — drain on roll-out is `tini` SIGTERM-only — Tier 10.5
+- **Bicep ↔ custom domain drift** — cert binding + `CORS_ORIGINS`/`PUBLIC_APP_URL` env overrides live outside Bicep (see Critical considerations above). Reconcile when adding `customDomains: []` + a cert-ID param to `app.bicep` — Tier 9 follow-up
+- **TypeScript migration + Storybook** — parked at end of roadmap — Tier 9.10 / 9.11
 
-Recently shipped: **Tier 6** — CORS allowlist + helmet headers + account lockout + per-route rate limits + dropped `nedb-promises`; email service abstraction + email verification on register + password reset flow; HttpOnly cookie auth + rotating refresh tokens + CSRF double-submit + bearer-header removal; opt-in TOTP 2FA with bcrypt-hashed recovery codes. Plus **Tier 5 (core)** + **Tier 5.4b** — migrations framework, leaderboard cache, transactional cascades, structured logging, N+1 elimination, gzip compression, frontend error boundary + `/api/client-errors` + Sentry hook (opt-in). See [ARCHITECTURE.md §13](ARCHITECTURE.md) for full roadmap status.
+Recently shipped: **Tier 9** — ESLint/Prettier/Husky baseline + frontend code-splitting + OpenAPI docs (dev) + Dockerfile + docker-compose + GitHub Actions CI (lint/build/migrations) + Bicep IaC for Azure (Log Analytics, App Insights, ACR, Key Vault, Postgres Flex, Container Apps env + main app + migrate Job) + GitHub Actions CD (OIDC federation, build → migrate → roll out) + custom domain `bantryx.com` with Azure managed TLS + Cloudflare DNS + www→apex redirect. App is live at https://bantryx.com. Earlier: **Tier 6** — CORS allowlist + helmet headers + account lockout + per-route rate limits + email service + email verification + password reset + HttpOnly cookie auth + rotating refresh + CSRF + TOTP 2FA. **Tier 5 (core)** + **Tier 5.4b** — migrations framework + leaderboard cache + transactional cascades + structured logging + frontend error boundary + Sentry hook (opt-in). See [ARCHITECTURE.md §13](ARCHITECTURE.md) for full roadmap status.

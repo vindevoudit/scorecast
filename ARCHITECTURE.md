@@ -1695,13 +1695,103 @@ Or in one go: `npm start` (= `vite build && node server.js`). For production it'
 
 Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. Seed data is hand-curated in [data.json](data.json) and only re-runs when the users table is empty.
 
+### 11.6 Cloud Deployment (Tier 9)
+
+ScoreCast runs on Azure (`eastus2`) at https://bantryx.com. The whole stack is provisioned via Bicep IaC and updated by GitHub Actions CD on every push to `main`.
+
+#### Resource topology
+
+| Resource                 | Name                           | Role                                                                                                        | Cost/mo             |
+| ------------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------- | ------------------- |
+| Resource Group           | `scorecast-prod`               | Container for everything                                                                                    | —                   |
+| Container Apps env       | `scorecast-env-p3aaelev7xp52`  | Consumption plan; hosts the app + the migration Job                                                         | $0 idle             |
+| Container App            | `scorecast-app`                | The Node/Express server; ingress on `:3000` → `:443`; scale 0→3                                             | $0 idle, ~$1/1k req |
+| Container Apps Job       | `scorecast-migrate`            | One-shot `npm run db:migrate` triggered by CD before each roll-out                                          | $0 idle             |
+| Container Registry       | `scorecastacrp3aaelev7xp52`    | Stores `scorecast:<sha>` images. Basic SKU, admin disabled, AcrPull via managed identity                    | ~$5                 |
+| Postgres Flexible Server | `scorecast-pg-p3aaelev7xp52`   | B1ms (1 vCPU, 2 GB), Postgres 16, 32 GB storage, 7-day backups, public + firewall (`AllowAllAzureServices`) | ~$17                |
+| Key Vault                | `scorecast-kv-p3aaelev7xp`     | RBAC mode; holds `jwt-secret`, `database-url`, `postgres-admin-password`, `resend-api-key`                  | ~$0.10              |
+| Log Analytics workspace  | `scorecast-logs-p3aaelev7xp52` | Container Apps stdout sink; 1 GB/day cap                                                                    | ~$2                 |
+| Application Insights     | `scorecast-appi-p3aaelev7xp52` | APM (currently unwired in app code — env var present, SDK not yet imported)                                 | ~$2                 |
+| Azure AD app             | `scorecast-github-cd`          | Federated identity for GitHub OIDC; no client secret                                                        | —                   |
+| DNS                      | (Cloudflare, `bantryx.com`)    | Apex CNAME flattened to Container Apps FQDN, `www` proxied for redirect rule                                | $13/yr domain       |
+
+Idle total: **~$30–35/mo**.
+
+#### Bicep modules ([infra/](infra/))
+
+| File                        | What it provisions                                                                                                                                                                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.bicep`                | Orchestrator; takes `location`, `appName`, `imageTag`, `pgAdminPassword` (`@secure`), `customDomain`                                                                                                                                                                                            |
+| `modules/logs.bicep`        | Log Analytics workspace + Application Insights linked to it                                                                                                                                                                                                                                     |
+| `modules/registry.bicep`    | ACR Basic, admin disabled, anonymous pull disabled                                                                                                                                                                                                                                              |
+| `modules/secrets.bicep`     | Key Vault, RBAC mode, soft-delete 7d                                                                                                                                                                                                                                                            |
+| `modules/db.bicep`          | Postgres Flex B1ms; writes `database-url` (with `?sslmode=require`) and `postgres-admin-password` into Key Vault; firewall rule for Azure services                                                                                                                                              |
+| `modules/app.bicep`         | Container Apps env + main app; system-assigned managed identity + RBAC for AcrPull on the registry + Key Vault Secrets User on the vault; secret references via `keyVaultUrl`; liveness + readiness probes on `/healthz`; `publicAppUrl` defaults to the Azure FQDN until `customDomain` is set |
+| `modules/migrate-job.bicep` | Container Apps Job with `command: ['npm', 'run', 'db:migrate']`; same managed-identity RBAC pattern as the app                                                                                                                                                                                  |
+| `modules/dns.bicep`         | Conditional Azure DNS zone (only when `customDomain` is non-empty). Currently unused for production because Cloudflare handles `bantryx.com`                                                                                                                                                    |
+
+Resource names use `uniqueString(resourceGroup().id)` so re-deploys are idempotent and globally unique.
+
+#### Secret resolution path
+
+```
+Container App (system-assigned managed identity)
+  └─► Key Vault (RBAC role: Key Vault Secrets User)
+        ├─ jwt-secret             ◄── seeded once via `az keyvault secret set`
+        ├─ database-url           ◄── written by db.bicep at deploy time
+        ├─ resend-api-key         ◄── placeholder; replace with real key when ready
+        └─ postgres-admin-password ◄── written by db.bicep (kept for break-glass access)
+```
+
+The Container App's `secrets:` block references each Key Vault entry via `keyVaultUrl` + `identity: 'system'`. At container start, Container Apps resolves the references, sets the values as environment variables (e.g. `JWT_SECRET`, `DATABASE_URL`), and starts the process. The app reads them as plain `process.env.X` — no Key Vault SDK call in app code.
+
+#### CD pipeline ([.github/workflows/deploy.yml](.github/workflows/deploy.yml))
+
+Triggers on push to `main` or `workflow_dispatch`. Three sequential jobs:
+
+1. **`build-and-push`** — `npm ci` (with `HUSKY=0`) → `npm run lint` → `npm run build` → `azure/login@v2` via OIDC → `az acr login` → `docker build/push` with tags `<github-sha>` and `latest`. Outputs `image_tag` for later jobs.
+2. **`migrate`** — `azure/login@v2` → `az containerapp job update --image <new>` → `az containerapp job start scorecast-migrate` → polls `az containerapp job execution show` until `Succeeded`. **Fails the workflow on `Failed`/`Degraded`/timeout** — no traffic shift if migrations didn't apply.
+3. **`deploy`** — `azure/login@v2` → `az containerapp update --image <new>` → polls revision until `runningState: Running` → smokes `GET https://bantryx.com/healthz` and fails the workflow on non-200. Traffic shifts to the new revision automatically (single-revision mode).
+
+Typical run time: **5–8 min**. Failures keep the old revision live; rollback is "revert + push."
+
+#### Auth for CD
+
+GitHub Actions OIDC + Azure workload identity federation. The federated credential at `scorecast-github-cd` trusts the issuer `https://token.actions.githubusercontent.com` for the subject `repo:vindevoudit/scorecast:ref:refs/heads/main`. No long-lived service-principal password exists. The SP has:
+
+- `Contributor` on the `scorecast-prod` resource group
+- `AcrPush` on the ACR
+
+GitHub repo secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (no `AZURE_CLIENT_SECRET` — OIDC replaces it).
+
+#### Custom domain + TLS (Tier 9.8)
+
+`bantryx.com` is registered on Cloudflare Registrar and served by Cloudflare DNS:
+
+| Cloudflare record       | Value                                                                                 | Proxy                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `bantryx.com` CNAME     | Container Apps FQDN                                                                   | DNS only (grey-cloud — orange-cloud would terminate TLS at Cloudflare and break Azure's managed cert validation) |
+| `asuid.bantryx.com` TXT | Container Apps env's `customDomainVerificationId`                                     | DNS only                                                                                                         |
+| `www.bantryx.com` CNAME | `bantryx.com`                                                                         | Proxied (orange-cloud) so the redirect rule can fire                                                             |
+| Redirect rule           | `https://www.bantryx.com/*` → `https://bantryx.com/${1}` (301, preserve query string) | —                                                                                                                |
+
+Container Apps issues + binds a free Azure managed cert via HTTP-01 ACME validation (Container Apps platform serves `/.well-known/acme-challenge/*` automatically). Cert auto-renews every 6 months.
+
+#### Operational realities & one caveat
+
+- **MIGRATE_ON_BOOT is `false` in prod.** Migrations run **only** as a one-shot Container Apps Job before each roll-out; the app server never auto-migrates in cloud.
+- **`pino-pretty` isn't shipped to prod.** The runtime image is built with `npm ci --omit=dev`; the logger emits JSON when `NODE_ENV === 'production'` (which is set by both `app.bicep` and `docker-compose.yml`).
+- **Scale-to-zero cold-start** — first request after idle takes ~3–5 s. Acceptable for now; flip `min=1` in `app.bicep` (~$15/mo) if user complaints arrive.
+- **No managed Redis yet** — leaderboard cache + rate-limit + lockout counters are in-process. Single-instance scale only. Tier 10.4 will add managed Redis when horizontal scale becomes useful.
+- **Bicep ↔ custom domain caveat**: the `bantryx.com` hostname binding, managed cert (`mc-scorecast-env--bantryx-com-8689`), and the `CORS_ORIGINS`/`PUBLIC_APP_URL` env-var overrides were attached **outside Bicep** (via `az containerapp hostname add` + `bind` + `az containerapp update --set-env-vars`). Bicep doesn't currently express the cert binding (its name has a random suffix Bicep can't predict, and `app.bicep` leaves `customDomains:` empty when `customDomain=''`). **Day-to-day CD is safe** — `az containerapp update --image` doesn't touch `customDomains` or env vars. **The risk fires only** on a fresh `az deployment group create -f infra/main.bicep` without restoring the binding + env-var commands afterward. Reconciliation work (parameterize cert ID or add a deployment script to look it up) is a Tier 9 follow-up.
+
 ---
 
 ## 12. Known Limitations & Technical Debt
 
 | Area                         | Issue                                                                                                                                                                                                                                                                    | Tier                      |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
-| Tests                        | No automated tests at all (Playwright deferred from 5.5 because it needs Docker)                                                                                                                                                                                         | 5.5 / 9.4                 |
+| Tests                        | No automated tests at all (Playwright deferred from 5.5; Docker landed in 9.4 so this is now unblocked)                                                                                                                                                                  | 5.5                       |
 | External data                | No football API integration; admin enters games manually                                                                                                                                                                                                                 | 4b (deferred)             |
 | Live scores                  | No live score display; no auto-poll                                                                                                                                                                                                                                      | 4b (deferred)             |
 | Leagues / seasons            | Single global game pool; no `league` / `season` fields                                                                                                                                                                                                                   | 4b (deferred)             |
@@ -1712,11 +1802,12 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 | Profile privacy              | Every authenticated user can view every profile                                                                                                                                                                                                                          | 8.6 (parked)              |
 | Notification spam            | Bulk-setResult can produce many notifications in one request; no batching/dedup                                                                                                                                                                                          | 7                         |
 | Cache scope                  | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so they survive a restart, but the rate-limit + lockout counters are in-memory. Today the app runs single-process so this is fine | Tier 10.4 (Redis backend) |
-| Server-side log shipping     | pino → stdout only; no managed log aggregator (CloudWatch / Application Insights / Loki). Sentry covers errors but not access logs                                                                                                                                       | Tier 10.6                 |
-| Health / readiness probes    | No `/healthz` or `/readyz` endpoint; load balancers / Container Apps probes have nothing to hit                                                                                                                                                                          | Tier 10.1                 |
+| Server-side log shipping     | pino → stdout → Container Apps → Log Analytics workspace (Tier 9.6). Application Insights is provisioned but its SDK isn't wired into app code yet. Sentry covers errors but not access logs                                                                             | Tier 10.6                 |
+| Health / readiness probes    | `/healthz` exists (Tier 9.4) and is used by Container Apps liveness + readiness probes — but it doesn't ping the DB or Redis. A real readiness check (`/readyz` with DB ping) is still pending                                                                           | Tier 10.1                 |
 | Metrics                      | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters                                                                                                                                                                        | Tier 10.3                 |
 | Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset today                                                   | future                    |
 | Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code                                                                                                                   | future                    |
+| Bicep custom-domain drift    | `bantryx.com` binding + cert + `CORS_ORIGINS`/`PUBLIC_APP_URL` overrides live outside Bicep. A fresh `az deployment group create` without reconciling would un-bind the cert. Documented in §11.6                                                                        | Tier 9 follow-up          |
 
 ---
 
@@ -1733,13 +1824,14 @@ Summary:
 - 🟡 **Tier 4b** — Game-data quality remainder: external API integration, live scores, leagues/seasons, additional pick types, streaks, audit log. **All deferred** (requires API-Football key + schema additions).
 - ✅ **Tier 5 (core)** — Ops & reliability: migrations framework (5.1), leaderboard caching (5.2), transactional cascades (5.3), structured logging (5.4), N+1 elimination (5.7), HTTP compression (5.6).
 - ✅ **Tier 5.4b** — Frontend error reporting: React `ErrorBoundary`, `POST /api/client-errors`, window listeners + reporter, `X-Request-Id` capture, Sentry SDK opt-in. See §6.7.
-- 🟡 **Tier 5 (remainder)** — 5.5 Playwright E2E (deferred — needs Docker / Tier 9.4).
+- 🟡 **Tier 5.5** — Playwright E2E. Docker is now in place (Tier 9.4), so this is unblocked.
 - ✅ **Tier 6** — Security hardening: CORS allowlist (6.1), helmet (6.2), email service (6.3), password reset (6.4), email verification on register (6.5), account lockout (6.6), CSRF double-submit (6.7), HttpOnly cookie auth + rotating refresh tokens (6.8), TOTP 2FA (6.9), per-route rate limits (6.10), dropped `nedb-promises` (6.11). See §8.15.
 - ❌ **Tier 7** — Real-time & engagement: scheduler-driven notifications, WebSocket/SSE, web push, email digests, prefs.
 - ✅ **Tier 8** (minus 8.6) — User capabilities: group lifecycle (leave/transfer/delete), pick deletion, avatars, search, profile bio + displayName, comment edit + reactions, leaderboard sort + pagination, bulk admin actions.
 - ❌ **Tier 8.6** — Profile privacy (parked; small isolated change).
-- ❌ **Tier 9** — DX, packaging & cloud deploy: ESLint, code-splitting, Docker, CI/CD, IaC, domain + TLS, secrets, TypeScript (parked at end), Storybook (parked).
-- ❌ **Tier 10** — Observability & scale: health probes, Prometheus metrics, managed Redis (replaces single-process leaderboard cache), graceful shutdown, cloud log shipping.
+- ✅ **Tier 9** (less 9.10 TS + 9.11 Storybook) — DX, packaging & cloud deploy: ESLint + Prettier + Husky + lint-staged (9.1), frontend code-splitting (9.2), OpenAPI from zod (9.3, dev-only), Dockerfile + docker-compose + `/healthz` (9.4), GitHub Actions CI (9.5), Bicep IaC for Azure (9.6), Key Vault secrets wiring (9.9), CD workflow with OIDC (9.7), custom domain `bantryx.com` + Azure managed TLS (9.8). **App is live at https://bantryx.com.** See §11.6.
+- 🟡 **Tier 9 follow-ups** — TypeScript migration (9.10) and Storybook (9.11) parked at end of roadmap; Bicep ↔ custom-domain reconciliation (see §11.6) deferred.
+- ❌ **Tier 10** — Observability & scale: `/readyz` (10.1), Prometheus metrics (10.3), managed Redis (10.4, replaces single-process leaderboard cache), graceful SIGTERM shutdown (10.5), cloud log shipping wired into App Insights SDK (10.6).
 
 ---
 

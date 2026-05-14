@@ -2,6 +2,8 @@
 
 A social football-prediction web app. Pick winners, join groups with friends, send friend requests, earn badges, banter in comments, and climb probability-weighted leaderboards. Built with React + Vite on the frontend and Express + PostgreSQL on the backend.
 
+**Live at https://bantryx.com** — deployed to Azure Container Apps with CD from this repo's `main` branch.
+
 ---
 
 ## Features
@@ -58,18 +60,35 @@ Awarded automatically by server hooks:
 
 ## Tech Stack
 
-- **Frontend**: React 18, Vite 5, Tailwind CSS 3
-- **Backend**: Node.js, Express 4
-- **Database**: PostgreSQL with Sequelize 6 ORM; migrations via `sequelize-cli` + `umzug`
+### Application
+
+- **Frontend**: React 18, Vite 5, Tailwind CSS 3. Code-split via `React.lazy` for Admin / Profile / Picks-history routes.
+- **Backend**: Node.js 20, Express 4
+- **Database**: PostgreSQL 16 with Sequelize 6 ORM; migrations via `sequelize-cli` + `umzug`
 - **Auth**: HttpOnly cookie auth — 15-min access JWT + 30-day rotating refresh token, hashed in DB. `bcryptjs` for passwords; `speakeasy` + `qrcode` for TOTP 2FA
 - **CSRF**: double-submit cookie pattern (`sc_csrf` cookie + `X-CSRF-Token` header)
 - **Security headers**: `helmet` (CSP tuned for Vite + Tailwind + Sentry; HSTS; `X-Frame-Options: DENY`)
 - **Email**: pluggable transport via `lib/email.js` — Resend in production, log-only fallback in dev
-- **Validation**: `zod` on every POST / PUT body
+- **Validation**: `zod` on every POST / PUT body. OpenAPI 3.0 spec generated from the same schemas (`GET /api/docs` in dev)
 - **Rate limiting**: `express-rate-limit` on login, register, comments, friend-requests, picks, password-reset, and client-error endpoints
 - **Logging**: `pino` + `pino-http` with request-id correlation; optional Sentry SDK (server + browser) gated behind `SENTRY_DSN` / `VITE_SENTRY_DSN`
 - **HTTP**: gzip via `compression` middleware
 - **Leaderboard cache**: in-memory `Map` with 30-second TTL
+
+### Dev tooling (Tier 9.1–9.3)
+
+- **Lint + format**: ESLint 9 flat config + Prettier 3 + `husky` + `lint-staged`. Pre-commit auto-fixes; pre-push runs `npm run build`
+- **API docs**: `@asteasolutions/zod-to-openapi` → Swagger UI at `/api/docs` (dev-only)
+
+### Cloud deployment (Tier 9.4–9.9)
+
+- **Container image**: multi-stage `Dockerfile` on `node:20-alpine`, non-root uid 1001, `tini` PID 1, `HEALTHCHECK` on `/healthz`
+- **Local stack**: `docker-compose.yml` (app + `postgres:16-alpine` + `redis:7-alpine`, all with healthchecks)
+- **CI**: `.github/workflows/ci.yml` — lint, format-check, build, migrations smoke against an ephemeral Postgres on every PR
+- **CD**: `.github/workflows/deploy.yml` — push to `main` → build image → push to Azure Container Registry → run migrations as a Container Apps Job → roll a new Container App revision → smoke `https://bantryx.com/healthz`. Auth via GitHub OIDC federated credential (no long-lived secrets)
+- **Infrastructure as code**: Bicep modules in `infra/` (Log Analytics + App Insights, ACR, Key Vault, Postgres Flex B1ms, Container Apps env, main app, migration job)
+- **Cloud target**: Azure (`eastus2`) — Container Apps (Consumption, scale 0→3), Postgres Flex B1ms, Key Vault for secrets, system-assigned managed identity for auth to ACR + Key Vault
+- **Domain + TLS**: `bantryx.com` on Cloudflare DNS (grey-cloud) → apex CNAME to Azure FQDN; Azure managed TLS cert via HTTP-01 ACME validation; `www.bantryx.com` 301-redirects to apex via Cloudflare redirect rule
 
 ---
 
@@ -77,8 +96,10 @@ Awarded automatically by server hooks:
 
 ### Prerequisites
 
-- Node.js 18+
-- PostgreSQL 13+ running locally (or a remote URL)
+- Node.js 20+
+- PostgreSQL 16+ running locally (or a remote URL — production runs on Azure DB for PostgreSQL Flexible Server)
+- (Optional) Docker Desktop for the containerized local stack
+- (Optional, for cloud work) Azure CLI + Bicep, GitHub CLI
 
 ### 1. Database
 
@@ -122,13 +143,52 @@ npm run dev        # Vite on :5173 with /api proxy (terminal 2)
 
 Open <http://localhost:5173>.
 
-**Production**:
+**Production-like single process**:
 
 ```bash
 npm start          # vite build + node server.js, both served on :3000
 ```
 
 Open <http://localhost:3000>.
+
+**Full containerized stack** (mirrors the prod image; uses `NODE_ENV=production`):
+
+```bash
+docker compose up --build
+```
+
+Open <http://localhost:3000>. Note: cookies are `Secure` in this mode so login won't transmit over `http://localhost` — use the two-terminal dev flow for full UI testing.
+
+---
+
+## Deployment (Azure)
+
+Cloud target is Azure. CD auto-runs on push to `main`.
+
+### One-time setup (already done for this repo)
+
+- Resource group `scorecast-prod` in `eastus2`
+- Azure resources provisioned via `infra/main.bicep` — Container Apps + Postgres Flex + ACR + Key Vault + Log Analytics + App Insights
+- Azure AD app `scorecast-github-cd` with federated credential for `repo:vindevoudit/scorecast:ref:refs/heads/main`
+- GitHub repo secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
+- Custom domain `bantryx.com` bound to the Container App via Cloudflare DNS + Azure managed cert
+
+### What happens on `git push origin main`
+
+1. `.github/workflows/deploy.yml` runs:
+   - **build-and-push** — `npm ci` → lint → `npm run build` → `docker build` → push to ACR with tags `<sha>` and `latest`
+   - **migrate** — `az containerapp job update` then `az containerapp job start scorecast-migrate` → polls execution status; fails the workflow on non-success (no traffic shift)
+   - **deploy** — `az containerapp update --image <sha>` → polls revision until `Running` → smoke `https://bantryx.com/healthz`
+2. Total time ~5 min for a typical change
+3. Failure modes: build error / migration failure / new revision unhealthy / smoke fails → old revision continues serving; revert + re-push to recover
+
+### Cost (at this scale)
+
+~$30–40/mo Azure (Postgres B1ms dominates) + ~$13/yr domain. TLS, OIDC, CD pipeline all free. Detailed breakdown in `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md`.
+
+### Caveat: Bicep ↔ custom domain
+
+The `bantryx.com` hostname binding and managed cert were attached via `az containerapp hostname add` + `bind` — they live outside Bicep. The `CORS_ORIGINS` + `PUBLIC_APP_URL` env vars were updated via `az containerapp update --set-env-vars`. **Day-to-day CD via `deploy.yml` is safe** (it only does `--image` updates). But a fresh `az deployment group create -f infra/main.bicep` would un-bind the cert and revert the env vars. To reconcile cleanly, re-run the hostname-add/bind sequence and re-set the env vars after any Bicep redeploy. See [CLAUDE.md](CLAUDE.md) "Critical considerations" for the exact commands.
 
 ---
 
@@ -178,18 +238,23 @@ Highlights:
 
 ## Scripts
 
-| Command                     | What it does                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------- |
-| `npm install`               | Install dependencies                                                         |
-| `npm run dev`               | Vite dev server (frontend only) with `/api` proxy to `:3000`                 |
-| `npm run build`             | Build the frontend bundle to `dist/`                                         |
-| `npm start`                 | Build, then boot `server.js` (serves the bundle + API on `:3000`)            |
-| `npm run preview`           | Preview the production bundle without booting `server.js`                    |
-| `node server.js`            | Run the backend directly (assumes `dist/` already exists for static serving) |
-| `npm run db:migrate`        | Apply pending database migrations                                            |
-| `npm run db:migrate:undo`   | Roll back the most recent migration                                          |
-| `npm run db:migrate:status` | Show applied / pending migrations                                            |
-| `npm run db:seed`           | Run all idempotent seeders                                                   |
+| Command                       | What it does                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `npm install`                 | Install dependencies                                                         |
+| `npm run dev`                 | Vite dev server (frontend only) with `/api` proxy to `:3000`                 |
+| `npm run build`               | Build the frontend bundle to `dist/` (with hidden sourcemaps for Sentry)     |
+| `npm start`                   | Build, then boot `server.js` (serves the bundle + API on `:3000`)            |
+| `npm run preview`             | Preview the production bundle without booting `server.js`                    |
+| `node server.js`              | Run the backend directly (assumes `dist/` already exists for static serving) |
+| `npm run lint`                | ESLint over the repo                                                         |
+| `npm run format`              | Prettier `--write` over the repo                                             |
+| `npm run format:check`        | Prettier `--check` (used by CI)                                              |
+| `npm run db:migrate`          | Apply pending database migrations                                            |
+| `npm run db:migrate:undo`     | Roll back the most recent migration                                          |
+| `npm run db:migrate:undo:all` | Roll back all migrations (used by CI smoke test only)                        |
+| `npm run db:migrate:status`   | Show applied / pending migrations                                            |
+| `npm run db:seed`             | Run all idempotent seeders                                                   |
+| `docker compose up --build`   | Local containerized stack (app + Postgres + Redis)                           |
 
 ---
 
@@ -210,14 +275,15 @@ Highlights:
 - **Tier 4a** — Admin UI for game CRUD + user moderation
 - **Tier 5 (core) + 5.4b** — migrations framework, leaderboard cache, transactional cascades, structured logging, N+1 elimination, gzip, frontend error boundary + `/api/client-errors` + Sentry opt-in
 - **Tier 6** — security hardening: CORS allowlist, helmet headers, account lockout, per-route rate limits, email service abstraction, email verification on register, password reset, HttpOnly cookie auth + rotating refresh tokens, CSRF double-submit, TOTP 2FA
+- **Tier 9 (less 9.10 TS + 9.11 Storybook)** — ESLint/Prettier/Husky baseline, frontend code-splitting, OpenAPI docs (dev), Dockerfile + docker-compose, GitHub Actions CI, Bicep IaC for Azure, GitHub Actions CD with OIDC, custom domain `bantryx.com` + Azure managed TLS. **App is live at https://bantryx.com.**
 
 **Pending:**
 
 - **Tier 4b** — external football API, live scores, leagues / seasons, additional pick types, audit log (deferred — needs API key)
-- **Tier 5.5** — Playwright E2E (deferred — needs Docker from Tier 9.4)
+- **Tier 5.5** — Playwright E2E (Docker is now available; unblocked)
 - **Tier 7** — real-time push, scheduler-driven notifications, web push, email digests
 - **Tier 8.6** — profile privacy (parked)
-- **Tier 9** — Docker, CI/CD, IaC, cloud deploy, TypeScript, Storybook
-- **Tier 10** — health probes, Prometheus metrics, managed Redis, graceful shutdown, cloud log shipping
+- **Tier 9.10 / 9.11** — TypeScript migration + Storybook (parked at end of roadmap)
+- **Tier 10** — health probes (`/readyz`), Prometheus metrics, managed Redis, graceful SIGTERM shutdown, cloud log shipping
 
 Detailed planning docs are referenced from [CLAUDE.md](CLAUDE.md).

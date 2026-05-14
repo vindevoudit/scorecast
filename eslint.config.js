@@ -17,10 +17,11 @@ const nodeFileGlobs = [
   'validation/**/*.js',
   'badges/**/*.js',
   'config/**/*.js',
+  'tests/**/*.js',
   'tailwind.config.js',
   'postcss.config.js',
 ];
-const rootEsmFileGlobs = ['eslint.config.js', 'vite.config.js'];
+const rootEsmFileGlobs = ['eslint.config.js', 'vite.config.js', 'playwright.config.js'];
 
 export default [
   {

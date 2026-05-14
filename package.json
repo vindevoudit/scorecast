@@ -17,7 +17,10 @@
     "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all",
     "db:migrate:status": "sequelize-cli db:migrate:status",
     "db:seed": "sequelize-cli db:seed:all",
-    "db:seed:undo": "sequelize-cli db:seed:undo:all"
+    "db:seed:undo": "sequelize-cli db:seed:undo:all",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:seed": "node tests/e2e/fixtures/seed.js"
   },
   "lint-staged": {
     "*.{js,jsx}": [
@@ -59,6 +62,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.60.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "eslint": "^9.39.4",

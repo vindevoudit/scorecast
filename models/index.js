@@ -233,4 +233,5 @@ module.exports = {
   PasswordResetToken,
   RefreshToken,
   initDatabase,
+  runMigrations,
 };

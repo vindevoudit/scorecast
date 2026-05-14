@@ -36,6 +36,11 @@ pids/
 coverage/
 *.lcov
 
+# Playwright (Tier 5.5)
+playwright-report/
+test-results/
+playwright/.cache/
+
 # nyc test coverage
 .nyc_output/
 

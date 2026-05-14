@@ -20,7 +20,6 @@ import { useAuth } from './hooks/useAuth';
 import { useData } from './hooks/useData';
 import { useNotifications } from './hooks/useNotifications';
 import { useGames } from './hooks/useGames';
-import { usePicks } from './hooks/usePicks';
 
 const PicksHistory = lazy(() => import('./components/PicksHistory'));
 const ProfileView = lazy(() => import('./components/ProfileView'));
@@ -40,6 +39,11 @@ const BASE_TABS = [
 const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 
 function App() {
+  // Tier 13 Chunk 5 — App.jsx is the layout shell. After component
+  // migration, the only handlers App.jsx still touches are the ones that
+  // cross context boundaries (auth + dashboard refresh after login) or
+  // tie into local UI state (the create-group form, completed-games
+  // toggle). Everything else lives inside the components that render it.
   const {
     user,
     authData,
@@ -55,15 +59,11 @@ function App() {
     handleForgotPassword,
     handleResetPassword,
     handle2faVerify: auth2faVerify,
-    handle2faSetup,
-    handle2faConfirm,
-    handle2faDisable,
     performLogout,
     initialAuthData,
   } = useAuth();
 
   const {
-    request,
     bootDone,
     loading,
     view,
@@ -75,13 +75,9 @@ function App() {
     groupOffset,
     groupLimit,
     selectedGroupId,
-    friends,
     discoverGroups,
     ownProfile,
-    profileUsername,
-    profile,
-    profileLoading,
-    profileBusy,
+    picks,
     handleCreateGroup,
     handleLeaveGroup,
     handleTransferGroup,
@@ -90,20 +86,10 @@ function App() {
     handleInvite,
     handleAcceptInvite,
     handleDeclineInvite,
-    handleSendFriendRequest,
-    handleAcceptFriend,
-    handleDeclineFriend,
-    handleUnfriend,
     openProfile,
-    closeProfile,
-    handleFriendAction,
-    handleSaveProfile,
     handleChangeGroupOrder,
     handleChangeGroupOffset,
     handleGroupSelection,
-    refreshGames,
-    refreshPicks,
-    refreshLeaderboard,
     loadDashboard,
   } = useData();
 
@@ -131,9 +117,8 @@ function App() {
     }
   };
 
-  const { status, showStatus } = useNotifications();
+  const { status } = useNotifications();
   const { games, upcomingGames, liveGames, completedGames } = useGames();
-  const { picks, pickMap, submitPick, removePick } = usePicks();
 
   const tabs = useMemo(
     () => (user?.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS),
@@ -141,13 +126,9 @@ function App() {
   );
 
   const showCompleted = useShowCompletedToggle();
-  const handleCommentError = (message) => {
-    if (message && message !== 'Session expired') showStatus(message);
-  };
 
   // Hoist the Create-Group form submit into a small adapter so the form
-  // continues to take an event (e.preventDefault) but routes the body
-  // through DataContext.handleCreateGroup.
+  // keeps its event signature but routes the body through DataContext.
   const onCreateGroupSubmit = async (event) => {
     event.preventDefault();
     await handleCreateGroup({ name: authData.groupName, visibility: authData.groupVisibility });
@@ -162,18 +143,7 @@ function App() {
       {list.length === 0 ? (
         <EmptyState title={emptyText} />
       ) : (
-        list.map((game) => (
-          <GameCard
-            key={game.id}
-            game={game}
-            existingPick={pickMap.get(game.id)}
-            onPickSubmit={submitPick}
-            onPickRemove={removePick}
-            currentUserId={user?.id}
-            request={request}
-            onError={handleCommentError}
-          />
-        ))
+        list.map((game) => <GameCard key={game.id} game={game} />)
       )}
     </div>
   );
@@ -227,8 +197,6 @@ function App() {
         </div>
 
         <SearchBar
-          request={request}
-          onSelectUser={openProfile}
           onSelectGroup={async (g) => {
             if (g.isMember) {
               setView('groups');
@@ -238,10 +206,9 @@ function App() {
             }
           }}
           onSelectGame={() => setView('games')}
-          onError={handleCommentError}
         />
 
-        <NotificationBell request={request} onError={handleCommentError} />
+        <NotificationBell />
 
         <button
           onClick={() => setConfirmingLogout(true)}
@@ -280,11 +247,6 @@ function App() {
               {completedGames.length > 0 && (
                 <CompletedSection
                   completedGames={completedGames}
-                  pickMap={pickMap}
-                  submitPick={submitPick}
-                  request={request}
-                  currentUserId={user?.id}
-                  onError={handleCommentError}
                   showCompleted={showCompleted.value}
                   setShowCompleted={showCompleted.set}
                 />
@@ -468,17 +430,7 @@ function App() {
               </div>
 
               <div className="mt-6">
-                <FriendsList
-                  friends={friends.friends}
-                  incoming={friends.incoming}
-                  outgoing={friends.outgoing}
-                  onSendRequest={handleSendFriendRequest}
-                  onAccept={handleAcceptFriend}
-                  onDecline={handleDeclineFriend}
-                  onCancel={handleUnfriend}
-                  onUnfriend={handleUnfriend}
-                  onSelectUser={openProfile}
-                />
+                <FriendsList />
               </div>
             </div>
 
@@ -550,15 +502,7 @@ function App() {
               <p className="text-sm text-slate-400">Loading your profile…</p>
             ) : (
               <Suspense fallback={<LazyFallback label="Loading profile…" />}>
-                <ProfileView
-                  profile={ownProfile}
-                  editable
-                  onSaveProfile={handleSaveProfile}
-                  twoFactorEnabled={Boolean(user?.twoFactorEnabled)}
-                  on2faSetup={handle2faSetup}
-                  on2faConfirm={handle2faConfirm}
-                  on2faDisable={handle2faDisable}
-                />
+                <ProfileView profile={ownProfile} editable />
               </Suspense>
             )}
           </div>
@@ -591,15 +535,7 @@ function App() {
 
         {view === 'admin' && user?.role === 'admin' && (
           <Suspense fallback={<LazyFallback label="Loading admin panel…" />}>
-            <AdminPanel
-              request={request}
-              currentUserId={user?.id}
-              onAfterGameChange={async () => {
-                await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
-              }}
-              onError={(msg) => msg && msg !== 'Session expired' && showStatus(msg)}
-              onSuccess={(msg) => msg && showStatus(msg)}
-            />
+            <AdminPanel />
           </Suspense>
         )}
       </section>
@@ -614,14 +550,7 @@ function App() {
         onCancel={() => setConfirmingLogout(false)}
       />
 
-      <ProfileDrawer
-        open={Boolean(profileUsername)}
-        profile={profile}
-        loading={profileLoading}
-        busy={profileBusy}
-        onClose={closeProfile}
-        onFriendAction={handleFriendAction}
-      />
+      <ProfileDrawer />
     </div>
   );
 
@@ -744,16 +673,7 @@ function useShowCompletedToggle() {
   return { value, set: (next) => set((prev) => (typeof next === 'function' ? next(prev) : next)) };
 }
 
-function CompletedSection({
-  completedGames,
-  pickMap,
-  submitPick,
-  request,
-  currentUserId,
-  onError,
-  showCompleted,
-  setShowCompleted,
-}) {
+function CompletedSection({ completedGames, showCompleted, setShowCompleted }) {
   return (
     <div className="space-y-4">
       <button
@@ -764,18 +684,7 @@ function CompletedSection({
       >
         {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
       </button>
-      {showCompleted &&
-        completedGames.map((game) => (
-          <GameCard
-            key={game.id}
-            game={game}
-            existingPick={pickMap.get(game.id)}
-            onPickSubmit={submitPick}
-            currentUserId={currentUserId}
-            request={request}
-            onError={onError}
-          />
-        ))}
+      {showCompleted && completedGames.map((game) => <GameCard key={game.id} game={game} />)}
     </div>
   );
 }

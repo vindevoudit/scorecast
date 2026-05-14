@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { timeAgo } from '../utils/time';
 import Avatar from './Avatar';
+import { useRequest } from '../hooks/useRequest';
+import { useAuth } from '../hooks/useAuth';
+import { useNotifications } from '../hooks/useNotifications';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
 
@@ -109,7 +112,16 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
   );
 }
 
-function CommentThread({ gameId, currentUserId, request, onError }) {
+function CommentThread({ gameId }) {
+  // Tier 13 Chunk 5 — was driven by props; now reads request + currentUserId
+  // + showStatus from the surrounding contexts directly.
+  const request = useRequest();
+  const { user } = useAuth();
+  const { showStatus } = useNotifications();
+  const currentUserId = user?.id;
+  const onError = (msg) => {
+    if (msg && msg !== 'Session expired') showStatus(msg);
+  };
   const [open, setOpen] = useState(false);
   const [comments, setComments] = useState([]);
   const [body, setBody] = useState('');

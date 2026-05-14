@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { timeAgo } from '../utils/time';
+import { useRequest } from '../hooks/useRequest';
+import { useNotifications } from '../hooks/useNotifications';
 
-function NotificationBell({ request, onError }) {
+function NotificationBell() {
+  // Tier 13 Chunk 5 — reads request + showStatus from context.
+  const request = useRequest();
+  const { showStatus } = useNotifications();
+  const onError = (msg) => {
+    if (msg && msg !== 'Session expired') showStatus(msg);
+  };
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);

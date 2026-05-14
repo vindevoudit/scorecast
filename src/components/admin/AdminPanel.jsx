@@ -1,7 +1,10 @@
 import GameManager from './GameManager';
 import UserManager from './UserManager';
 
-function AdminPanel({ request, currentUserId, onAfterGameChange, onError, onSuccess }) {
+// Tier 13 Chunk 5 — AdminPanel is now a layout shell. GameManager and
+// UserManager each consume request + showStatus + (for GameManager) the
+// DataContext refreshers via hooks.
+function AdminPanel() {
   return (
     <div className="space-y-6">
       <div className="rounded-3xl border border-amber-800/50 bg-amber-950/30 p-5">
@@ -10,18 +13,8 @@ function AdminPanel({ request, currentUserId, onAfterGameChange, onError, onSucc
           Changes here affect every user. Use the destructive actions carefully.
         </p>
       </div>
-      <GameManager
-        request={request}
-        onAfterChange={onAfterGameChange}
-        onError={onError}
-        onSuccess={onSuccess}
-      />
-      <UserManager
-        request={request}
-        currentUserId={currentUserId}
-        onError={onError}
-        onSuccess={onSuccess}
-      />
+      <GameManager />
+      <UserManager />
     </div>
   );
 }

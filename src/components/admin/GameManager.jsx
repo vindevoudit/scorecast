@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import ConfirmModal from '../ConfirmModal';
+import { useRequest } from '../../hooks/useRequest';
+import { useNotifications } from '../../hooks/useNotifications';
+import { useData } from '../../hooks/useData';
 
 const EMPTY_FORM = {
   homeTeam: '',
@@ -176,7 +179,21 @@ function GameRow({ game, onSave, onSetResult, onDelete, busy }) {
   );
 }
 
-function GameManager({ request, onAfterChange, onError, onSuccess }) {
+function GameManager() {
+  // Tier 13 Chunk 5 — context-driven. After any admin mutation, refresh
+  // the DataContext caches (games/picks/leaderboard) so the surrounding
+  // UI reflects the change.
+  const request = useRequest();
+  const { showStatus } = useNotifications();
+  const { refreshGames, refreshPicks, refreshLeaderboard } = useData();
+  const onError = (msg) => {
+    if (msg && msg !== 'Session expired') showStatus(msg);
+  };
+  const onSuccess = (msg) => msg && showStatus(msg);
+  const onAfterChange = async () => {
+    await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
+  };
+
   const [games, setGames] = useState([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);

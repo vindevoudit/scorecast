@@ -1,6 +1,7 @@
 import { scorePick } from '../utils/scoring';
 import { useCountdown } from '../utils/time';
 import CommentThread from './CommentThread';
+import { usePicks } from '../hooks/usePicks';
 
 function formatProbability(value) {
   return `${Math.round(value * 100)}%`;
@@ -32,15 +33,12 @@ function teamCardClass(side, game) {
   return `${base} bg-slate-950/70 opacity-60`;
 }
 
-function GameCard({
-  game,
-  existingPick,
-  onPickSubmit,
-  onPickRemove,
-  currentUserId,
-  request,
-  onError,
-}) {
+function GameCard({ game }) {
+  // Tier 13 Chunk 5 — `game` is the only data prop; everything else comes
+  // through usePicks (pickMap + submit/remove) and CommentThread now
+  // reads its own context.
+  const { pickMap, submitPick, removePick } = usePicks();
+  const existingPick = pickMap.get(game.id) || null;
   const upcoming = isUpcomingGame(game);
   const countdown = useCountdown(game.date);
 
@@ -130,7 +128,7 @@ function GameCard({
         <button
           className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'home' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:bg-cyan-500/20'}`}
           disabled={!upcoming}
-          onClick={() => onPickSubmit(game.id, 'home')}
+          onClick={() => submitPick(game.id, 'home')}
           aria-label={`Pick ${game.homeTeam} to win`}
         >
           Pick {game.homeTeam}
@@ -138,18 +136,18 @@ function GameCard({
         <button
           className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'away' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-slate-700 bg-slate-950/90 text-slate-100 hover:border-slate-500 hover:bg-slate-900'}`}
           disabled={!upcoming}
-          onClick={() => onPickSubmit(game.id, 'away')}
+          onClick={() => submitPick(game.id, 'away')}
           aria-label={`Pick ${game.awayTeam} to win`}
         >
           Pick {game.awayTeam}
         </button>
       </div>
 
-      {upcoming && existingPickId && onPickRemove && (
+      {upcoming && existingPickId && (
         <div className="mt-3 flex justify-end">
           <button
             type="button"
-            onClick={() => onPickRemove(existingPickId)}
+            onClick={() => removePick(existingPickId)}
             className="text-xs text-slate-400 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             Undo pick
@@ -157,14 +155,7 @@ function GameCard({
         </div>
       )}
 
-      {request && (
-        <CommentThread
-          gameId={game.id}
-          currentUserId={currentUserId}
-          request={request}
-          onError={onError}
-        />
-      )}
+      <CommentThread gameId={game.id} />
     </div>
   );
 }

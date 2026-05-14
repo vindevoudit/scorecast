@@ -1,8 +1,25 @@
 import { lazy, Suspense, useEffect } from 'react';
+import { useData } from '../hooks/useData';
 
 const ProfileView = lazy(() => import('./ProfileView'));
 
-function ProfileDrawer({ open, profile, loading, onClose, onFriendAction, busy }) {
+function ProfileDrawer() {
+  // Tier 13 Chunk 5 — fully self-contained. Open/close + drawer profile +
+  // friend-action busy state all flow from DataContext.
+  const {
+    profileUsername,
+    profile,
+    profileLoading,
+    profileBusy,
+    closeProfile,
+    handleFriendAction,
+  } = useData();
+  const open = Boolean(profileUsername);
+  const loading = profileLoading;
+  const busy = profileBusy;
+  const onClose = closeProfile;
+  const onFriendAction = handleFriendAction;
+
   useEffect(() => {
     if (!open) return undefined;
     const handleKey = (event) => {

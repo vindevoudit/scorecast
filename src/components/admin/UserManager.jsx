@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import ConfirmModal from '../ConfirmModal';
+import { useRequest } from '../../hooks/useRequest';
+import { useAuth } from '../../hooks/useAuth';
+import { useNotifications } from '../../hooks/useNotifications';
 
-function UserManager({ request, currentUserId, onError, onSuccess }) {
+function UserManager() {
+  // Tier 13 Chunk 5 — context-driven.
+  const request = useRequest();
+  const { user } = useAuth();
+  const { showStatus } = useNotifications();
+  const currentUserId = user?.id;
+  const onError = (msg) => {
+    if (msg && msg !== 'Session expired') showStatus(msg);
+  };
+  const onSuccess = (msg) => msg && showStatus(msg);
+
   const [users, setUsers] = useState([]);
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);

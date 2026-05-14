@@ -2,6 +2,8 @@ import { useState } from 'react';
 import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
 import TwoFactorSetup from './TwoFactorSetup';
+import { useAuth } from '../hooks/useAuth';
+import { useData } from '../hooks/useData';
 
 function formatDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
@@ -30,17 +32,17 @@ function friendButtonProps(friendStatus) {
   }
 }
 
-function ProfileView({
-  profile,
-  onFriendAction,
-  onSaveProfile,
-  busy,
-  editable,
-  twoFactorEnabled,
-  on2faSetup,
-  on2faConfirm,
-  on2faDisable,
-}) {
+function ProfileView({ profile, onFriendAction, busy, editable }) {
+  // Tier 13 Chunk 5 — self/edit-only handlers come from hooks. The drawer
+  // path still passes onFriendAction + busy as props because that lifecycle
+  // (open profile → click action → close drawer) lives in DataContext.
+  const { user, handle2faSetup, handle2faConfirm, handle2faDisable } = useAuth();
+  const { handleSaveProfile: onSaveProfile } = useData();
+  const twoFactorEnabled = Boolean(user?.twoFactorEnabled);
+  const on2faSetup = handle2faSetup;
+  const on2faConfirm = handle2faConfirm;
+  const on2faDisable = handle2faDisable;
+
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
   const [bio, setBio] = useState(profile?.bio || '');

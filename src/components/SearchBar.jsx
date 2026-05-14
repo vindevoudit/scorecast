@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRequest } from '../hooks/useRequest';
+import { useNotifications } from '../hooks/useNotifications';
+import { useData } from '../hooks/useData';
 
 function formatGameDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
 }
 
-function SearchBar({ request, onSelectUser, onSelectGroup, onSelectGame, onError }) {
+// Tier 13 Chunk 5 — request + showStatus + openProfile come from contexts.
+// onSelectGroup + onSelectGame stay as callback props because they encode
+// App.jsx-specific view-routing decisions (which tab to open, whether to
+// auto-join a public group). Search itself doesn't know about that.
+function SearchBar({ onSelectGroup, onSelectGame }) {
+  const request = useRequest();
+  const { showStatus } = useNotifications();
+  const { openProfile } = useData();
+  const onSelectUser = openProfile;
+  const onError = (msg) => {
+    if (msg && msg !== 'Session expired') showStatus(msg);
+  };
   const [q, setQ] = useState('');
   const [results, setResults] = useState({ users: [], groups: [], games: [] });
   const [open, setOpen] = useState(false);

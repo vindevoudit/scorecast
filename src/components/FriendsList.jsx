@@ -1,17 +1,23 @@
 import { useState } from 'react';
 import EmptyState from './EmptyState';
+import { useFriends } from '../hooks/useFriends';
+import { useData } from '../hooks/useData';
 
-function FriendsList({
-  friends,
-  incoming,
-  outgoing,
-  onSendRequest,
-  onAccept,
-  onDecline,
-  onCancel,
-  onUnfriend,
-  onSelectUser,
-}) {
+function FriendsList() {
+  // Tier 13 Chunk 5 — fully self-contained. Friends data + handlers come
+  // from useFriends; profile navigation from useData (openProfile).
+  const {
+    friends: friendsData,
+    handleSendFriendRequest: onSendRequest,
+    handleAcceptFriend: onAccept,
+    handleDeclineFriend: onDecline,
+    handleUnfriend,
+  } = useFriends();
+  const { friends, incoming, outgoing } = friendsData;
+  const onCancel = handleUnfriend;
+  const onUnfriend = handleUnfriend;
+  const { openProfile: onSelectUser } = useData();
+
   const [username, setUsername] = useState('');
 
   const handleSubmit = async (event) => {

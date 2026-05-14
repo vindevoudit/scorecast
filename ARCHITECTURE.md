@@ -241,7 +241,11 @@ ScoreCast/
 │
 ├── src/                                 # React frontend
 │   ├── main.jsx                         # React.createRoot bootstrap; provider stack: NotificationProvider → AuthProvider → DataProvider → App (Tier 13.6); mounts ErrorBoundary, installs clientErrorReporter, calls initSentry()
-│   ├── App.jsx                          # ~780 LOC (Tier 13.6); layout shell that consumes hooks. State + handlers moved into contexts/
+│   ├── App.jsx                          # ~71 LOC after Tier 13 Chunk 6 — pure layout shell: gradient chrome + title + status banner + 3-way switch (Skeleton/Auth/Dashboard view).
+│   ├── views/                           # Tier 13 Chunk 6 — view-level components consumed by App.jsx
+│   │   ├── SkeletonView.jsx             # placeholder shown while the initial dashboard fetch is in flight
+│   │   ├── AuthView.jsx                 # login / register / forgot / reset / 2FA challenge — composes loadDashboard with auth handlers internally
+│   │   └── DashboardView.jsx            # the authenticated UI (tabs, games, groups, leaderboard, profile, admin). Consumes useAuth/useData/useGames directly
 │   ├── contexts/                        # Tier 13.6 React Context providers
 │   │   ├── NotificationContext.jsx      # status banner + scorecast:client-error subscription
 │   │   ├── AuthContext.jsx              # user, authData, auth handlers (login/register/forgot/reset), 2FA flow, URL token consumption
@@ -547,8 +551,18 @@ Verified property: a mid-cascade exception leaves the parent row + all child row
 ### 6.1 Build Pipeline
 
 ```
-src/main.jsx  →  React.createRoot()  →  <App />
-src/App.jsx + components/  →  Vite (esbuild + Rollup)  →  dist/index.html, dist/assets/*.js, *.css
+src/main.jsx  →  React.createRoot()
+              →  <ErrorBoundary>
+                   <NotificationProvider>
+                     <AuthProvider>
+                       <DataProvider>
+                         <App />                  // Tier 13: layout shell only
+                           → <SkeletonView>       // initial boot
+                           → <AuthView>           // unauthenticated
+                           → <DashboardView>      // authenticated UI
+
+src/App.jsx + src/views/ + src/contexts/ + src/hooks/ + components/
+  →  Vite (esbuild + Rollup)  →  dist/index.html, dist/assets/*.js, *.css
 ```
 
 `npm run dev` starts Vite's dev server on `localhost:5173` with HMR. The dev server proxies `/api/*` to `localhost:3000` (configured in [vite.config.js](vite.config.js)), so the frontend code can use relative URLs in both dev and prod with no env-var gymnastics.
@@ -557,75 +571,103 @@ src/App.jsx + components/  →  Vite (esbuild + Rollup)  →  dist/index.html, d
 
 ### 6.2 State Management
 
-`src/App.jsx` is the **single source of truth** for all client state. There is no Context, no Redux, no Zustand. State is held in roughly two dozen `useState` hooks at the top of the component:
+Tier 13 (Chunks 6.x) moved client state out of `App.jsx` into three React Context providers stacked in [src/main.jsx](src/main.jsx). There is **no Redux, no Zustand, no React Router** — Context + `useState` is sufficient at this scale.
 
 ```
-user, bootDone,                                // Tier 6.8: no more `token` — cookies are the source of truth
-games, groups, picks, pendingInvites,
-leaderboard, selectedGroupId, view, status, loading,
-authData, authView, forgotSent,                // Tier 6.4/6.5/6.9: 'auth'|'forgot'|'reset'|'twofa'
-confirmingLogout, showCompleted,
-profileUsername, profile, profileLoading, profileBusy,
-friends, discoverGroups, ownProfile,
-groupOrderBy, groupOffset                      // Tier 8.8: leaderboard sort + pagination
+<NotificationProvider>     // status banner toast (Tier 13.6)
+  <AuthProvider>           // user, authData, authView, 2FA flow (Tier 13.6)
+    <DataProvider>         // games, picks, groups, leaderboard, friends, profile + every mutation handler
+      <App />              // ~71 LOC layout shell; routes between SkeletonView / AuthView / DashboardView
 ```
 
-**No localStorage** (Tier 6.8). Auth state is inferred from `user` (which is set by a successful `/api/me` boot fetch); the cookies that actually authenticate the user are HttpOnly and invisible to JS. `bootDone` tracks whether the initial `/api/me` round-trip completed so the UI shows the skeleton view until then (instead of briefly flashing the login form to an authenticated user).
+The state slots that used to live in `App.jsx` now live as `useState` inside the appropriate provider:
 
-Derived state uses `useMemo` (`pickMap`, `upcomingGames/liveGames/completedGames`, `tabs`).
+```
+NotificationContext:  status                                              // single toast string
+AuthContext:          user, authData, authView, forgotSent, confirmingLogout
+                      // authView ∈ 'auth' | 'forgot' | 'reset' | 'twofa'
+DataContext:          bootDone, loading, view, games, groups, picks,
+                      pendingInvites, leaderboard, groupOrderBy, groupOffset,
+                      selectedGroupId, friends, discoverGroups, ownProfile,
+                      profileUsername, profile, profileLoading, profileBusy
+```
 
-> **Note on `pickMap`**: it stores the **full pick object** keyed by `gameId`, not just the choice. This was changed in Tier 8.2 so `GameCard` can pass `existingPickId` to the undo-pick handler. The card derives `existingChoice = existingPick?.choice` for the visual state.
+**Cross-context coordination is event-driven, not imperative.** Provider order matters:
 
-`useCallback` is used for the `request` helper and `fetchProfile` — they're passed to children (`NotificationBell`, `CommentThread`) where stable references matter for `useEffect` dependencies.
+- `AuthContext` only manages user state. When the user logs in / out, it flips `user` and calls `showStatus` from `NotificationContext`. It does **not** know about `DataContext`.
+- `DataContext` watches `user` via `useEffect`. When `user` flips from null → set (login), it triggers `loadDashboard()`. When it flips back to null (logout / session-expired), it wipes its own slots in a single effect.
+- `useRequest` ([src/hooks/useRequest.js](src/hooks/useRequest.js)) is the fetch wrapper consumed by every component that talks to `/api/*`. On a 401, it calls `clearSession` from `AuthContext`, which trips the user → null effect in `DataContext`, which wipes data. No component has to know about teardown.
 
-### 6.3 The `request()` Helper
+**Selector hooks** ([src/hooks/](src/hooks/)) let components import the narrow slice they need:
 
-The heart of frontend-backend communication. Rewritten in Tier 6.8 to handle cookie auth, CSRF, and transparent token refresh:
+- `useAuth` / `useData` / `useNotifications` — direct re-exports of the context value
+- `useGames` — `{ games, upcomingGames, liveGames, completedGames, refreshGames }` (the segmentation `useMemo` moved here from App.jsx)
+- `usePicks` — `{ picks, pickMap, submitPick, removePick }` (pickMap built here)
+- `useGroups` / `useLeaderboard` / `useFriends` — projections on `useData()`
+
+> **Note on `pickMap`**: it stores the **full pick object** keyed by `gameId`, not just the choice. This was changed in Tier 8.2 so `GameCard` can pass `existingPickId` to the undo-pick handler. Tier 13 moved this `useMemo` into [src/hooks/usePicks.js](src/hooks/usePicks.js).
+
+**No localStorage** (Tier 6.8). Auth state is inferred from `user` (set by a successful `/api/me` boot fetch); the cookies that actually authenticate the user are HttpOnly and invisible to JS. `bootDone` tracks whether the initial `/api/me` round-trip completed so the UI shows the skeleton view until then (instead of briefly flashing the login form to an authenticated user).
+
+### 6.3 The `useRequest()` Hook
+
+The heart of frontend-backend communication. Originally an inline `useCallback` in `App.jsx`; Tier 13 Chunk 3 extracted it into [src/hooks/useRequest.js](src/hooks/useRequest.js) so any component or context can call it without prop-drilling. It handles cookie auth, CSRF, and transparent token refresh:
 
 ```js
-const request = useCallback(async (path, options = {}) => {
-  const method = (options.method || 'GET').toUpperCase();
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-  if (method !== 'GET' && method !== 'HEAD') {
-    const csrf = getCookie('sc_csrf');
-    if (csrf) headers['X-CSRF-Token'] = csrf;
-  }
+export function useRequest() {
+  const { user, clearSession } = useAuth();
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
-  const doFetch = () => fetch(path, { credentials: 'include', ...options, headers });
-
-  let response = await doFetch();
-  let reqId = response.headers.get('X-Request-Id');
-  if (reqId) setLastRequestId(reqId);
-
-  // Refresh-then-retry: on 401, try POST /api/auth/refresh once and retry.
-  // /api/auth/* are exempt to prevent recursion.
-  if (response.status === 401 && !path.startsWith('/api/auth/')) {
-    const refreshResp = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      credentials: 'include',
-    });
-    if (refreshResp.status === 204) {
-      response = await doFetch();
-      const newReqId = response.headers.get('X-Request-Id');
-      if (newReqId) {
-        setLastRequestId(newReqId);
-        reqId = newReqId;
+  return useCallback(
+    async (path, options = {}) => {
+      const method = (options.method || 'GET').toUpperCase();
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (method !== 'GET' && method !== 'HEAD') {
+        const csrf = getCookie('sc_csrf');
+        if (csrf) headers['X-CSRF-Token'] = csrf;
       }
-    }
-  }
 
-  if (response.status === 401) {
-    if (userRef.current) {
-      handleSessionExpired();
-      throw new Error('Session expired');
-    }
-    const err = new Error('Authentication required');
-    err.reqId = reqId;
-    err.status = 401;
-    throw err;
-  }
-  // ... 204 / non-ok / JSON parsing as before
-}, []);
+      const doFetch = () => fetch(path, { credentials: 'include', ...options, headers });
+
+      let response = await doFetch();
+      let reqId = response.headers.get('X-Request-Id');
+      if (reqId) setLastRequestId(reqId);
+
+      // Refresh-then-retry: on 401, try POST /api/auth/refresh once and retry.
+      // /api/auth/* are exempt to prevent recursion.
+      if (response.status === 401 && !path.startsWith('/api/auth/')) {
+        const refreshResp = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (refreshResp.status === 204) {
+          response = await doFetch();
+          const newReqId = response.headers.get('X-Request-Id');
+          if (newReqId) {
+            setLastRequestId(newReqId);
+            reqId = newReqId;
+          }
+        }
+      }
+
+      if (response.status === 401) {
+        if (userRef.current) {
+          clearSession();
+          throw new Error('Session expired');
+        }
+        const err = new Error('Authentication required');
+        err.reqId = reqId;
+        err.status = 401;
+        throw err;
+      }
+      // ... 204 / non-ok / JSON parsing as before
+    },
+    [clearSession],
+  );
+}
 ```
 
 Important properties:
@@ -634,11 +676,13 @@ Important properties:
 - **CSRF auto-injection**: state-changing methods read `sc_csrf` via [src/lib/cookies.js](src/lib/cookies.js) and send it as `X-CSRF-Token`. The cookie is set by the server's CSRF middleware on the first request of any session — so by the time the SPA needs to send a mutation, the cookie is already present.
 - **Refresh-then-retry**: a 401 on a non-`/api/auth/*` path triggers one `POST /api/auth/refresh`. On success (204 + new cookies), the original request is retried. On failure, the original 401 is surfaced. This is what lets the user keep using the app for 30 days without re-logging-in, even though access tokens expire every 15 minutes.
 - **No retry loop**: `/api/auth/refresh` itself is exempted from refresh-retry; if refresh returns 401, we drop straight to the session-expired path.
-- **Auto-handles 401**: when the (possibly-retried) response is still 401 **and** there is a `user` in state (`userRef.current`), it clears the user via `handleSessionExpired` and throws `'Session expired'`. Without a user (first boot, no cookies), it throws `'Authentication required'` instead — used by the boot flow to silently fall to the login screen.
+- **Auto-handles 401**: when the (possibly-retried) response is still 401 **and** there is a `user` in state (`userRef.current`), it calls `clearSession` from `AuthContext` (which flips `user` to null and shows a toast) and throws `'Session expired'`. `DataContext` watches `user` and wipes its slots when it sees the null. Without a user (first boot, no cookies), it throws `'Authentication required'` instead — used by the boot flow to silently fall to the login screen.
 - **Tolerates empty responses** (`204` and zero-length bodies).
 - **Tier 5.4b**: every response's `X-Request-Id` header is captured and pushed into `setLastRequestId()` ([src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js)) so any subsequent client-error report carries the most recent server reqId. Thrown error objects also get a `.reqId` property attached, so handler `.catch()` sites can include it in their own error reports.
 
-**Boot flow** (replaces the old `useEffect([token])`):
+**Bypass for `/api/auth/*` endpoints**: `AuthContext` itself can't use `useRequest` (chicken-and-egg — useRequest reads from AuthContext). Login/register/forgot/reset/2fa-verify call `apiFetch` from [src/lib/apiClient.js](src/lib/apiClient.js) instead, a bare wrapper that does CSRF + fetch + JSON parse without the refresh-retry path (which would be meaningless for these endpoints anyway — they are themselves the path).
+
+**Boot flow** lives inside `DataProvider`:
 
 ```js
 useEffect(() => {
@@ -657,7 +701,7 @@ useEffect(() => {
 }, []);
 ```
 
-The first paint is always the skeleton view; once `bootDone` flips, the UI resolves to dashboard (if `user` got set) or auth panel (if not).
+The first paint is always `<SkeletonView />`; once `bootDone` flips, `App.jsx` resolves to `<DashboardView />` (if `user` got set) or `<AuthView />` (if not). Post-login dashboard fetch composition lives in `AuthView` — it awaits `authLogin()` / `authRegister()` / `auth2faVerify()`, then calls `loadDashboard()` from `useData`.
 
 ### 6.4 Tab Routing
 
@@ -676,53 +720,63 @@ There is **no global polling for game state** today (deferred Tier 4 feature). L
 
 ```
 <ErrorBoundary>                            // Tier 5.4b — render-error fallback wrapping the whole tree
-└── <App>
-    ├── (auth panel — switches on `authView` state, Tier 6)
-    │     authView === 'auth':    <LoginForm> / <RegisterForm>     // login has 'Forgot password?' button
-    │     authView === 'forgot':  <ForgotPasswordForm>             // 6.4
-    │     authView === 'reset':   <ResetPasswordForm>              // 6.4 (entered via ?resetToken=)
-    │     authView === 'twofa':   <TwoFactorChallenge>             // 6.9 (entered when login returns {challenge: true})
-    └── (dashboard)
-    ├── header card
-    ├── tabs row
-    │   ├── <SearchBar>                  // Tier 8.4
-    │   ├── <NotificationBell>
-    │   └── logout button → <ConfirmModal>
-    │
-    ├── view === 'games':
-    │     <GameCard>* (Avatar in comments, undo-pick link, inline <CommentThread>)
-    │     sidebar: <LeaderboardRow>* (with Avatar, clickable → opens drawer)
-    │
-    ├── view === 'mypicks': <PicksHistory>
-    │
-    ├── view === 'groups':
-    │     create form (with visibility radio)
-    │     Discover list
-    │     <FriendsList>
-    │     pending invites
-    │     <GroupCard>*  (Avatar member chips + leave/transfer/delete menu)
-    │
-    ├── view === 'leaderboard':
-    │     <LeaderboardCard>  <GroupLeaderboardCard>  (sort + pagination)
-    │
-    ├── view === 'profile' (self):
-    │     <ProfileView editable onSaveProfile twoFactorEnabled on2faSetup on2faConfirm on2faDisable>
-    │       Avatar header, displayName/bio edit form, <TwoFactorSetup> section (Tier 6.9)
-    │
-    └── view === 'admin' (admin only): <AdminPanel>
-                                         ├── <GameManager>  (checkbox column + bulk action bar)
-                                         └── <UserManager>  (checkbox column + bulk action bar)
+└── <NotificationProvider>                 // Tier 13.6: status banner state
+    <AuthProvider>                         // Tier 13.6: user + auth flow
+      <DataProvider>                       // Tier 13.6: games/picks/groups/leaderboard/friends + handlers
+        <App>                              // Tier 13 Chunk 6: layout shell only (~71 LOC)
+        ├── header card + status banner
+        └── body:
+            ├── <SkeletonView>             // boot / loading state
+            ├── <AuthView>                 // unauthenticated — switches on `authView`
+            │     authView === 'auth':   <LoginForm> / <RegisterForm>
+            │     authView === 'forgot': <ForgotPasswordForm>
+            │     authView === 'reset':  <ResetPasswordForm>  (entered via ?resetToken=)
+            │     authView === 'twofa':  <TwoFactorChallenge> (Tier 6.9; login returned {challenge: true})
+            │
+            └── <DashboardView>            // authenticated UI; consumes useAuth/useData/useGames
+                ├── header card
+                ├── tabs row
+                │   ├── <SearchBar>                  // Tier 8.4; consumes useRequest + useData
+                │   ├── <NotificationBell>           // consumes useRequest + useNotifications
+                │   └── logout button → <ConfirmModal>
+                │
+                ├── view === 'games':
+                │     <GameCard>* (uses usePicks for submit/remove + pickMap)
+                │       └── <CommentThread> (uses useRequest + useAuth + useNotifications)
+                │     sidebar: <LeaderboardRow>* (clickable → opens drawer)
+                │
+                ├── view === 'mypicks': <PicksHistory>
+                │
+                ├── view === 'groups':
+                │     create form (with visibility radio)
+                │     Discover list
+                │     <FriendsList>                  // consumes useFriends + useData
+                │     pending invites
+                │     <GroupCard>*
+                │
+                ├── view === 'leaderboard':
+                │     <LeaderboardCard>  <GroupLeaderboardCard>
+                │
+                ├── view === 'profile' (self):
+                │     <ProfileView editable />       // consumes useAuth + useData (handlers from hooks, not props)
+                │       Avatar header, displayName/bio edit form, <TwoFactorSetup> section (Tier 6.9)
+                │
+                └── view === 'admin' (admin only): <AdminPanel>
+                                                     ├── <GameManager>  (consumes useRequest + useNotifications + useData)
+                                                     └── <UserManager>  (consumes useRequest + useAuth + useNotifications)
 
-Overlays (rendered above the dashboard):
-├── <ConfirmModal>           (logout, deletions, bulk confirmations, group leave/delete)
-└── <ProfileDrawer>           (any leaderboard row click)
+Overlays (rendered inside <DashboardView>):
+├── <ConfirmModal>           (logout, deletions, bulk confirmations)
+└── <ProfileDrawer>           (any avatar/leaderboard row click; consumes useData entirely)
         └── <ProfileView>
               ├── <Avatar>
               └── <BadgeWall>
 
-<CommentThread> (inside each GameCard) renders:
+<CommentThread> renders:
   <CommentRow>* — each with <Avatar>, edit form (author only), 5-emoji reaction strip
 ```
+
+**Tier 13 prop-drilling status**: every component above either (a) takes only data props (`game`, `group`, `profile`, etc.) or (b) consumes contexts via hooks directly. The legacy `request` / `currentUserId` / `onError` / `onSaveProfile` prop chains are gone. Three exceptions: `GroupCard` / `LeaderboardCard` / `GroupLeaderboardCard` still receive `currentUserId` as a prop because they're pure presentation components used in multiple contexts; migrating them buys nothing.
 
 ### 6.7 Error Reporting (Tier 5.4b)
 
@@ -744,8 +798,10 @@ Three failure modes, three UX paths, one logging sink.
 │                                 │                            showStatus()    │
 │                                 └─ reportClientError() ─────┘  (cyan toast)  │
 │                                                                              │
-│  3. request() throws        ──▶ caller .catch() in App.jsx                   │
-│     (handled API error)        └─ showStatus(error.message)  (cyan toast)    │
+│  3. useRequest() throws     ──▶ caller .catch() (DataContext mutation       │
+│     (handled API error)         handler or view component)                   │
+│                                 └─ showStatus(error.message) via             │
+│                                    useNotifications  (cyan toast)            │
 │                                                                              │
 └─────────────────────────┬───────────────────────────────────────────────────┘
                           │ POST /api/client-errors
@@ -769,10 +825,10 @@ Three failure modes, three UX paths, one logging sink.
 **Files touched**:
 
 - [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx): class component (React requires class for error boundaries). `getDerivedStateFromError` sets `hasError = true`; `componentDidCatch` calls `reportClientError` and Sentry `captureException`. Fallback UI matches the slate/cyan/rose theme, offers **Reload page** and **Try again**. Raw error message rendered **only when `import.meta.env.DEV` is true** — Vite strips the branch from the prod bundle so users never see `Cannot read properties of undefined…` style messages.
-- [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js): installs `window.error` and `unhandledrejection` listeners. Hard-throttled to **5 reports per 60 s window** (the rest are dropped silently — prevents runaway-error storms). `reportClientError` posts via `fetch({keepalive: true})` so reports complete even if the page is unloading. Clips `stack` and `componentStack` to **8 KB** each and `message` to 500 chars, matching the server's zod ceilings. Failures inside the reporter are swallowed (never re-feed the listener). Also dispatches a `scorecast:client-error` DOM event so App.jsx can show a toast.
+- [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js): installs `window.error` and `unhandledrejection` listeners. Hard-throttled to **5 reports per 60 s window** (the rest are dropped silently — prevents runaway-error storms). `reportClientError` posts via `fetch({keepalive: true})` so reports complete even if the page is unloading. Clips `stack` and `componentStack` to **8 KB** each and `message` to 500 chars, matching the server's zod ceilings. Failures inside the reporter are swallowed (never re-feed the listener). Also dispatches a `scorecast:client-error` DOM event so `NotificationContext` can show a toast.
 - [src/lib/sentry.js](src/lib/sentry.js): `initSentry()` is `async` — reads `import.meta.env.VITE_SENTRY_DSN` and, if set, does a dynamic `await import('@sentry/react')` then calls `init({dsn, environment, tracesSampleRate: 0})`. If unset, **the entire dynamic-import branch is dead-code-eliminated by Vite** — zero `@sentry/react` bytes in the bundle (verified: 0 occurrences of "sentry" in `dist/assets/*.js` when DSN unset).
-- [src/main.jsx](src/main.jsx): bootstrap order — `initSentry()` (fire-and-forget async), `installClientErrorReporter()` (synchronous), then `createRoot().render(<StrictMode><ErrorBoundary><App/></ErrorBoundary></StrictMode>)`.
-- [src/App.jsx](src/App.jsx): single `useEffect` listens for `scorecast:client-error` and triggers a _"Something went wrong — refresh if things look off."_ toast via the existing `setStatus`/clearTimeout machinery.
+- [src/main.jsx](src/main.jsx): bootstrap order — `initSentry()` (fire-and-forget async), `installClientErrorReporter()` (synchronous), then `createRoot().render(<StrictMode><ErrorBoundary><NotificationProvider><AuthProvider><DataProvider><App/></...></StrictMode>)` (Tier 13 added the provider stack).
+- [src/contexts/NotificationContext.jsx](src/contexts/NotificationContext.jsx): owns the `scorecast:client-error` listener (Tier 13 moved this out of App.jsx). When fired, it sets the status banner to _"Something went wrong — refresh if things look off."_ for 3.5 s.
 
 **Server-side wiring**:
 
@@ -1581,7 +1637,7 @@ DELETE /api/admin/users/<bobId>
 **Frontend** (Tier 5.4b restructured this from "no error boundary" to a three-path strategy — see §6.7):
 
 1. **React render errors** → caught by [ErrorBoundary](src/components/ErrorBoundary.jsx) → fallback UI + report.
-2. **Window-level errors / unhandled rejections** → [clientErrorReporter](src/lib/clientErrorReporter.js) → POST `/api/client-errors` + custom DOM event → App.jsx shows a cyan toast.
+2. **Window-level errors / unhandled rejections** → [clientErrorReporter](src/lib/clientErrorReporter.js) → POST `/api/client-errors` + custom DOM event → `NotificationContext` shows a cyan toast.
 3. **Handled API errors** (anything `request()` throws) → caller's `.catch()` → `showStatus(error.message)`. The special `'Session expired'` error is not re-toasted (the session-expired handler already toasted).
 
 All three paths converge on the **server-side structured log** via `POST /api/client-errors`. Sentry sees paths 1 + 2 directly (its browser SDK installs its own `window.error` listener at `init`).
@@ -1716,7 +1772,7 @@ Or in one go: `npm start` (= `vite build && node server.js`). For production it'
 4. **Notification side-effects on result-set**: when modifying `POST /api/games/:gameId/result`, `POST /api/admin/games/bulk` (setResult action), or any endpoint that resolves picks, you must keep the `notify` + `evaluateBadges` loop intact, otherwise users stop getting feedback.
 5. **Self-protection guards**: the admin self-demote/self-delete checks compare on `req.user.id` (UUID string from the JWT). The bulk-user endpoint additionally **silently filters** self out (no error). If you ever change how `req.user` is shaped, audit both paths.
 6. **`save({hooks: false})`** is intentional in the role-update endpoint, `PUT /api/me`, the bcrypt backfill seeder, and bulk role flips — without it, Sequelize's `beforeUpdate` hook would attempt to re-hash an already-hashed password.
-7. **`pickMap` shape**: the frontend `pickMap` in [App.jsx](src/App.jsx) stores **full pick objects** (Tier 8.2), not just the `choice` string. Consumers in [GameCard.jsx](src/components/GameCard.jsx) destructure to `existingChoice` and `existingPickId`. Don't revert to the simpler shape — the undo-pick UX needs the id.
+7. **`pickMap` shape**: the frontend `pickMap` lives in [src/hooks/usePicks.js](src/hooks/usePicks.js) (moved from App.jsx in Tier 13) and stores **full pick objects** (Tier 8.2), not just the `choice` string. Consumers in [GameCard.jsx](src/components/GameCard.jsx) call `usePicks()` and destructure `pickMap.get(game.id)` to `existingChoice` and `existingPickId`. Don't revert to the simpler shape — the undo-pick UX needs the id.
 8. **Avatar color stability**: [Avatar.jsx](src/components/Avatar.jsx) hashes on **lowercased `username`**, never `displayName`. If you change this, every existing user's avatar color flips on next render.
 9. **Comment reaction emoji palette**: `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [src/components/CommentThread.jsx](src/components/CommentThread.jsx) must stay in sync. Adding an emoji to one without the other yields either a 400 (server rejects) or a stuck UI button (client allows but server rejects on send).
 10. **Leaderboard `viewerRow`**: when consuming `GET /api/leaderboard`, the group block's `groupMeta.viewerRow` is the **sorted-row including rank**, not the raw user. The frontend uses it to render the "Your position" anchor when the page window excludes the viewer.
@@ -1732,7 +1788,7 @@ Or in one go: `npm start` (= `vite build && node server.js`). For production it'
 20. **Tier 6.2 — CSP and Vite HMR**: helmet's CSP `connectSrc` includes `ws://localhost:5173, http://localhost:5173` **only when `NODE_ENV !== 'production'`** so HMR works in dev. If you change `connectSrc` for any reason (e.g., to allow a new third-party host), keep the dev-only HMR entry, or you'll see "Refused to connect" errors in the browser console and HMR will silently fail.
 21. **Tier 6.6 — Lockout response generic-401 invariant**: locked accounts return exactly the same `401 {error: 'Invalid credentials'}` body and status as wrong-password and unknown-user. Don't add "Account is locked" messages anywhere user-visible — that's a username-enumeration leak. The lock is observable internally via `users.lockedUntil` and via the access logs.
 22. **Tier 6.7 — CSRF EXEMPT_PATHS additions**: when adding a state-changing endpoint that runs **before** the user has a session (login, register-time, email-link landing pages), you must add the path to `EXEMPT_PATHS` in [middleware/csrf.js](middleware/csrf.js) or callers will get blanket 403. The current exemption list covers all pre-auth and anonymous mutation endpoints — adding more in the same category is fine; adding any **post-auth** endpoint to the list is a security mistake.
-23. **Tier 6.8 — Cookie auth + frontend request() refresh-retry**: `request()` retries a 401 exactly once after `POST /api/auth/refresh`. It exempts `/api/auth/*` paths so refresh can't recurse on itself. **Don't add another retry layer at a caller** — if the post-refresh attempt still 401s, the user is genuinely logged out and we want to fall through to `handleSessionExpired`. Wrapping calls in retry loops would mask that.
+23. **Tier 6.8 — Cookie auth + frontend `useRequest()` refresh-retry**: `useRequest()` retries a 401 exactly once after `POST /api/auth/refresh`. It exempts `/api/auth/*` paths so refresh can't recurse on itself. **Don't add another retry layer at a caller** — if the post-refresh attempt still 401s, the user is genuinely logged out and we want to fall through to `clearSession` (which flips `AuthContext.user` to null; `DataContext` then auto-wipes its slots via the `user → null` effect). Wrapping calls in retry loops would mask that.
 24. **Tier 6.8 — Bearer-header clean break**: `authMiddleware` reads `req.cookies.sc_access` only. If you're tempted to "support both" again for backwards compatibility (e.g., during a migration window), don't — the original `localStorage.scorecastToken` from before Tier 6 was invalidated client-side at deploy time. Adding bearer-header support back would re-expose the XSS-readable-session attack surface.
 25. **Tier 6.8 — `Path=/api/auth` on refresh cookie**: `sc_refresh` is path-scoped so it isn't sent on `/api/picks`, `/api/me`, etc. Don't bring it back to `Path=/` — the whole point is that the high-value cookie is only exposed on the (small) auth endpoint surface. Same logic for `sc_challenge`.
 26. **Tier 6.8 — Multi-device login semantics**: `/api/login` does NOT revoke prior refresh tokens. Multiple devices can be logged in simultaneously, each with its own active refresh chain. Only `/api/auth/logout` (current device) and `/api/auth/reset-password` (all devices) revoke. If you ever add "sign out all devices" UI, call `revokeAllUserRefreshTokens(userId)`.
@@ -1883,13 +1939,14 @@ Summary:
 - ✅ **Tier 9** (less 9.10 TS + 9.11 Storybook) — DX, packaging & cloud deploy: ESLint + Prettier + Husky + lint-staged (9.1), frontend code-splitting (9.2), OpenAPI from zod (9.3, dev-only), Dockerfile + docker-compose + `/healthz` (9.4), GitHub Actions CI (9.5), Bicep IaC for Azure (9.6), Key Vault secrets wiring (9.9), CD workflow with OIDC (9.7), custom domain `bantryx.com` + Azure managed TLS (9.8). **App is live at https://bantryx.com.** See §11.6.
 - 🟡 **Tier 9 follow-ups** — TypeScript migration (9.10) and Storybook (9.11) parked at end of roadmap; Bicep ↔ custom-domain reconciliation (see §11.6) deferred.
 - ❌ **Tier 10** — Observability & scale: `/readyz` (10.1), Prometheus metrics (10.3), managed Redis (10.4, replaces single-process leaderboard cache), graceful SIGTERM shutdown (10.5), cloud log shipping wired into App Insights SDK (10.6).
+- ✅ **Tier 13** — Codebase cleanup / modularization (six chunks). `server.js` 2262 → 157 LOC (13.1 response/error infra + 13.2 routes/ split, 13.4 services/ + 13.5 helper consolidation). `src/App.jsx` 1308 → 71 LOC (13.6 contexts + 13.7 hooks, Chunk 5 component migration to hooks, Chunk 6 DashboardView/AuthView/SkeletonView extraction). New lint rules: backend `no-console` (with `lib/instrument.js` carve-out) + ban deep relative imports. Pure refactor — Playwright 3/3 green on every chunk. See §6.2, §6.3, §6.6.
 
 ---
 
 ## 14. Glossary
 
 | Term                                                        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------- |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------- |
 | **Pick**                                                    | A user's prediction `'home' \| 'away'` for a single game. Unique per `(userId, gameId)`.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **Result**                                                  | The actual outcome of a game, set by an admin: `'home' \| 'away' \| null`. `null` means the game hasn't been resolved (or was unresolved).                                                                                                                                                                                                                                                                                                                                                                                             |
 | **Probability**                                             | Implied win-chance for one team in `[0,1]`. Home + away must sum to 1.0 ±0.01. Drives the scoring formula.                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -1900,7 +1957,7 @@ Summary:
 | **Badge**                                                   | A milestone achievement awarded server-side. Defined in [badges/catalog.js](badges/catalog.js); awarded by `evaluateBadges()`.                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **Notification**                                            | An in-app feed item created by the `notify()` helper. Polled every 30 s by `NotificationBell`.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **Drawer**                                                  | The right-side overlay panel that shows another user's `ProfileView`. Opened by clicking any leaderboard row.                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **Tab**                                                     | The pseudo-routing primitive in `App.jsx`. Tabs are strings (`'games'                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 'mypicks' | ...`) stored in the `view` state. |
+| **Tab**                                                     | The pseudo-routing primitive in `DashboardView`. Tabs are strings (`'games'                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 'mypicks' | ...`) stored in the `view`slot of`DataContext`. |
 | **Sync**                                                    | (Tier 4, deferred) The act of pulling fixtures + results from an external football API.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | **Tier**                                                    | Roadmap grouping. Tiers 1–3, 4a, 5 (core), and 8 (minus 8.6) are shipped; Tiers 4b, 6, 7, 8.6, 9 remain.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **Migration**                                               | A versioned file under `migrations/` (Tier 5.1) that evolves the schema. Applied by sequelize-cli (`npm run db:migrate`) or by umzug on dev boot. Statements should be idempotent so they're safe against DBs that pre-existed the framework.                                                                                                                                                                                                                                                                                          |
@@ -1908,11 +1965,11 @@ Summary:
 | **Leaderboard cache key**                                   | `'overall'` for the global block; `group:<groupId>` per group. Invalidated on every mutation that affects standings. See §8.14.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | **Request ID**                                              | A UUID v4 assigned by [middleware/requestId.js](middleware/requestId.js) on every request, attached to `req.id`, echoed in the response's `X-Request-Id` header, and included in every log line produced by `req.log`. Honored inbound `X-Request-Id` headers (≤200 chars) are reused instead of generating a new one — useful for client-side correlation.                                                                                                                                                                            |
 | **ErrorBoundary**                                           | (Tier 5.4b) React class component in [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx) that wraps `<App />` in `main.jsx`. Catches _render-phase_ errors below it via `componentDidCatch`, swaps in a slate/rose fallback card, and reports through `reportClientError` + Sentry `captureException`. Does **not** catch errors thrown from event handlers, async code, or `setTimeout` callbacks — those go through the window-level listeners in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js). |
-| **clientErrorReporter**                                     | (Tier 5.4b) Module in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) that installs `window.error` and `unhandledrejection` listeners, throttles reports to 5 per 60 s, posts to `POST /api/client-errors`, and dispatches a `scorecast:client-error` DOM event for App.jsx to toast. Exports `reportClientError({...})` for explicit calls and `setLastRequestId(id)` to record the most recent server reqId observed via response headers.                                                                          |
+| **clientErrorReporter**                                     | (Tier 5.4b) Module in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) that installs `window.error` and `unhandledrejection` listeners, throttles reports to 5 per 60 s, posts to `POST /api/client-errors`, and dispatches a `scorecast:client-error` DOM event for `NotificationContext` to toast. Exports `reportClientError({...})` for explicit calls and `setLastRequestId(id)` to record the most recent server reqId observed via response headers.                                                            |
 | **`/api/client-errors`**                                    | (Tier 5.4b) Public endpoint accepting `{message, stack?, componentStack?, url?, reqId?, userAgent?, level?}` (zod-validated, all string fields capped — stack at 8 KB). Soft-decodes the JWT to attach `userId` if present, else logs anonymously. Rate-limited 30/5 min per IP. Always returns 204.                                                                                                                                                                                                                                   |
 | **`SENTRY_DSN` / `VITE_SENTRY_DSN`**                        | (Tier 5.4b) Opt-in env vars enabling server-side and browser-side Sentry capture respectively. Both are no-ops when unset (server exports stubs; Vite tree-shakes the dynamic `@sentry/react` import). `VITE_SENTRY_DSN` is read at Vite build time — change requires `npm run build`.                                                                                                                                                                                                                                                 |
 | **`sc_access` / `sc_refresh` / `sc_csrf` / `sc_challenge`** | (Tier 6.8 / 6.7 / 6.9) The four cookies that drive auth. `sc_access` is a 15-min HttpOnly access JWT (Path=/). `sc_refresh` is a 30-day HttpOnly opaque token (Path=/api/auth) whose SHA-256 hash is stored in `refresh_tokens`. `sc_csrf` is JS-readable 30-day random token used by the double-submit pattern. `sc_challenge` is a 5-min HttpOnly JWT issued between password-OK and 2FA-code-OK when the user has 2FA enabled.                                                                                                      |
-| **Refresh-then-retry**                                      | (Tier 6.8) The frontend `request()` helper's behavior on 401: try `POST /api/auth/refresh` once, then re-fetch the original. `/api/auth/*` paths are exempted from the retry to prevent recursion. This is what makes 15-min access tokens invisible to the user — they live 30 days from one login.                                                                                                                                                                                                                                   |
+| **Refresh-then-retry**                                      | (Tier 6.8) The frontend `useRequest()` hook's behavior on 401: try `POST /api/auth/refresh` once, then re-fetch the original. `/api/auth/*` paths are exempted from the retry to prevent recursion. This is what makes 15-min access tokens invisible to the user — they live 30 days from one login.                                                                                                                                                                                                                                  |
 | **CSRF double-submit**                                      | (Tier 6.7) Defence against cross-site request forgery. The frontend reads the (non-HttpOnly) `sc_csrf` cookie via `getCookie('sc_csrf')` and echoes it as the `X-CSRF-Token` header on every state-changing request. Server compares the two via `crypto.timingSafeEqual`. Relies on same-origin policy preventing cross-origin reads of the cookie.                                                                                                                                                                                   |
 | **EXEMPT_PATHS**                                            | (Tier 6.7) The set in [middleware/csrf.js](middleware/csrf.js) listing routes that skip CSRF enforcement. Only **pre-auth or anonymous** mutation endpoints belong here (login, register, refresh, verify-email, forgot/reset, client-errors). Adding any **post-auth** endpoint to this set is a security mistake.                                                                                                                                                                                                                    |
 | **Token storage pattern**                                   | (Tier 6) Single-use tokens (verify-email, password-reset, refresh) are 32 random bytes hex, SHA-256-hashed on insert (`tokenHash` column), and looked up via that hash's unique index. Raw values only exist in transit. Recovery codes are the exception (low entropy → bcrypt).                                                                                                                                                                                                                                                      |

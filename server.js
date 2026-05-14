@@ -559,6 +559,13 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(csrfMiddleware);
 
+// Minimal liveness probe for container orchestrators (Docker HEALTHCHECK, Azure
+// Container Apps ingress probes, etc.). No DB / Redis ping yet — Tier 10.1 adds
+// /readyz for that.
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, uptime: process.uptime() });
+});
+
 // Dev-only: API documentation (OpenAPI spec + Swagger UI).
 // Hidden in production to reduce attack surface.
 if (process.env.NODE_ENV !== 'production') {

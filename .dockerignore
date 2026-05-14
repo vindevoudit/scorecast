@@ -1,0 +1,35 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.gitattributes
+
+# Local env (Docker passes env via compose / Container Apps secrets)
+.env
+.env.*
+!.env.example
+
+# Build artifacts (regenerated inside the image)
+dist
+coverage
+
+# Dev tooling
+.husky
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test runner output (Tier 5.5 will land Playwright)
+playwright-report
+test-results
+
+# Cloud IaC — not needed in the runtime image
+infra
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+
+# Plans & local notes
+*.local.md

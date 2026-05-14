@@ -15,6 +15,7 @@ const nodeFileGlobs = [
   'migrations/**/*.js',
   'seeders/**/*.js',
   'routes/**/*.js',
+  'services/**/*.js',
   'validation/**/*.js',
   'badges/**/*.js',
   'config/**/*.js',

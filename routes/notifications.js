@@ -1,50 +1,43 @@
 'use strict';
 
-// Tier 13 Chunk 1 — notification routes extracted from server.js.
+// Tier 13 Chunk 2 — notification routes delegate to NotificationService.
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
-const { Notification } = require('../models');
+const asyncHandler = require('../middleware/asyncHandler');
+const errors = require('../lib/errors');
+const NotificationService = require('../services/NotificationService');
 
 const router = express.Router();
 
-router.get('/notifications', authMiddleware, async (req, res) => {
-  try {
-    const unreadOnly = req.query.unreadOnly === 'true';
-    const where = { userId: req.user.id };
-    if (unreadOnly) where.read = false;
-    const items = await Notification.findAll({
-      where,
-      order: [['createdAt', 'DESC']],
-      limit: 50,
+router.get(
+  '/notifications',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const result = await NotificationService.listForUser(req.user.id, {
+      unreadOnly: req.query.unreadOnly === 'true',
     });
-    const unreadCount = await Notification.count({ where: { userId: req.user.id, read: false } });
-    res.json({ items, unreadCount });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch notifications' });
-  }
-});
+    res.json(result);
+  }),
+);
 
-router.post('/notifications/:id/read', authMiddleware, async (req, res) => {
-  try {
-    const notification = await Notification.findByPk(req.params.id);
-    if (!notification) return res.status(404).json({ error: 'Notification not found' });
-    if (notification.userId !== req.user.id)
-      return res.status(403).json({ error: 'Access denied' });
-    notification.read = true;
-    await notification.save();
+router.post(
+  '/notifications/:id/read',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const { status } = await NotificationService.markRead(req.params.id, req.user.id);
+    if (status === 'not_found') throw errors.notFound('Notification not found');
+    if (status === 'forbidden') throw errors.forbidden();
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to mark notification' });
-  }
-});
+  }),
+);
 
-router.post('/notifications/read-all', authMiddleware, async (req, res) => {
-  try {
-    await Notification.update({ read: true }, { where: { userId: req.user.id, read: false } });
+router.post(
+  '/notifications/read-all',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    await NotificationService.markAllRead(req.user.id);
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to mark notifications' });
-  }
-});
+  }),
+);
 
 module.exports = router;

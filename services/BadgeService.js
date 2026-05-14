@@ -1,26 +1,29 @@
 'use strict';
 
-// Tier 13 Chunk 1 — notification + badge helpers extracted from server.js.
-// `notify` never throws (any failure is logged and swallowed). Any code path
-// that sets a result, creates a pick, creates a group, or accepts an invite
-// must call evaluateBadges + notify (CLAUDE.md invariant).
-const { Badge, Pick, Game, Notification } = require('../models');
+// Tier 13 Chunk 2 — BadgeService. Evaluates the badge catalog against a
+// user's current pick history and awards anything newly earned. Failures are
+// logged and swallowed (badges are best-effort, never block the surrounding
+// request flow).
+//
+// CLAUDE.md invariant: any code path that sets a result, creates a pick,
+// creates a group, or accepts an invite must call evaluateBadges() + notify().
+// Tier 5.3 invariant: evaluate runs OUTSIDE the surrounding transaction
+// because notify() fires inside the awardBadge path.
+const { Badge, Pick, Game } = require('../models');
 const { BADGE_CATALOG } = require('../badges/catalog');
-const logger = require('./logger');
-
-async function notify(userId, type, title, body = null, link = null) {
-  try {
-    await Notification.create({ userId, type, title, body, link });
-  } catch (error) {
-    logger.warn({ err: error, userId, notificationType: type }, 'failed to create notification');
-  }
-}
+const logger = require('../lib/logger');
+const NotificationService = require('./NotificationService');
 
 async function awardBadge(userId, slug) {
   try {
     await Badge.create({ userId, slug });
     const meta = BADGE_CATALOG.find((b) => b.slug === slug);
-    await notify(userId, 'badge', `Badge earned: ${meta?.name || slug}`, meta?.description || null);
+    await NotificationService.notify(
+      userId,
+      'badge',
+      `Badge earned: ${meta?.name || slug}`,
+      meta?.description || null,
+    );
     return true;
   } catch (_error) {
     return false;
@@ -74,4 +77,4 @@ async function evaluateBadges(userId, context = {}) {
   }
 }
 
-module.exports = { notify, awardBadge, evaluateBadges };
+module.exports = { awardBadge, evaluateBadges };

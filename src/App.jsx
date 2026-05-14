@@ -739,7 +739,7 @@ function App() {
       <section className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.55)] backdrop-blur-xl">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm uppercase tracking-[0.35em] text-cyan-400/80">ScoreCast</p>
+            <p className="text-sm uppercase tracking-[0.35em] text-cyan-400/80">Bantryx</p>
             <h1 className="mt-3 max-w-3xl text-3xl font-semibold text-white sm:text-4xl">
               Football predictions with groups, invites, and probability-based scoring.
             </h1>
@@ -1174,7 +1174,7 @@ function App() {
 
       <ConfirmModal
         open={confirmingLogout}
-        title="Log out of ScoreCast?"
+        title="Log out of Bantryx?"
         description="You'll need to sign back in to make picks or view your leaderboards."
         confirmLabel="Log out"
         cancelLabel="Stay signed in"
@@ -1265,7 +1265,7 @@ function App() {
         <div className="space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-sm uppercase tracking-[0.35em] text-cyan-400/80">ScoreCast</p>
+              <p className="text-sm uppercase tracking-[0.35em] text-cyan-400/80">Bantryx</p>
               <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
                 Join groups, make picks, and climb the leaderboards!
               </h1>
@@ -1277,7 +1277,7 @@ function App() {
             </div>
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 px-6 py-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.4)]">
               <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Predict & Win</p>
-              <p className="mt-3 text-2xl font-semibold text-white">ScoreCast</p>
+              <p className="mt-3 text-2xl font-semibold text-white">Bantryx</p>
               <p className="mt-2 text-sm text-slate-400">
                 Pick smart, earn points, dominate leaderboards.
               </p>

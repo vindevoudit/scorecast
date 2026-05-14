@@ -101,9 +101,9 @@ async function sendVerificationEmail(user) {
   const link = `${PUBLIC_APP_URL}/?verifyToken=${raw}`;
   await email.send({
     to: user.email,
-    subject: 'Verify your ScoreCast email',
-    text: `Welcome to ScoreCast, ${user.username}.\n\nConfirm your email by opening this link:\n${link}\n\nThe link expires in 24 hours.`,
-    html: `<p>Welcome to ScoreCast, ${user.username}.</p><p>Confirm your email by opening this link:</p><p><a href="${link}">${link}</a></p><p>The link expires in 24 hours.</p>`,
+    subject: 'Verify your Bantryx email',
+    text: `Welcome to Bantryx, ${user.username}.\n\nConfirm your email by opening this link:\n${link}\n\nThe link expires in 24 hours.`,
+    html: `<p>Welcome to Bantryx, ${user.username}.</p><p>Confirm your email by opening this link:</p><p><a href="${link}">${link}</a></p><p>The link expires in 24 hours.</p>`,
   });
 }
 
@@ -697,7 +697,7 @@ app.post(
         email
           .send({
             to: user.email,
-            subject: 'Reset your ScoreCast password',
+            subject: 'Reset your Bantryx password',
             text: `Open this link to reset your password:\n${link}\n\nThe link expires in 15 minutes. If you didn't request this, ignore this email.`,
             html: `<p>Open this link to reset your password:</p><p><a href="${link}">${link}</a></p><p>The link expires in 15 minutes. If you didn't request this, ignore this email.</p>`,
           })
@@ -926,7 +926,7 @@ app.post('/api/me/2fa/setup', authMiddleware, async (req, res) => {
         .status(400)
         .json({ error: '2FA is already enabled — disable it first to regenerate' });
     }
-    const secret = speakeasy.generateSecret({ name: `ScoreCast:${user.username}`, length: 20 });
+    const secret = speakeasy.generateSecret({ name: `Bantryx:${user.username}`, length: 20 });
     const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
     const recoveryCodes = Array.from({ length: 10 }, () => {
       const raw = crypto.randomBytes(5).toString('hex').toUpperCase();

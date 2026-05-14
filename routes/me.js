@@ -1,0 +1,186 @@
+'use strict';
+
+// Tier 13 Chunk 1 — current-user routes extracted from server.js. Covers
+// /me, /me/2fa/{setup,confirm,disable}, and /me/email. All require auth.
+const express = require('express');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const speakeasy = require('speakeasy');
+const qrcode = require('qrcode');
+
+const { validate } = require('../validation/middleware');
+const {
+  setEmailSchema,
+  totpConfirmSchema,
+  totpVerifySchema,
+  editProfileSchema,
+} = require('../validation/schemas');
+const { authMiddleware } = require('../middleware/auth');
+const { getUserById } = require('../lib/users');
+const { getJoinedGroupIds, getPendingInvites } = require('../lib/groups');
+const { sendVerificationEmail } = require('../lib/emailHelpers');
+const { User, sequelize } = require('../models');
+
+const router = express.Router();
+
+router.get('/me', authMiddleware, async (req, res) => {
+  const user = await getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const joinedGroups = await getJoinedGroupIds(user.id);
+  const pendingInvites = await getPendingInvites(user.id);
+  res.json({
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    displayName: user.displayName || null,
+    bio: user.bio || null,
+    email: user.email || null,
+    emailVerifiedAt: user.emailVerifiedAt || null,
+    twoFactorEnabled: Boolean(user.totpEnabledAt),
+    joinedGroups,
+    pendingInvites,
+  });
+});
+
+router.put('/me', authMiddleware, validate(editProfileSchema), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (req.body.displayName !== undefined) {
+      user.displayName = req.body.displayName === '' ? null : req.body.displayName;
+    }
+    if (req.body.bio !== undefined) {
+      user.bio = req.body.bio === '' ? null : req.body.bio;
+    }
+    await user.save({ hooks: false });
+    res.json({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      displayName: user.displayName,
+      bio: user.bio,
+    });
+  } catch (error) {
+    req.log.error({ err: error }, 'handler error');
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+router.post('/me/2fa/setup', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.totpEnabledAt) {
+      return res
+        .status(400)
+        .json({ error: '2FA is already enabled — disable it first to regenerate' });
+    }
+    const secret = speakeasy.generateSecret({ name: `Bantryx:${user.username}`, length: 20 });
+    const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
+    const recoveryCodes = Array.from({ length: 10 }, () => {
+      const raw = crypto.randomBytes(5).toString('hex').toUpperCase();
+      return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`;
+    });
+    const hashedRecoveryCodes = await Promise.all(recoveryCodes.map((c) => bcrypt.hash(c, 8)));
+    user.totpSecret = secret.base32;
+    user.totpEnabledAt = null;
+    user.totpRecoveryCodes = hashedRecoveryCodes;
+    await user.save({ hooks: false });
+    res.json({ qrCodeDataUrl, secret: secret.base32, recoveryCodes });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa setup failed');
+    res.status(500).json({ error: '2FA setup failed' });
+  }
+});
+
+router.post('/me/2fa/confirm', authMiddleware, validate(totpConfirmSchema), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user || !user.totpSecret) {
+      return res.status(400).json({ error: 'No pending 2FA setup' });
+    }
+    if (user.totpEnabledAt) {
+      return res.status(400).json({ error: '2FA already enabled' });
+    }
+    const valid = speakeasy.totp.verify({
+      secret: user.totpSecret,
+      encoding: 'base32',
+      token: req.body.code,
+      window: 1,
+    });
+    if (!valid)
+      return res
+        .status(400)
+        .json({ error: 'Code did not match — try the next one in your authenticator' });
+    user.totpEnabledAt = new Date();
+    await user.save({ hooks: false });
+    res.json({ ok: true, totpEnabledAt: user.totpEnabledAt });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa confirm failed');
+    res.status(500).json({ error: '2FA confirm failed' });
+  }
+});
+
+router.post('/me/2fa/disable', authMiddleware, validate(totpVerifySchema), async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user || !user.totpEnabledAt) {
+      return res.status(400).json({ error: '2FA is not enabled' });
+    }
+    const { code, recoveryCode } = req.body;
+    let valid = false;
+    if (typeof code === 'string') {
+      valid = speakeasy.totp.verify({
+        secret: user.totpSecret,
+        encoding: 'base32',
+        token: code,
+        window: 1,
+      });
+    } else if (typeof recoveryCode === 'string') {
+      const normalized = recoveryCode.trim().toUpperCase();
+      const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
+      for (const hash of codes) {
+        if (await bcrypt.compare(normalized, hash)) {
+          valid = true;
+          break;
+        }
+      }
+    }
+    if (!valid) return res.status(400).json({ error: 'Code did not match' });
+    user.totpSecret = null;
+    user.totpEnabledAt = null;
+    user.totpRecoveryCodes = null;
+    await user.save({ hooks: false });
+    res.json({ ok: true });
+  } catch (error) {
+    req.log.error({ err: error.message }, '2fa disable failed');
+    res.status(500).json({ error: '2FA disable failed' });
+  }
+});
+
+router.patch('/me/email', authMiddleware, validate(setEmailSchema), async (req, res) => {
+  const { email: emailAddress } = req.body;
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const existing = await User.findOne({
+      where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
+    });
+    if (existing && existing.id !== user.id) {
+      return res.status(400).json({ error: 'That email is already in use' });
+    }
+    user.email = emailAddress;
+    user.emailVerifiedAt = null;
+    await user.save({ hooks: false });
+    sendVerificationEmail(user).catch((err) => {
+      req.log.warn({ err: err.message, userId: user.id }, 'failed to send verification email');
+    });
+    res.json({ email: user.email, emailVerifiedAt: null });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'set-email failed');
+    res.status(500).json({ error: 'Failed to set email' });
+  }
+});
+
+module.exports = router;

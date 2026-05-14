@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import GameCard from './components/GameCard';
 import LeaderboardCard, { LeaderboardRow } from './components/LeaderboardCard';
 import LoginForm from './components/LoginForm';
@@ -16,6 +16,12 @@ import FriendsList from './components/FriendsList';
 import NotificationBell from './components/NotificationBell';
 import SearchBar from './components/SearchBar';
 
+import { useAuth } from './hooks/useAuth';
+import { useData } from './hooks/useData';
+import { useNotifications } from './hooks/useNotifications';
+import { useGames } from './hooks/useGames';
+import { usePicks } from './hooks/usePicks';
+
 const PicksHistory = lazy(() => import('./components/PicksHistory'));
 const ProfileView = lazy(() => import('./components/ProfileView'));
 const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
@@ -23,21 +29,6 @@ const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-slate-400">{label}</p>;
 }
-import { setLastRequestId } from './lib/clientErrorReporter';
-import { getCookie } from './lib/cookies';
-
-const initialAuthData = {
-  loginUsername: '',
-  loginPassword: '',
-  registerUsername: '',
-  registerPassword: '',
-  registerEmail: '',
-  forgotEmail: '',
-  resetPassword: '',
-  resetToken: '',
-  groupName: '',
-  groupVisibility: 'private',
-};
 
 const BASE_TABS = [
   { id: 'games', kicker: 'Games', label: 'Upcoming Matches' },
@@ -48,666 +39,119 @@ const BASE_TABS = [
 ];
 const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 function App() {
-  const [user, setUser] = useState(null);
-  const [bootDone, setBootDone] = useState(false);
-  const [games, setGames] = useState([]);
-  const [groups, setGroups] = useState([]);
-  const [picks, setPicks] = useState([]);
-  const [pendingInvites, setPendingInvites] = useState([]);
-  const [leaderboard, setLeaderboard] = useState({ overall: [], group: [], groupMeta: null });
-  const [groupOrderBy, setGroupOrderBy] = useState('points');
-  const [groupOffset, setGroupOffset] = useState(0);
-  const groupLimit = 20;
-  const [selectedGroupId, setSelectedGroupId] = useState('');
-  const [view, setView] = useState('games');
-  const [status, setStatus] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [authData, setAuthData] = useState(initialAuthData);
-  const [authView, setAuthView] = useState('auth');
-  const [forgotSent, setForgotSent] = useState(false);
-  const [confirmingLogout, setConfirmingLogout] = useState(false);
-  const [showCompleted, setShowCompleted] = useState(false);
-  const [profileUsername, setProfileUsername] = useState('');
-  const [profile, setProfile] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileBusy, setProfileBusy] = useState(false);
-  const [friends, setFriends] = useState({ friends: [], incoming: [], outgoing: [] });
-  const [discoverGroups, setDiscoverGroups] = useState([]);
-  const [ownProfile, setOwnProfile] = useState(null);
-  const userRef = useRef(user);
-  userRef.current = user;
+  const {
+    user,
+    authData,
+    setAuthData,
+    authView,
+    setAuthView,
+    forgotSent,
+    setForgotSent,
+    confirmingLogout,
+    setConfirmingLogout,
+    handleLogin: authLogin,
+    handleRegister: authRegister,
+    handleForgotPassword,
+    handleResetPassword,
+    handle2faVerify: auth2faVerify,
+    handle2faSetup,
+    handle2faConfirm,
+    handle2faDisable,
+    performLogout,
+    initialAuthData,
+  } = useAuth();
 
-  const pickMap = useMemo(() => new Map(picks.map((pick) => [pick.gameId, pick])), [picks]);
+  const {
+    request,
+    bootDone,
+    loading,
+    view,
+    setView,
+    groups,
+    pendingInvites,
+    leaderboard,
+    groupOrderBy,
+    groupOffset,
+    groupLimit,
+    selectedGroupId,
+    friends,
+    discoverGroups,
+    ownProfile,
+    profileUsername,
+    profile,
+    profileLoading,
+    profileBusy,
+    handleCreateGroup,
+    handleLeaveGroup,
+    handleTransferGroup,
+    handleDeleteGroup,
+    handleJoinPublicGroup,
+    handleInvite,
+    handleAcceptInvite,
+    handleDeclineInvite,
+    handleSendFriendRequest,
+    handleAcceptFriend,
+    handleDeclineFriend,
+    handleUnfriend,
+    openProfile,
+    closeProfile,
+    handleFriendAction,
+    handleSaveProfile,
+    handleChangeGroupOrder,
+    handleChangeGroupOffset,
+    handleGroupSelection,
+    refreshGames,
+    refreshPicks,
+    refreshLeaderboard,
+    loadDashboard,
+  } = useData();
+
+  // Compose auth handlers with loadDashboard so post-login the dashboard
+  // boots immediately. AuthContext only manages the user JWT; DataContext
+  // owns the data fetch — the two cross paths here in the consumer.
+  const handleLogin = async (event) => {
+    const result = await authLogin(event);
+    if (result?.user) {
+      await loadDashboard().catch(() => {});
+    }
+  };
+
+  const handleRegister = async (event) => {
+    const result = await authRegister(event);
+    if (result?.user) {
+      await loadDashboard().catch(() => {});
+    }
+  };
+
+  const handle2faVerify = async (payload) => {
+    const result = await auth2faVerify(payload);
+    if (result?.user) {
+      await loadDashboard().catch(() => {});
+    }
+  };
+
+  const { status, showStatus } = useNotifications();
+  const { games, upcomingGames, liveGames, completedGames } = useGames();
+  const { picks, pickMap, submitPick, removePick } = usePicks();
 
   const tabs = useMemo(
     () => (user?.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS),
     [user?.role],
   );
 
-  const { upcomingGames, liveGames, completedGames } = useMemo(() => {
-    const now = Date.now();
-    const upcoming = [];
-    const live = [];
-    const completed = [];
-    for (const game of games) {
-      if (game.result) {
-        completed.push(game);
-      } else if (new Date(game.date).getTime() > now) {
-        upcoming.push(game);
-      } else {
-        live.push(game);
-      }
-    }
-    return { upcomingGames: upcoming, liveGames: live, completedGames: completed };
-  }, [games]);
-
-  const showStatus = async (message) => {
-    setStatus(message);
-    await delay(3500);
-    setStatus('');
-  };
-
-  const handleSessionExpired = () => {
-    setUser(null);
-    setGames([]);
-    setGroups([]);
-    setPicks([]);
-    setLeaderboard({ overall: [], group: [] });
-    setPendingInvites([]);
-    setSelectedGroupId('');
-    setView('games');
-    showStatus('Session expired — please sign in again.');
-  };
-
-  const request = useCallback(async (path, options = {}) => {
-    const method = (options.method || 'GET').toUpperCase();
-    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
-    if (method !== 'GET' && method !== 'HEAD') {
-      const csrf = getCookie('sc_csrf');
-      if (csrf) headers['X-CSRF-Token'] = csrf;
-    }
-
-    const doFetch = () =>
-      fetch(path, {
-        credentials: 'include',
-        ...options,
-        headers,
-      });
-
-    let response = await doFetch();
-    let reqId = response.headers.get('X-Request-Id');
-    if (reqId) setLastRequestId(reqId);
-
-    if (response.status === 401 && !path.startsWith('/api/auth/')) {
-      const refreshResp = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (refreshResp.status === 204) {
-        response = await doFetch();
-        const newReqId = response.headers.get('X-Request-Id');
-        if (newReqId) {
-          setLastRequestId(newReqId);
-          reqId = newReqId;
-        }
-      }
-    }
-
-    if (response.status === 401) {
-      if (userRef.current) {
-        handleSessionExpired();
-        const err = new Error('Session expired');
-        err.reqId = reqId;
-        throw err;
-      }
-      const err = new Error('Authentication required');
-      err.reqId = reqId;
-      err.status = 401;
-      throw err;
-    }
-
-    if (response.status === 204) return null;
-    const text = await response.text();
-    const data = text ? JSON.parse(text) : null;
-    if (!response.ok) {
-      const err = new Error((data && data.error) || 'Request failed');
-      err.reqId = reqId;
-      throw err;
-    }
-    return data;
-  }, []);
-
-  const refreshPicks = async () => {
-    const data = await request('/api/picks');
-    setPicks(data);
-  };
-
-  const refreshGames = async () => {
-    const data = await request('/api/games');
-    setGames(data.sort((a, b) => new Date(a.date) - new Date(b.date)));
-  };
-
-  const refreshGroups = async () => {
-    const data = await request('/api/groups');
-    setGroups(data);
-    if (!selectedGroupId && data.length > 0) {
-      setSelectedGroupId(data[0].id);
-    }
-    return data;
-  };
-
-  const refreshFriends = async () => {
-    try {
-      const data = await request('/api/friends');
-      setFriends(data);
-    } catch (error) {
-      if (error.message !== 'Session expired') console.warn(error.message);
-    }
-  };
-
-  const refreshDiscover = async () => {
-    try {
-      const data = await request('/api/groups/discover');
-      setDiscoverGroups(data);
-    } catch (error) {
-      if (error.message !== 'Session expired') console.warn(error.message);
-    }
-  };
-
-  const refreshLeaderboard = async (groupId = '', overrides = {}) => {
-    const effectiveGroupId = groupId || selectedGroupId || groups[0]?.id || '';
-    const orderBy = overrides.orderBy ?? groupOrderBy;
-    const offset = overrides.offset ?? groupOffset;
-    const params = new URLSearchParams();
-    if (effectiveGroupId) params.set('groupId', effectiveGroupId);
-    if (orderBy) params.set('orderBy', orderBy);
-    if (offset) params.set('offset', String(offset));
-    params.set('limit', String(groupLimit));
-    const query = params.toString() ? `?${params.toString()}` : '';
-    const data = await request(`/api/leaderboard${query}`);
-    setLeaderboard({ overall: data.overall, group: data.group, groupMeta: data.groupMeta || null });
-  };
-
-  const handleChangeGroupOrder = async (next) => {
-    setGroupOrderBy(next);
-    setGroupOffset(0);
-    await refreshLeaderboard('', { orderBy: next, offset: 0 });
-  };
-
-  const handleChangeGroupOffset = async (next) => {
-    setGroupOffset(next);
-    await refreshLeaderboard('', { offset: next });
-  };
-
-  const handleGroupSelection = async (event) => {
-    const groupId = event.target.value;
-    setSelectedGroupId(groupId);
-    setGroupOffset(0);
-    await refreshLeaderboard(groupId, { offset: 0 });
-  };
-
-  const loadDashboard = async () => {
-    setLoading(true);
-    try {
-      const me = await request('/api/me');
-      const { pendingInvites: invites, ...userData } = me;
-      setUser(userData);
-      setPendingInvites(invites || []);
-      await refreshGames();
-      const groupData = await refreshGroups();
-      const initialGroupId =
-        selectedGroupId && groupData.some((group) => group.id === selectedGroupId)
-          ? selectedGroupId
-          : groupData[0]?.id || '';
-      setSelectedGroupId(initialGroupId);
-      await Promise.all([
-        refreshPicks(),
-        refreshLeaderboard(initialGroupId),
-        refreshFriends(),
-        refreshDiscover(),
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let timer;
-    const handler = () => {
-      setStatus('Something went wrong — refresh if things look off.');
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setStatus(''), 3500);
-    };
-    window.addEventListener('scorecast:client-error', handler);
-    return () => {
-      window.removeEventListener('scorecast:client-error', handler);
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const verifyToken = params.get('verifyToken');
-    const resetToken = params.get('resetToken');
-    if (verifyToken) {
-      fetch('/api/auth/verify-email', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: verifyToken }),
-      })
-        .then((res) => {
-          if (res.ok) {
-            setStatus("Email verified — you're all set.");
-          } else {
-            setStatus('That verification link is invalid or expired.');
-          }
-          setTimeout(() => setStatus(''), 4000);
-        })
-        .catch(() => {});
-      params.delete('verifyToken');
-      const next = params.toString();
-      window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
-    }
-    if (resetToken) {
-      setAuthData((prev) => ({ ...prev, resetToken }));
-      setAuthView('reset');
-      params.delete('resetToken');
-      const next = params.toString();
-      window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadDashboard()
-      .catch((error) => {
-        if (
-          error.status === 401 ||
-          error.message === 'Session expired' ||
-          error.message === 'Authentication required'
-        ) {
-          return;
-        }
-        showStatus(error.message);
-      })
-      .finally(() => setBootDone(true));
-  }, []);
-
-  useEffect(() => {
-    if (view !== 'profile' || !user?.username) return;
-    request(`/api/users/${encodeURIComponent(user.username)}/profile`)
-      .then(setOwnProfile)
-      .catch((error) => {
-        if (error.message !== 'Session expired') showStatus(error.message);
-      });
-  }, [view, user?.username, picks, games, request]);
-
-  const performLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-        headers: (() => {
-          const csrf = getCookie('sc_csrf');
-          return csrf ? { 'X-CSRF-Token': csrf } : {};
-        })(),
-      });
-    } catch (_) {
-      // best-effort; still clear local state
-    }
-    setUser(null);
-    setGames([]);
-    setGroups([]);
-    setPicks([]);
-    setLeaderboard({ overall: [], group: [] });
-    setPendingInvites([]);
-    setSelectedGroupId('');
-    setView('games');
-    setConfirmingLogout(false);
-  };
-
-  const removePick = async (pickId) => {
-    try {
-      await request(`/api/picks/${pickId}`, { method: 'DELETE' });
-      await Promise.all([refreshPicks(), refreshLeaderboard()]);
-      await showStatus('Pick removed');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const submitPick = async (gameId, choice) => {
-    try {
-      await request('/api/picks', {
-        method: 'POST',
-        body: JSON.stringify({ gameId, choice }),
-      });
-      await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
-      await showStatus('Pick saved successfully');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleLogin = async (event) => {
-    event.preventDefault();
-    try {
-      const data = await request('/api/login', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: authData.loginUsername,
-          password: authData.loginPassword,
-        }),
-      });
-      if (data?.challenge) {
-        setAuthData((prev) => ({ ...prev, loginPassword: '' }));
-        setAuthView('twofa');
-        return;
-      }
-      setUser(data.user);
-      setAuthData(initialAuthData);
-      await loadDashboard().catch(() => {});
-    } catch (error) {
-      showStatus(error.message);
-    }
-  };
-
-  const handle2faVerify = async (payload) => {
-    const data = await request('/api/auth/2fa/verify', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setUser(data.user);
-    setAuthData(initialAuthData);
-    setAuthView('auth');
-    await loadDashboard().catch(() => {});
-  };
-
-  const handle2faSetup = async () => {
-    return await request('/api/me/2fa/setup', { method: 'POST', body: JSON.stringify({}) });
-  };
-
-  const handle2faConfirm = async (code) => {
-    await request('/api/me/2fa/confirm', { method: 'POST', body: JSON.stringify({ code }) });
-    setUser((u) => (u ? { ...u, twoFactorEnabled: true } : u));
-    showStatus('Two-factor authentication enabled.');
-    return true;
-  };
-
-  const handle2faDisable = async (payload) => {
-    await request('/api/me/2fa/disable', { method: 'POST', body: JSON.stringify(payload) });
-    setUser((u) => (u ? { ...u, twoFactorEnabled: false } : u));
-    showStatus('Two-factor authentication disabled.');
-    return true;
-  };
-
-  const handleRegister = async (event) => {
-    event.preventDefault();
-    try {
-      const data = await request('/api/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: authData.registerUsername,
-          password: authData.registerPassword,
-          email: authData.registerEmail,
-        }),
-      });
-      setUser(data.user);
-      setAuthData(initialAuthData);
-      showStatus('Check your email for a verification link.');
-      await loadDashboard().catch(() => {});
-    } catch (error) {
-      showStatus(error.message);
-    }
-  };
-
-  const handleForgotPassword = async (event) => {
-    event.preventDefault();
-    try {
-      await request('/api/auth/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify({ email: authData.forgotEmail }),
-      });
-      setForgotSent(true);
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleResetPassword = async (event) => {
-    event.preventDefault();
-    try {
-      await request('/api/auth/reset-password', {
-        method: 'POST',
-        body: JSON.stringify({ token: authData.resetToken, password: authData.resetPassword }),
-      });
-      setAuthData((prev) => ({ ...prev, resetPassword: '', resetToken: '' }));
-      setAuthView('auth');
-      showStatus('Password updated. Sign in with your new password.');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleCreateGroup = async (event) => {
-    event.preventDefault();
-    try {
-      await request('/api/groups', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: authData.groupName,
-          visibility: authData.groupVisibility,
-        }),
-      });
-      setAuthData((prev) => ({ ...prev, groupName: '', groupVisibility: 'private' }));
-      await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
-      showStatus('Group created successfully');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const fetchProfile = useCallback(
-    async (username) => {
-      if (!username) return;
-      setProfileLoading(true);
-      try {
-        const data = await request(`/api/users/${encodeURIComponent(username)}/profile`);
-        setProfile(data);
-      } catch (error) {
-        if (error.message !== 'Session expired') showStatus(error.message);
-        setProfile(null);
-      } finally {
-        setProfileLoading(false);
-      }
-    },
-    [request],
-  );
-
-  const openProfile = (username) => {
-    setProfileUsername(username);
-    setProfile(null);
-    fetchProfile(username);
-  };
-
-  const closeProfile = () => {
-    setProfileUsername('');
-    setProfile(null);
-  };
-
-  const handleFriendAction = async (action) => {
-    if (!profile) return;
-    setProfileBusy(true);
-    try {
-      if (action === 'request') {
-        await request('/api/friends/request', {
-          method: 'POST',
-          body: JSON.stringify({ username: profile.username }),
-        });
-        showStatus(`Friend request sent to ${profile.username}`);
-      } else if (action === 'cancel' && profile.friendship) {
-        await request(`/api/friends/${profile.friendship.id}`, { method: 'DELETE' });
-        showStatus('Request cancelled');
-      } else if (action === 'accept' && profile.friendship) {
-        await request(`/api/friends/${profile.friendship.id}/accept`, { method: 'POST' });
-        showStatus(`You are now friends with ${profile.username}`);
-      } else if (action === 'unfriend' && profile.friendship) {
-        await request(`/api/friends/${profile.friendship.id}`, { method: 'DELETE' });
-        showStatus(`Unfriended ${profile.username}`);
-      }
-      await Promise.all([fetchProfile(profile.username), refreshFriends()]);
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    } finally {
-      setProfileBusy(false);
-    }
-  };
-
-  const handleSendFriendRequest = async (username) => {
-    try {
-      await request('/api/friends/request', {
-        method: 'POST',
-        body: JSON.stringify({ username }),
-      });
-      await refreshFriends();
-      showStatus(`Friend request sent to ${username}`);
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleAcceptFriend = async (id) => {
-    try {
-      await request(`/api/friends/${id}/accept`, { method: 'POST' });
-      await refreshFriends();
-      showStatus('Friend request accepted');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleDeclineFriend = async (id) => {
-    try {
-      await request(`/api/friends/${id}/decline`, { method: 'POST' });
-      await refreshFriends();
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleUnfriend = async (id) => {
-    try {
-      await request(`/api/friends/${id}`, { method: 'DELETE' });
-      await refreshFriends();
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleLeaveGroup = async (groupId) => {
-    try {
-      await request(`/api/groups/${groupId}/leave`, { method: 'POST' });
-      await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
-      showStatus('Left the group');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleTransferGroup = async (groupId, newOwnerId) => {
-    try {
-      await request(`/api/groups/${groupId}/transfer`, {
-        method: 'POST',
-        body: JSON.stringify({ newOwnerId }),
-      });
-      await refreshGroups();
-      showStatus('Ownership transferred');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleDeleteGroup = async (groupId) => {
-    try {
-      await request(`/api/groups/${groupId}`, { method: 'DELETE' });
-      await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
-      showStatus('Group deleted');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleSaveProfile = async (payload) => {
-    try {
-      const updated = await request('/api/me', {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      setUser((prev) =>
-        prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev,
-      );
-      setOwnProfile((prev) =>
-        prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev,
-      );
-      showStatus('Profile updated');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleJoinPublicGroup = async (groupId) => {
-    try {
-      await request(`/api/groups/${groupId}/join`, { method: 'POST' });
-      await Promise.all([refreshGroups(), refreshDiscover(), refreshLeaderboard()]);
-      showStatus('Joined group');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleInvite = async (groupId, username) => {
-    try {
-      await request(`/api/groups/${groupId}/invite`, {
-        method: 'POST',
-        body: JSON.stringify({ username }),
-      });
-      await Promise.all([refreshGroups(), refreshLeaderboard()]);
-      showStatus(`${username} invited successfully`);
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleAcceptInvite = async (groupId, inviteId) => {
-    try {
-      await request(`/api/groups/${groupId}/invite/${inviteId}/accept`, {
-        method: 'POST',
-      });
-      await Promise.all([loadDashboard()]);
-      showStatus('Invitation accepted!');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
-  const handleDeclineInvite = async (groupId, inviteId) => {
-    try {
-      await request(`/api/groups/${groupId}/invite/${inviteId}/decline`, {
-        method: 'POST',
-      });
-      await Promise.all([loadDashboard()]);
-      showStatus('Invitation declined');
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-    }
-  };
-
+  const showCompleted = useShowCompletedToggle();
   const handleCommentError = (message) => {
     if (message && message !== 'Session expired') showStatus(message);
+  };
+
+  // Hoist the Create-Group form submit into a small adapter so the form
+  // continues to take an event (e.preventDefault) but routes the body
+  // through DataContext.handleCreateGroup.
+  const onCreateGroupSubmit = async (event) => {
+    event.preventDefault();
+    await handleCreateGroup({ name: authData.groupName, visibility: authData.groupVisibility });
+    setAuthData((prev) => ({ ...prev, groupName: '', groupVisibility: 'private' }));
   };
 
   const renderGameSection = (heading, list, emptyText) => (
@@ -834,28 +278,16 @@ function App() {
               )}
 
               {completedGames.length > 0 && (
-                <div className="space-y-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowCompleted((prev) => !prev)}
-                    className="w-full rounded-3xl border border-slate-800 bg-slate-900/60 px-5 py-4 text-left text-sm font-semibold uppercase tracking-[0.24em] text-slate-300 transition duration-200 hover:border-slate-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                    aria-expanded={showCompleted}
-                  >
-                    {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
-                  </button>
-                  {showCompleted &&
-                    completedGames.map((game) => (
-                      <GameCard
-                        key={game.id}
-                        game={game}
-                        existingPick={pickMap.get(game.id)}
-                        onPickSubmit={submitPick}
-                        currentUserId={user?.id}
-                        request={request}
-                        onError={handleCommentError}
-                      />
-                    ))}
-                </div>
+                <CompletedSection
+                  completedGames={completedGames}
+                  pickMap={pickMap}
+                  submitPick={submitPick}
+                  request={request}
+                  currentUserId={user?.id}
+                  onError={handleCommentError}
+                  showCompleted={showCompleted.value}
+                  setShowCompleted={showCompleted.set}
+                />
               )}
             </div>
 
@@ -950,7 +382,7 @@ function App() {
               <p className="mt-2 text-slate-400">
                 Invite friends and compare scores in your private pool.
               </p>
-              <form onSubmit={handleCreateGroup} className="mt-6 space-y-4">
+              <form onSubmit={onCreateGroupSubmit} className="mt-6 space-y-4">
                 <label htmlFor="group-name" className="sr-only">
                   Group name
                 </label>
@@ -1301,6 +733,49 @@ function App() {
             ? dashboard
             : authPanel}
       </div>
+    </div>
+  );
+}
+
+// Small local hook for the "show completed games" toggle. Living inline
+// keeps it scoped to the games view; doesn't justify a context entry.
+function useShowCompletedToggle() {
+  const [value, set] = useState(false);
+  return { value, set: (next) => set((prev) => (typeof next === 'function' ? next(prev) : next)) };
+}
+
+function CompletedSection({
+  completedGames,
+  pickMap,
+  submitPick,
+  request,
+  currentUserId,
+  onError,
+  showCompleted,
+  setShowCompleted,
+}) {
+  return (
+    <div className="space-y-4">
+      <button
+        type="button"
+        onClick={() => setShowCompleted((prev) => !prev)}
+        className="w-full rounded-3xl border border-slate-800 bg-slate-900/60 px-5 py-4 text-left text-sm font-semibold uppercase tracking-[0.24em] text-slate-300 transition duration-200 hover:border-slate-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        aria-expanded={showCompleted}
+      >
+        {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
+      </button>
+      {showCompleted &&
+        completedGames.map((game) => (
+          <GameCard
+            key={game.id}
+            game={game}
+            existingPick={pickMap.get(game.id)}
+            onPickSubmit={submitPick}
+            currentUserId={currentUserId}
+            request={request}
+            onError={onError}
+          />
+        ))}
     </div>
   );
 }

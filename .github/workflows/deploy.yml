@@ -17,7 +17,7 @@ env:
   ACR_NAME: scorecastacrp3aaelev7xp52
   ACR_LOGIN_SERVER: scorecastacrp3aaelev7xp52.azurecr.io
   IMAGE_REPO: scorecast
-  HEALTH_URL: https://scorecast-app.victoriouspebble-d2a0e9ef.eastus2.azurecontainerapps.io/healthz
+  HEALTH_URL: https://bantryx.com/healthz
 
 jobs:
   build-and-push:

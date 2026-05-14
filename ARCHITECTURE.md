@@ -67,13 +67,15 @@ The codebase is mid-sized (~4k lines of JavaScript split roughly evenly between 
 │  │ (per-route)  │  │ requireAdmin │ │                            │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────────┘  │
 │                                                                       │
-│  Route handlers ─── Sequelize models ─── helper fns                  │
-│                          │             (scorePick, notify,           │
-│                          │              evaluateBadges,              │
-│                          │              cascadeDelete*,              │
-│                          │              setAuthCookies,              │
-│                          │              sendVerificationEmail,       │
-│                          │              leaderboardCache, …)         │
+│  routes/*.js ─── services/*.js ─── Sequelize models                   │
+│   (thin parse/auth │  (domain logic — PickService, GameService,        │
+│    + service call) │   GroupService, UserService, CommentService,      │
+│                    │   LeaderboardService, NotificationService,        │
+│                    │   BadgeService — own cache + notify + cascade)    │
+│                                                                       │
+│  lib/ cross-cutting infra:                                            │
+│    scoring, users, groups, friends, auth (cookies/tokens), errors,    │
+│    response, errorMiddleware, leaderboardCache, email, logger         │
 │  ┌──────────────────────┴──────────────────────────────────────┐   │
 │  │ lib/leaderboardCache (in-process Map, 30s TTL)              │   │
 │  │ lib/email (Resend transport — log-only fallback)            │   │
@@ -106,7 +108,7 @@ There is **one server process**, **one database**, **no message queue**, **no wo
 | Build tool         | **Vite 5**                                                                                                                                                                                                                                                                                                                                                | Fastest DX for vanilla React; dev proxy avoids CORS in development                                                                                                                                                                                                                                     |
 | Styling            | **Tailwind CSS 3**                                                                                                                                                                                                                                                                                                                                        | Utility classes keep components self-contained; no design-token sprawl                                                                                                                                                                                                                                 |
 | HTTP client        | **`fetch`** (no axios)                                                                                                                                                                                                                                                                                                                                    | Standard; the wrapper handles JSON + auth header + 401                                                                                                                                                                                                                                                 |
-| State              | **`useState` + `useMemo` + `useCallback`**                                                                                                                                                                                                                                                                                                                | No Redux/Zustand/Context — App.jsx is the single state owner                                                                                                                                                                                                                                           |
+| State              | **React Context + custom hooks** (Tier 13.6/13.7)                                                                                                                                                                                                                                                                                                         | Three providers: `AuthContext` (user + auth flow), `DataContext` (games/picks/groups/leaderboard/friends/profile + mutations), `NotificationContext` (toast banner). Selector hooks (`useGames`/`usePicks`/`useGroups`/etc.) keep components narrow. No Redux/Zustand.                                 |
 | Backend            | **Node 18+ / Express 4**                                                                                                                                                                                                                                                                                                                                  | Tiny surface, no router framework, easy to read                                                                                                                                                                                                                                                        |
 | ORM                | **Sequelize 6**                                                                                                                                                                                                                                                                                                                                           | Predictable, supports raw SQL escape hatches                                                                                                                                                                                                                                                           |
 | Migrations         | **sequelize-cli + umzug** (Tier 5.1)                                                                                                                                                                                                                                                                                                                      | sequelize-cli for `npm run db:*` scripts; umzug for programmatic dev-boot execution. Versioned files under `migrations/`. See §7.3                                                                                                                                                                     |
@@ -133,7 +135,7 @@ Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker
 
 ```
 ScoreCast/
-├── server.js                            # Single-file Express app (~1550 LOC)
+├── server.js                            # Express composition shell (~157 LOC; Tier 13 — handlers live under routes/, business logic under services/)
 ├── package.json                         # All deps; npm scripts: dev, build, start, preview, db:migrate*, db:seed*
 ├── db-config.js                         # Legacy stub — unused now that config/database.js exists
 ├── data.json                            # Seed: users, games, groups, picks
@@ -164,16 +166,54 @@ ScoreCast/
 ├── seeders/                             # Tier 5.1: idempotent seeders
 │   └── 20260513000001-seed-password-backfill.js   # re-hashes any plaintext seed password matching data.json
 │
-├── lib/                                 # Process-local helpers
+├── lib/                                 # Process-local helpers + cross-cutting infra
 │   ├── logger.js                        # Tier 5.4: pino instance (pretty in dev, JSON in prod, LOG_LEVEL env)
 │   ├── leaderboardCache.js              # Tier 5.2: getOrBuild/invalidate/stats; 30s TTL in-memory Map
 │   ├── instrument.js                    # Tier 5.4b: Sentry.init() — MUST be the very first require() in server.js
 │   ├── sentry.js                        # Tier 5.4b: captureException + setupExpressErrorHandler wrappers (no-ops if SENTRY_DSN unset)
-│   └── email.js                         # Tier 6.3: send({to, subject, html, text}) — Resend transport when RESEND_API_KEY set, log-only otherwise. NEVER throws.
+│   ├── email.js                         # Tier 6.3: send({to, subject, html, text}) — Resend transport when RESEND_API_KEY set, log-only otherwise. NEVER throws.
+│   ├── emailHelpers.js                  # Tier 13.1: sendVerificationEmail (wraps lib/email)
+│   ├── auth.js                          # Tier 13.1: cookie + token helpers (JWT_SECRET, ACCESS/REFRESH/CHALLENGE cookies, setAuthCookies, clearAuthCookies, hashToken, generateRawToken)
+│   ├── scoring.js                       # Tier 13.1: scorePick + sortLeaderboard (server-side authoritative scorer)
+│   ├── users.js                         # Tier 13.1: getUserById, getUserByUsername, buildUserSummary
+│   ├── groups.js                        # Tier 13.1: getGroupsForUser, getGroupById, getJoinedGroupIds, getPendingInvites, buildGroupLeaderboard
+│   ├── friends.js                       # Tier 13.1: getFriendshipBetween, friendStatusFrom
+│   ├── response.js                      # Tier 13.1: attachResponseHelpers middleware (res.ok / res.created / res.noContent)
+│   ├── errors.js                        # Tier 13.1: AppError class + factories (notFound, forbidden, badRequest, conflict, …)
+│   └── errorMiddleware.js               # Tier 13.1: global Express error handler — translates AppError to JSON response shape
 │
 ├── middleware/
 │   ├── requestId.js                     # Tier 5.4: assigns req.id + req.log child; echoes X-Request-Id header
-│   └── csrf.js                          # Tier 6.7: double-submit (sc_csrf cookie + X-CSRF-Token header). EXEMPT_PATHS for unauth mutations. timingSafeEqual compare.
+│   ├── csrf.js                          # Tier 6.7: double-submit (sc_csrf cookie + X-CSRF-Token header). EXEMPT_PATHS for unauth mutations. timingSafeEqual compare.
+│   ├── auth.js                          # Tier 13.1: authMiddleware + requireAdmin (sc_access cookie → req.user)
+│   ├── rateLimit.js                     # Tier 13.1: all 7 express-rate-limit instances + skipInTest predicate
+│   └── asyncHandler.js                  # Tier 13.1: wraps async route handlers so thrown AppError flows to errorMiddleware
+│
+├── routes/                              # Tier 13.2: Express routers mounted at /api (each owns one domain)
+│   ├── auth.js                          # /register, /login, /auth/{verify-email, forgot-password, reset-password, refresh, logout, 2fa/verify}
+│   ├── client-errors.js                 # /client-errors (CSRF-exempt; logs frontend exceptions)
+│   ├── me.js                            # /me, /me/2fa/{setup, confirm, disable}, /me/email
+│   ├── games.js                         # /games, /games/:id/result, /games/:id/comments
+│   ├── picks.js                         # /picks (CRUD)
+│   ├── groups.js                        # /groups (CRUD + invite/accept/decline/transfer/visibility/discover/join/leave)
+│   ├── leaderboard.js                   # /leaderboard
+│   ├── friends.js                       # /friends + /friends/:id/{accept, decline}
+│   ├── users.js                         # /search, /users/:username/profile
+│   ├── comments.js                      # /comments/:id (edit/delete) + reactions
+│   ├── notifications.js                 # /notifications, /notifications/:id/read, /notifications/read-all
+│   ├── admin.js                         # /admin/{games, users, cache-stats} + bulk endpoints
+│   ├── health.js                        # /healthz (root path; no /api prefix)
+│   └── docs.js                          # /api/openapi.json + /api/docs Swagger UI (dev-only)
+│
+├── services/                            # Tier 13.4: pure domain logic (no req/res). Routes parse → call → respond.
+│   ├── NotificationService.js           # notify (never throws), listForUser, markRead, markAllRead
+│   ├── BadgeService.js                  # awardBadge, evaluateBadges (uses NotificationService for badge-earned toasts)
+│   ├── LeaderboardService.js            # Wraps lib/leaderboardCache: getOverall, getForGroup, invalidate, stats
+│   ├── CommentService.js                # listForGame, create, edit, remove, react, unreact (CommentReaction ops)
+│   ├── PickService.js                   # createPick, listForUser, deletePick (calls Badge + Leaderboard hooks)
+│   ├── GameService.js                   # CRUD + setResult/bulkSetResult/cascadeDelete (notify + badge eval on result)
+│   ├── GroupService.js                  # CRUD + invite/accept/decline/join/leave/transfer/visibility + cascadeDelete
+│   └── UserService.js                   # cascadeDelete + admin list/role/delete + bulkAction (filters self id → skipped[])
 │
 ├── models/                              # Sequelize models — one file per table
 │   ├── index.js                         # Sequelize init + associations + initDatabase + umzug shim (runMigrations) + seedDatabase
@@ -200,12 +240,23 @@ ScoreCast/
 │   └── middleware.js                    # validate(schema) → 400 with structured issues on failure
 │
 ├── src/                                 # React frontend
-│   ├── main.jsx                         # React.createRoot bootstrap; mounts ErrorBoundary, installs clientErrorReporter, calls initSentry()
-│   ├── App.jsx                          # ~1100 LOC; state, tabs, request(), all handlers
+│   ├── main.jsx                         # React.createRoot bootstrap; provider stack: NotificationProvider → AuthProvider → DataProvider → App (Tier 13.6); mounts ErrorBoundary, installs clientErrorReporter, calls initSentry()
+│   ├── App.jsx                          # ~780 LOC (Tier 13.6); layout shell that consumes hooks. State + handlers moved into contexts/
+│   ├── contexts/                        # Tier 13.6 React Context providers
+│   │   ├── NotificationContext.jsx      # status banner + scorecast:client-error subscription
+│   │   ├── AuthContext.jsx              # user, authData, auth handlers (login/register/forgot/reset), 2FA flow, URL token consumption
+│   │   └── DataContext.jsx              # games, picks, groups, leaderboard, friends, discover, invites, profile + every mutation handler. Watches user → null to clear its own slots on logout
+│   ├── hooks/                           # Tier 13.7 custom hooks
+│   │   ├── useAuth.js, useData.js, useNotifications.js   # re-exports of their context's hook
+│   │   ├── useRequest.js                # CSRF + 401 refresh-retry + session-expired (depends on AuthContext)
+│   │   ├── useGames.js                  # segmented upcoming/live/completed + refreshGames
+│   │   ├── usePicks.js                  # pickMap memo + submit/remove
+│   │   ├── useGroups.js, useLeaderboard.js, useFriends.js   # selector hooks on useData
 │   ├── index.css                        # @tailwind base/components/utilities
 │   ├── lib/
 │   │   ├── clientErrorReporter.js       # Tier 5.4b: window error + unhandledrejection listeners; throttled POST to /api/client-errors; dispatches scorecast:client-error DOM event
 │   │   ├── sentry.js                    # Tier 5.4b: dynamic import('@sentry/react') gated on VITE_SENTRY_DSN (Vite tree-shakes when unset)
+│   │   ├── apiClient.js                 # Tier 13.3: bare apiFetch helper used by AuthContext for /api/auth/* paths (no refresh-retry needed)
 │   │   └── cookies.js                   # Tier 6.7: getCookie(name) — reads document.cookie for X-CSRF-Token header injection
 │   ├── utils/
 │   │   ├── scoring.js                   # MIRROR of server's scorePick; see §8.1

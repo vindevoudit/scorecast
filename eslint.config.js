@@ -107,6 +107,30 @@ export default [
       ],
       'no-empty': ['error', { allowEmptyCatch: true }],
       'n/no-process-exit': 'off',
+      // Tier 13.9 — backend code must route through pino (lib/logger.js).
+      // lib/instrument.js is the documented exception (Sentry init runs
+      // before logger is loadable). Re-enable in that file via override
+      // below; nothing else should use console.* on the server side.
+      'no-console': 'error',
+    },
+  },
+
+  // Tier 13.9 — lib/instrument.js fires before lib/logger.js is wired, so
+  // it falls back to console.warn for "Sentry unavailable" messaging. Carve
+  // it out individually rather than weakening the rule everywhere.
+  {
+    files: ['lib/instrument.js'],
+    rules: { 'no-console': 'off' },
+  },
+
+  // Tier 13.9 — block deep relative imports anywhere. The new layered
+  // structure (lib/ + middleware/ + routes/ + services/) means anything
+  // crossing three directory boundaries is almost certainly a smell.
+  {
+    files: ['**/*.{js,jsx}'],
+    ignores: ['node_modules/**', 'dist/**'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: ['../../../*', '../../../../*'] }],
     },
   },
 

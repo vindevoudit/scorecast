@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
-import ProfileView from './ProfileView';
+import { lazy, Suspense, useEffect } from 'react';
+
+const ProfileView = lazy(() => import('./ProfileView'));
 
 function ProfileDrawer({ open, profile, loading, onClose, onFriendAction, busy }) {
   useEffect(() => {
@@ -38,7 +39,9 @@ function ProfileDrawer({ open, profile, loading, onClose, onFriendAction, busy }
         {loading || !profile ? (
           <p className="text-sm text-slate-400">Loading…</p>
         ) : (
-          <ProfileView profile={profile} onFriendAction={onFriendAction} busy={busy} />
+          <Suspense fallback={<p className="text-sm text-slate-400">Loading…</p>}>
+            <ProfileView profile={profile} onFriendAction={onFriendAction} busy={busy} />
+          </Suspense>
         )}
       </div>
     </div>

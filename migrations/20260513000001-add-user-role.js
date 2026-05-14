@@ -10,7 +10,7 @@ module.exports = {
       END $$;
     `);
     await queryInterface.sequelize.query(
-      `ALTER TABLE users ADD COLUMN IF NOT EXISTS role "public"."enum_users_role" NOT NULL DEFAULT 'user'`
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS role "public"."enum_users_role" NOT NULL DEFAULT 'user'`,
     );
   },
 

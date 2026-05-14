@@ -12,17 +12,21 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
     <>
       <div className="flex min-w-0 items-center gap-3">
         {rank != null && (
-          <span className="w-6 shrink-0 text-sm font-semibold text-slate-500 tabular-nums">
+          <span className="w-6 shrink-0 text-sm font-semibold tabular-nums text-slate-500">
             {rank}.
           </span>
         )}
         <Avatar username={entry.username} displayName={entry.displayName} size={28} />
-        <span className={`min-w-0 truncate text-sm ${isCurrentUser ? 'font-semibold text-white' : 'text-slate-300'}`}>
+        <span
+          className={`min-w-0 truncate text-sm ${isCurrentUser ? 'font-semibold text-white' : 'text-slate-300'}`}
+        >
           {entry.displayName || entry.username}
-          {isCurrentUser && <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">you</span>}
+          {isCurrentUser && (
+            <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">you</span>
+          )}
         </span>
       </div>
-      <div className="shrink-0 text-sm font-semibold text-white tabular-nums">{entry.points}</div>
+      <div className="shrink-0 text-sm font-semibold tabular-nums text-white">{entry.points}</div>
     </>
   );
 

@@ -15,13 +15,32 @@ const { Op } = require('sequelize');
 const crypto = require('crypto');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
-const { User, Group, Game, Pick, GroupMember, GroupInvite, Badge, Friendship, Comment, Notification, CommentReaction, EmailVerificationToken, PasswordResetToken, RefreshToken, sequelize, initDatabase } = require('./models');
+const {
+  User,
+  Group,
+  Game,
+  Pick,
+  GroupMember,
+  GroupInvite,
+  Badge,
+  Friendship,
+  Comment,
+  Notification,
+  CommentReaction,
+  EmailVerificationToken,
+  PasswordResetToken,
+  RefreshToken,
+  sequelize,
+  initDatabase,
+} = require('./models');
 const logger = require('./lib/logger');
 const requestId = require('./middleware/requestId');
 const leaderboardCache = require('./lib/leaderboardCache');
 const sentry = require('./lib/sentry');
 const email = require('./lib/email');
 const csrfMiddleware = require('./middleware/csrf');
+const swaggerUi = require('swagger-ui-express');
+const { buildOpenAPIDocument } = require('./lib/openapi');
 const pinoHttp = require('pino-http');
 const { validate } = require('./validation/middleware');
 const {
@@ -97,11 +116,9 @@ const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const COOKIE_SECURE = process.env.NODE_ENV === 'production';
 
 function createAccessToken(user) {
-  return jwt.sign(
-    { id: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
-    { expiresIn: Math.floor(ACCESS_TTL_MS / 1000) }
-  );
+  return jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, {
+    expiresIn: Math.floor(ACCESS_TTL_MS / 1000),
+  });
 }
 
 async function setAuthCookies(res, user, { userAgent } = {}) {
@@ -137,7 +154,7 @@ function clearAuthCookies(res) {
 async function revokeAllUserRefreshTokens(userId) {
   await RefreshToken.update(
     { revokedAt: new Date() },
-    { where: { userId, revokedAt: null }, hooks: false }
+    { where: { userId, revokedAt: null }, hooks: false },
   );
 }
 
@@ -222,9 +239,12 @@ const forgotPasswordLimiter = rateLimit({
 
 function scorePick(pick, game) {
   if (!game.result) return 0;
-  const isWinningChoice = (pick.choice === 'home' && game.result === 'home') || (pick.choice === 'away' && game.result === 'away');
+  const isWinningChoice =
+    (pick.choice === 'home' && game.result === 'home') ||
+    (pick.choice === 'away' && game.result === 'away');
   if (!isWinningChoice) return 0;
-  const probability = pick.choice === 'home' ? parseFloat(game.homeProbability) : parseFloat(game.awayProbability);
+  const probability =
+    pick.choice === 'home' ? parseFloat(game.homeProbability) : parseFloat(game.awayProbability);
   return Math.round((1 - probability) * 100);
 }
 
@@ -247,7 +267,7 @@ async function getPendingInvites(userId) {
 
   const invites = await GroupInvite.findAll({ where: { username: user.username } });
   const groups = await Group.findAll({ where: { id: invites.map((i) => i.groupId) } });
-  
+
   return invites.map((invite) => {
     const group = groups.find((g) => g.id === invite.groupId);
     return {
@@ -350,12 +370,7 @@ async function awardBadge(userId, slug) {
   try {
     await Badge.create({ userId, slug });
     const meta = BADGE_CATALOG.find((b) => b.slug === slug);
-    await notify(
-      userId,
-      'badge',
-      `Badge earned: ${meta?.name || slug}`,
-      meta?.description || null
-    );
+    await notify(userId, 'badge', `Badge earned: ${meta?.name || slug}`, meta?.description || null);
     return true;
   } catch (error) {
     return false;
@@ -384,17 +399,22 @@ async function evaluateBadges(userId, context = {}) {
       const isWin = pick.choice === game.result;
       if (!isWin) continue;
       correctCount += 1;
-      const probability = pick.choice === 'home'
-        ? parseFloat(game.homeProbability)
-        : parseFloat(game.awayProbability);
+      const probability =
+        pick.choice === 'home'
+          ? parseFloat(game.homeProbability)
+          : parseFloat(game.awayProbability);
       if (probability < 0.4) upsetWins += 1;
     }
 
     if (correctCount >= 1 && !earnedSlugs.has('first-win')) await awardBadge(userId, 'first-win');
-    if (correctCount >= 10 && !earnedSlugs.has('correct-10')) await awardBadge(userId, 'correct-10');
-    if (correctCount >= 25 && !earnedSlugs.has('correct-25')) await awardBadge(userId, 'correct-25');
-    if (correctCount >= 50 && !earnedSlugs.has('correct-50')) await awardBadge(userId, 'correct-50');
-    if (upsetWins >= 5 && !earnedSlugs.has('upset-specialist')) await awardBadge(userId, 'upset-specialist');
+    if (correctCount >= 10 && !earnedSlugs.has('correct-10'))
+      await awardBadge(userId, 'correct-10');
+    if (correctCount >= 25 && !earnedSlugs.has('correct-25'))
+      await awardBadge(userId, 'correct-25');
+    if (correctCount >= 50 && !earnedSlugs.has('correct-50'))
+      await awardBadge(userId, 'correct-50');
+    if (upsetWins >= 5 && !earnedSlugs.has('upset-specialist'))
+      await awardBadge(userId, 'upset-specialist');
 
     if (context.groupCreated && !earnedSlugs.has('group-founder')) {
       await awardBadge(userId, 'group-founder');
@@ -481,22 +501,27 @@ function sortLeaderboard(rows, orderBy) {
 
 const app = express();
 app.use(requestId);
-app.use(pinoHttp({
-  logger,
-  genReqId: (req) => req.id,
-  customLogLevel: (req, res, err) => {
-    if (err || res.statusCode >= 500) return 'error';
-    if (res.statusCode >= 400) return 'warn';
-    return 'info';
-  },
-  serializers: {
-    req: (req) => ({ id: req.id, method: req.method, url: req.url }),
-    res: (res) => ({ statusCode: res.statusCode }),
-  },
-}));
+app.use(
+  pinoHttp({
+    logger,
+    genReqId: (req) => req.id,
+    customLogLevel: (req, res, err) => {
+      if (err || res.statusCode >= 500) return 'error';
+      if (res.statusCode >= 400) return 'warn';
+      return 'info';
+    },
+    serializers: {
+      req: (req) => ({ id: req.id, method: req.method, url: req.url }),
+      res: (res) => ({ statusCode: res.statusCode }),
+    },
+  }),
+);
 app.use(compression());
 
-const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 if (process.env.NODE_ENV === 'production' && corsOrigins.length === 0) {
   throw new Error('CORS_ORIGINS env var is required in production');
 }
@@ -504,31 +529,46 @@ const cspConnectSrc = ["'self'", 'https://*.sentry.io', 'https://*.ingest.sentry
 if (process.env.NODE_ENV !== 'production') {
   cspConnectSrc.push('ws://localhost:5173', 'http://localhost:5173');
 }
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:'],
-      connectSrc: cspConnectSrc,
-      fontSrc: ["'self'", 'data:'],
-      frameAncestors: ["'none'"],
-      objectSrc: ["'none'"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: cspConnectSrc,
+        fontSrc: ["'self'", 'data:'],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+      },
     },
-  },
-  frameguard: { action: 'deny' },
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: false,
-}));
-app.use(cors({
-  origin: corsOrigins.length ? corsOrigins : true,
-  credentials: true,
-}));
+    frameguard: { action: 'deny' },
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: false,
+  }),
+);
+app.use(
+  cors({
+    origin: corsOrigins.length ? corsOrigins : true,
+    credentials: true,
+  }),
+);
 app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(csrfMiddleware);
+
+// Dev-only: API documentation (OpenAPI spec + Swagger UI).
+// Hidden in production to reduce attack surface.
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/api/openapi.json', (req, res) => {
+    res.json(buildOpenAPIDocument());
+  });
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(buildOpenAPIDocument()));
+  logger.info('OpenAPI docs available at /api/docs and /api/openapi.json (dev only)');
+}
+
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.post('/api/register', registerLimiter, validate(registerSchema), async (req, res) => {
@@ -585,11 +625,9 @@ app.post('/api/login', loginLimiter, validate(loginSchema), async (req, res) => 
   }
 
   if (user.totpEnabledAt) {
-    const challengeJwt = jwt.sign(
-      { id: user.id, type: '2fa-pending' },
-      JWT_SECRET,
-      { expiresIn: Math.floor(CHALLENGE_TTL_MS / 1000) }
-    );
+    const challengeJwt = jwt.sign({ id: user.id, type: '2fa-pending' }, JWT_SECRET, {
+      expiresIn: Math.floor(CHALLENGE_TTL_MS / 1000),
+    });
     res.cookie(CHALLENGE_COOKIE, challengeJwt, {
       httpOnly: true,
       secure: COOKIE_SECURE,
@@ -631,34 +669,41 @@ app.post('/api/auth/verify-email', async (req, res) => {
   }
 });
 
-app.post('/api/auth/forgot-password', forgotPasswordLimiter, validate(forgotPasswordSchema), async (req, res) => {
-  const { email: emailAddress } = req.body;
-  try {
-    const user = await User.findOne({
-      where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
-    });
-    if (user && user.emailVerifiedAt) {
-      const raw = generateRawToken();
-      await PasswordResetToken.create({
-        userId: user.id,
-        tokenHash: hashToken(raw),
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+app.post(
+  '/api/auth/forgot-password',
+  forgotPasswordLimiter,
+  validate(forgotPasswordSchema),
+  async (req, res) => {
+    const { email: emailAddress } = req.body;
+    try {
+      const user = await User.findOne({
+        where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
       });
-      const link = `${PUBLIC_APP_URL}/?resetToken=${raw}`;
-      email.send({
-        to: user.email,
-        subject: 'Reset your ScoreCast password',
-        text: `Open this link to reset your password:\n${link}\n\nThe link expires in 15 minutes. If you didn't request this, ignore this email.`,
-        html: `<p>Open this link to reset your password:</p><p><a href="${link}">${link}</a></p><p>The link expires in 15 minutes. If you didn't request this, ignore this email.</p>`,
-      }).catch((err) => {
-        req.log.warn({ err: err.message, userId: user.id }, 'failed to send reset email');
-      });
+      if (user && user.emailVerifiedAt) {
+        const raw = generateRawToken();
+        await PasswordResetToken.create({
+          userId: user.id,
+          tokenHash: hashToken(raw),
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        });
+        const link = `${PUBLIC_APP_URL}/?resetToken=${raw}`;
+        email
+          .send({
+            to: user.email,
+            subject: 'Reset your ScoreCast password',
+            text: `Open this link to reset your password:\n${link}\n\nThe link expires in 15 minutes. If you didn't request this, ignore this email.`,
+            html: `<p>Open this link to reset your password:</p><p><a href="${link}">${link}</a></p><p>The link expires in 15 minutes. If you didn't request this, ignore this email.</p>`,
+          })
+          .catch((err) => {
+            req.log.warn({ err: err.message, userId: user.id }, 'failed to send reset email');
+          });
+      }
+    } catch (error) {
+      req.log.error({ err: error.message }, 'forgot-password failed');
     }
-  } catch (error) {
-    req.log.error({ err: error.message }, 'forgot-password failed');
-  }
-  res.status(204).end();
-});
+    res.status(204).end();
+  },
+);
 
 app.post('/api/auth/reset-password', validate(resetPasswordSchema), async (req, res) => {
   const { token, password } = req.body;
@@ -727,7 +772,10 @@ app.post('/api/auth/logout', async (req, res) => {
   if (raw) {
     try {
       const row = await RefreshToken.findOne({
-        where: { tokenHash: crypto.createHash('sha256').update(raw).digest('hex'), revokedAt: null },
+        where: {
+          tokenHash: crypto.createHash('sha256').update(raw).digest('hex'),
+          revokedAt: null,
+        },
       });
       if (row) {
         row.revokedAt = new Date();
@@ -813,7 +861,7 @@ app.post('/api/client-errors', clientErrorLimiter, validate(clientErrorSchema), 
   const logFn = level === 'warn' ? req.log.warn.bind(req.log) : req.log.error.bind(req.log);
   logFn(
     { clientError: { message, stack, componentStack, url, reqId, userAgent }, userId },
-    'client error'
+    'client error',
   );
   res.status(204).end();
 });
@@ -867,7 +915,9 @@ app.post('/api/me/2fa/setup', authMiddleware, async (req, res) => {
     const user = await getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.totpEnabledAt) {
-      return res.status(400).json({ error: '2FA is already enabled — disable it first to regenerate' });
+      return res
+        .status(400)
+        .json({ error: '2FA is already enabled — disable it first to regenerate' });
     }
     const secret = speakeasy.generateSecret({ name: `ScoreCast:${user.username}`, length: 20 });
     const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
@@ -902,7 +952,10 @@ app.post('/api/me/2fa/confirm', authMiddleware, validate(totpConfirmSchema), asy
       token: req.body.code,
       window: 1,
     });
-    if (!valid) return res.status(400).json({ error: 'Code did not match — try the next one in your authenticator' });
+    if (!valid)
+      return res
+        .status(400)
+        .json({ error: 'Code did not match — try the next one in your authenticator' });
     user.totpEnabledAt = new Date();
     await user.save({ hooks: false });
     res.json({ ok: true, totpEnabledAt: user.totpEnabledAt });
@@ -1016,7 +1069,7 @@ app.get('/api/groups/discover', authMiddleware, async (req, res) => {
         visibility: g.visibility,
         memberCount: countByGroup.get(g.id) || 0,
         createdAt: g.createdAt,
-      }))
+      })),
     );
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch public groups' });
@@ -1057,54 +1110,59 @@ app.post('/api/groups', authMiddleware, validate(createGroupSchema), async (req,
   }
 });
 
-app.post('/api/groups/:groupId/invite', authMiddleware, validate(inviteSchema), async (req, res) => {
-  const { username } = req.body;
+app.post(
+  '/api/groups/:groupId/invite',
+  authMiddleware,
+  validate(inviteSchema),
+  async (req, res) => {
+    const { username } = req.body;
 
-  try {
-    const group = await Group.findByPk(req.params.groupId);
-    if (!group) {
-      return res.status(404).json({ error: 'Group not found' });
+    try {
+      const group = await Group.findByPk(req.params.groupId);
+      if (!group) {
+        return res.status(404).json({ error: 'Group not found' });
+      }
+
+      const isMember = await GroupMember.findOne({
+        where: { groupId: req.params.groupId, userId: req.user.id },
+      });
+      if (!isMember) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const invitedUser = await getUserByUsername(username);
+      if (!invitedUser) {
+        return res.status(400).json({ error: 'No user found with that username' });
+      }
+
+      const isAlreadyMember = await GroupMember.findOne({
+        where: { groupId: req.params.groupId, userId: invitedUser.id },
+      });
+      if (isAlreadyMember) {
+        return res.status(400).json({ error: 'User is already a member of this group' });
+      }
+
+      const existingInvite = await GroupInvite.findOne({
+        where: { groupId: req.params.groupId, username: invitedUser.username },
+      });
+      if (existingInvite) {
+        return res.status(400).json({ error: 'User has already been invited to this group' });
+      }
+
+      await GroupInvite.create({ groupId: req.params.groupId, username: invitedUser.username });
+      notify(
+        invitedUser.id,
+        'invite',
+        `You were invited to "${group.name}"`,
+        `Open the Groups tab to accept or decline.`,
+      ).catch(() => {});
+      const updatedGroup = await getGroupById(req.params.groupId);
+      res.json({ success: true, group: updatedGroup });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to invite user' });
     }
-
-    const isMember = await GroupMember.findOne({
-      where: { groupId: req.params.groupId, userId: req.user.id },
-    });
-    if (!isMember) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    const invitedUser = await getUserByUsername(username);
-    if (!invitedUser) {
-      return res.status(400).json({ error: 'No user found with that username' });
-    }
-
-    const isAlreadyMember = await GroupMember.findOne({
-      where: { groupId: req.params.groupId, userId: invitedUser.id },
-    });
-    if (isAlreadyMember) {
-      return res.status(400).json({ error: 'User is already a member of this group' });
-    }
-
-    const existingInvite = await GroupInvite.findOne({
-      where: { groupId: req.params.groupId, username: invitedUser.username },
-    });
-    if (existingInvite) {
-      return res.status(400).json({ error: 'User has already been invited to this group' });
-    }
-
-    await GroupInvite.create({ groupId: req.params.groupId, username: invitedUser.username });
-    notify(
-      invitedUser.id,
-      'invite',
-      `You were invited to "${group.name}"`,
-      `Open the Groups tab to accept or decline.`
-    ).catch(() => {});
-    const updatedGroup = await getGroupById(req.params.groupId);
-    res.json({ success: true, group: updatedGroup });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to invite user' });
-  }
-});
+  },
+);
 
 app.post('/api/groups/:groupId/invite/:inviteId/accept', authMiddleware, async (req, res) => {
   try {
@@ -1132,11 +1190,9 @@ app.post('/api/groups/:groupId/invite/:inviteId/accept', authMiddleware, async (
 
     await GroupInvite.destroy({ where: { id: req.params.inviteId } });
     if (group.ownerId && group.ownerId !== req.user.id) {
-      notify(
-        group.ownerId,
-        'group-join',
-        `${user.username} joined "${group.name}"`
-      ).catch(() => {});
+      notify(group.ownerId, 'group-join', `${user.username} joined "${group.name}"`).catch(
+        () => {},
+      );
     }
     leaderboardCache.invalidate(`group:${req.params.groupId}`);
     const updatedGroup = await getGroupById(req.params.groupId);
@@ -1177,7 +1233,9 @@ app.post('/api/picks', pickLimiter, authMiddleware, validate(pickSchema), async 
     const gameDate = new Date(game.date);
     const now = new Date();
     if (game.result || gameDate <= now) {
-      return res.status(400).json({ error: 'Picks can only be created or changed for upcoming games' });
+      return res
+        .status(400)
+        .json({ error: 'Picks can only be created or changed for upcoming games' });
     }
 
     const existingPick = await Pick.findOne({
@@ -1222,10 +1280,7 @@ app.get('/api/search', authMiddleware, async (req, res) => {
     if (type === 'all' || type === 'users') {
       const users = await User.findAll({
         where: {
-          [Op.or]: [
-            { username: { [Op.iLike]: like } },
-            { displayName: { [Op.iLike]: like } },
-          ],
+          [Op.or]: [{ username: { [Op.iLike]: like } }, { displayName: { [Op.iLike]: like } }],
         },
         limit: 5,
       });
@@ -1242,7 +1297,11 @@ app.get('/api/search', authMiddleware, async (req, res) => {
         where: {
           name: { [Op.iLike]: like },
           [Op.or]: [
-            { id: { [Op.in]: joinedIds.length ? joinedIds : ['00000000-0000-0000-0000-000000000000'] } },
+            {
+              id: {
+                [Op.in]: joinedIds.length ? joinedIds : ['00000000-0000-0000-0000-000000000000'],
+              },
+            },
             { visibility: 'public' },
           ],
         },
@@ -1259,10 +1318,7 @@ app.get('/api/search', authMiddleware, async (req, res) => {
     if (type === 'all' || type === 'games') {
       const games = await Game.findAll({
         where: {
-          [Op.or]: [
-            { homeTeam: { [Op.iLike]: like } },
-            { awayTeam: { [Op.iLike]: like } },
-          ],
+          [Op.or]: [{ homeTeam: { [Op.iLike]: like } }, { awayTeam: { [Op.iLike]: like } }],
         },
         order: [['date', 'DESC']],
         limit: 5,
@@ -1310,11 +1366,17 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
     const overall = await leaderboardCache.getOrBuild('overall', buildUserSummary);
     const groupId = req.query.groupId;
 
-    let groupBlock = { rows: [], total: 0, viewerRow: null, orderBy: 'points', offset: 0, limit: 20 };
+    let groupBlock = {
+      rows: [],
+      total: 0,
+      viewerRow: null,
+      orderBy: 'points',
+      offset: 0,
+      limit: 20,
+    };
     if (groupId) {
-      const groupRowsRaw = await leaderboardCache.getOrBuild(
-        `group:${groupId}`,
-        () => buildGroupLeaderboard(groupId)
+      const groupRowsRaw = await leaderboardCache.getOrBuild(`group:${groupId}`, () =>
+        buildGroupLeaderboard(groupId),
       );
       const orderBy = ['points', 'winRate', 'username'].includes(req.query.orderBy)
         ? req.query.orderBy
@@ -1334,37 +1396,43 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/games/:gameId/result', authMiddleware, requireAdmin, validate(resultSchema), async (req, res) => {
-  const { result } = req.body;
+app.post(
+  '/api/games/:gameId/result',
+  authMiddleware,
+  requireAdmin,
+  validate(resultSchema),
+  async (req, res) => {
+    const { result } = req.body;
 
-  try {
-    const game = await Game.findByPk(req.params.gameId);
-    if (!game) {
-      return res.status(404).json({ error: 'Game not found' });
-    }
-
-    game.result = result;
-    await game.save();
-
-    if (result) {
-      const picksForGame = await Pick.findAll({ where: { gameId: req.params.gameId } });
-      for (const pick of picksForGame) {
-        const points = scorePick(pick, game);
-        const isWin = pick.choice === result;
-        const title = isWin
-          ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
-          : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
-        notify(pick.userId, 'pick-scored', title).catch(() => {});
-        evaluateBadges(pick.userId).catch(() => {});
+    try {
+      const game = await Game.findByPk(req.params.gameId);
+      if (!game) {
+        return res.status(404).json({ error: 'Game not found' });
       }
-    }
 
-    leaderboardCache.invalidate('all');
-    res.json({ success: true, game });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update game result' });
-  }
-});
+      game.result = result;
+      await game.save();
+
+      if (result) {
+        const picksForGame = await Pick.findAll({ where: { gameId: req.params.gameId } });
+        for (const pick of picksForGame) {
+          const points = scorePick(pick, game);
+          const isWin = pick.choice === result;
+          const title = isWin
+            ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
+            : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
+          notify(pick.userId, 'pick-scored', title).catch(() => {});
+          evaluateBadges(pick.userId).catch(() => {});
+        }
+      }
+
+      leaderboardCache.invalidate('all');
+      res.json({ success: true, game });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update game result' });
+    }
+  },
+);
 
 app.get('/api/users/:username/profile', authMiddleware, async (req, res) => {
   try {
@@ -1460,41 +1528,50 @@ app.get('/api/users/:username/profile', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/friends/request', friendRequestLimiter, authMiddleware, validate(friendRequestSchema), async (req, res) => {
-  try {
-    const target = await getUserByUsername(req.body.username);
-    if (!target) return res.status(404).json({ error: 'User not found' });
-    if (target.id === req.user.id) return res.status(400).json({ error: 'You cannot friend yourself' });
+app.post(
+  '/api/friends/request',
+  friendRequestLimiter,
+  authMiddleware,
+  validate(friendRequestSchema),
+  async (req, res) => {
+    try {
+      const target = await getUserByUsername(req.body.username);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+      if (target.id === req.user.id)
+        return res.status(400).json({ error: 'You cannot friend yourself' });
 
-    const existing = await getFriendshipBetween(req.user.id, target.id);
-    if (existing) {
-      if (existing.status === 'accepted') return res.status(400).json({ error: 'Already friends' });
-      return res.status(400).json({ error: 'Friend request already pending' });
+      const existing = await getFriendshipBetween(req.user.id, target.id);
+      if (existing) {
+        if (existing.status === 'accepted')
+          return res.status(400).json({ error: 'Already friends' });
+        return res.status(400).json({ error: 'Friend request already pending' });
+      }
+
+      const friendship = await Friendship.create({
+        requesterId: req.user.id,
+        addresseeId: target.id,
+        status: 'pending',
+      });
+      const requester = await getUserById(req.user.id);
+      notify(
+        target.id,
+        'friend-request',
+        `${requester.username} sent you a friend request`,
+        'Open Groups → Friends to accept or decline.',
+      ).catch(() => {});
+      res.json({ success: true, friendship });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to send friend request' });
     }
-
-    const friendship = await Friendship.create({
-      requesterId: req.user.id,
-      addresseeId: target.id,
-      status: 'pending',
-    });
-    const requester = await getUserById(req.user.id);
-    notify(
-      target.id,
-      'friend-request',
-      `${requester.username} sent you a friend request`,
-      'Open Groups → Friends to accept or decline.'
-    ).catch(() => {});
-    res.json({ success: true, friendship });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to send friend request' });
-  }
-});
+  },
+);
 
 app.post('/api/friends/:id/accept', authMiddleware, async (req, res) => {
   try {
     const friendship = await Friendship.findByPk(req.params.id);
     if (!friendship) return res.status(404).json({ error: 'Friend request not found' });
-    if (friendship.addresseeId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (friendship.addresseeId !== req.user.id)
+      return res.status(403).json({ error: 'Access denied' });
     if (friendship.status !== 'pending') return res.status(400).json({ error: 'Already accepted' });
 
     friendship.status = 'accepted';
@@ -1505,7 +1582,7 @@ app.post('/api/friends/:id/accept', authMiddleware, async (req, res) => {
     notify(
       friendship.requesterId,
       'friend-request',
-      `${accepter.username} accepted your friend request`
+      `${accepter.username} accepted your friend request`,
     ).catch(() => {});
 
     res.json({ success: true });
@@ -1518,7 +1595,8 @@ app.post('/api/friends/:id/decline', authMiddleware, async (req, res) => {
   try {
     const friendship = await Friendship.findByPk(req.params.id);
     if (!friendship) return res.status(404).json({ error: 'Friend request not found' });
-    if (friendship.addresseeId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (friendship.addresseeId !== req.user.id)
+      return res.status(403).json({ error: 'Access denied' });
     await friendship.destroy();
     res.json({ success: true });
   } catch (error) {
@@ -1581,7 +1659,8 @@ app.post('/api/groups/:groupId/join', authMiddleware, async (req, res) => {
   try {
     const group = await Group.findByPk(req.params.groupId);
     if (!group) return res.status(404).json({ error: 'Group not found' });
-    if (group.visibility !== 'public') return res.status(403).json({ error: 'This group is private' });
+    if (group.visibility !== 'public')
+      return res.status(403).json({ error: 'This group is private' });
 
     const existing = await GroupMember.findOne({
       where: { groupId: group.id, userId: req.user.id },
@@ -1592,11 +1671,9 @@ app.post('/api/groups/:groupId/join', authMiddleware, async (req, res) => {
     leaderboardCache.invalidate(`group:${group.id}`);
     const joiner = await getUserById(req.user.id);
     if (group.ownerId !== req.user.id) {
-      notify(
-        group.ownerId,
-        'group-join',
-        `${joiner.username} joined "${group.name}"`
-      ).catch(() => {});
+      notify(group.ownerId, 'group-join', `${joiner.username} joined "${group.name}"`).catch(
+        () => {},
+      );
     }
     const updated = await getGroupById(group.id);
     res.json({ success: true, group: updated });
@@ -1620,51 +1697,51 @@ app.post('/api/groups/:groupId/leave', authMiddleware, async (req, res) => {
     await membership.destroy();
     leaderboardCache.invalidate(`group:${group.id}`);
     const leaver = await getUserById(req.user.id);
-    notify(
-      group.ownerId,
-      'group-join',
-      `${leaver.username} left "${group.name}"`
-    ).catch(() => {});
+    notify(group.ownerId, 'group-join', `${leaver.username} left "${group.name}"`).catch(() => {});
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to leave group' });
   }
 });
 
-app.post('/api/groups/:groupId/transfer', authMiddleware, validate(transferOwnerSchema), async (req, res) => {
-  try {
-    const group = await Group.findByPk(req.params.groupId);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    if (group.ownerId !== req.user.id) return res.status(403).json({ error: 'Only the owner can transfer ownership' });
-    if (req.body.newOwnerId === req.user.id) {
-      return res.status(400).json({ error: 'You are already the owner' });
-    }
-    const newOwnerMembership = await GroupMember.findOne({
-      where: { groupId: group.id, userId: req.body.newOwnerId },
-    });
-    if (!newOwnerMembership) return res.status(400).json({ error: 'New owner must be a member of the group' });
-    const newOwner = await getUserById(req.body.newOwnerId);
-    if (!newOwner) return res.status(404).json({ error: 'New owner user not found' });
+app.post(
+  '/api/groups/:groupId/transfer',
+  authMiddleware,
+  validate(transferOwnerSchema),
+  async (req, res) => {
+    try {
+      const group = await Group.findByPk(req.params.groupId);
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      if (group.ownerId !== req.user.id)
+        return res.status(403).json({ error: 'Only the owner can transfer ownership' });
+      if (req.body.newOwnerId === req.user.id) {
+        return res.status(400).json({ error: 'You are already the owner' });
+      }
+      const newOwnerMembership = await GroupMember.findOne({
+        where: { groupId: group.id, userId: req.body.newOwnerId },
+      });
+      if (!newOwnerMembership)
+        return res.status(400).json({ error: 'New owner must be a member of the group' });
+      const newOwner = await getUserById(req.body.newOwnerId);
+      if (!newOwner) return res.status(404).json({ error: 'New owner user not found' });
 
-    group.ownerId = newOwner.id;
-    await group.save();
-    notify(
-      newOwner.id,
-      'group-join',
-      `You are now the owner of "${group.name}"`
-    ).catch(() => {});
-    const updated = await getGroupById(group.id);
-    res.json({ success: true, group: updated });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to transfer ownership' });
-  }
-});
+      group.ownerId = newOwner.id;
+      await group.save();
+      notify(newOwner.id, 'group-join', `You are now the owner of "${group.name}"`).catch(() => {});
+      const updated = await getGroupById(group.id);
+      res.json({ success: true, group: updated });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to transfer ownership' });
+    }
+  },
+);
 
 app.delete('/api/groups/:groupId', authMiddleware, async (req, res) => {
   try {
     const group = await Group.findByPk(req.params.groupId);
     if (!group) return res.status(404).json({ error: 'Group not found' });
-    if (group.ownerId !== req.user.id) return res.status(403).json({ error: 'Only the owner can delete the group' });
+    if (group.ownerId !== req.user.id)
+      return res.status(403).json({ error: 'Only the owner can delete the group' });
 
     const members = await GroupMember.findAll({ where: { groupId: group.id } });
     const memberIds = members.map((m) => m.userId).filter((id) => id !== req.user.id);
@@ -1676,7 +1753,9 @@ app.delete('/api/groups/:groupId', authMiddleware, async (req, res) => {
     leaderboardCache.invalidate(`group:${group.id}`);
 
     for (const memberId of memberIds) {
-      notify(memberId, 'group-join', `Group "${groupName}" was deleted by the owner`).catch(() => {});
+      notify(memberId, 'group-join', `Group "${groupName}" was deleted by the owner`).catch(
+        () => {},
+      );
     }
     res.json({ success: true });
   } catch (error) {
@@ -1685,18 +1764,24 @@ app.delete('/api/groups/:groupId', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/groups/:groupId/visibility', authMiddleware, validate(visibilitySchema), async (req, res) => {
-  try {
-    const group = await Group.findByPk(req.params.groupId);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    if (group.ownerId !== req.user.id) return res.status(403).json({ error: 'Only the owner can change visibility' });
-    group.visibility = req.body.visibility;
-    await group.save();
-    res.json({ success: true, visibility: group.visibility });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update visibility' });
-  }
-});
+app.post(
+  '/api/groups/:groupId/visibility',
+  authMiddleware,
+  validate(visibilitySchema),
+  async (req, res) => {
+    try {
+      const group = await Group.findByPk(req.params.groupId);
+      if (!group) return res.status(404).json({ error: 'Group not found' });
+      if (group.ownerId !== req.user.id)
+        return res.status(403).json({ error: 'Only the owner can change visibility' });
+      group.visibility = req.body.visibility;
+      await group.save();
+      res.json({ success: true, visibility: group.visibility });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update visibility' });
+    }
+  },
+);
 
 app.get('/api/games/:gameId/comments', authMiddleware, async (req, res) => {
   try {
@@ -1736,7 +1821,7 @@ app.get('/api/games/:gameId/comments', authMiddleware, async (req, res) => {
         editedAt: c.editedAt || null,
         reactionCounts: countsByComment.get(c.id) || {},
         yourReactions: yourByComment.get(c.id) || [],
-      }))
+      })),
     );
   } catch (error) {
     req.log.error({ err: error }, 'handler error');
@@ -1744,32 +1829,38 @@ app.get('/api/games/:gameId/comments', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/games/:gameId/comments', commentLimiter, authMiddleware, validate(commentSchema), async (req, res) => {
-  try {
-    const game = await Game.findByPk(req.params.gameId);
-    if (!game) return res.status(404).json({ error: 'Game not found' });
+app.post(
+  '/api/games/:gameId/comments',
+  commentLimiter,
+  authMiddleware,
+  validate(commentSchema),
+  async (req, res) => {
+    try {
+      const game = await Game.findByPk(req.params.gameId);
+      if (!game) return res.status(404).json({ error: 'Game not found' });
 
-    const comment = await Comment.create({
-      gameId: req.params.gameId,
-      userId: req.user.id,
-      body: req.body.body,
-    });
-    const user = await getUserById(req.user.id);
-    res.json({
-      id: comment.id,
-      gameId: comment.gameId,
-      userId: comment.userId,
-      username: user.username,
-      body: comment.body,
-      createdAt: comment.createdAt,
-      editedAt: null,
-      reactionCounts: {},
-      yourReactions: [],
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to post comment' });
-  }
-});
+      const comment = await Comment.create({
+        gameId: req.params.gameId,
+        userId: req.user.id,
+        body: req.body.body,
+      });
+      const user = await getUserById(req.user.id);
+      res.json({
+        id: comment.id,
+        gameId: comment.gameId,
+        userId: comment.userId,
+        username: user.username,
+        body: comment.body,
+        createdAt: comment.createdAt,
+        editedAt: null,
+        reactionCounts: {},
+        yourReactions: [],
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to post comment' });
+    }
+  },
+);
 
 app.put('/api/comments/:id', authMiddleware, validate(commentSchema), async (req, res) => {
   try {
@@ -1804,24 +1895,29 @@ app.delete('/api/comments/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/comments/:id/reactions', authMiddleware, validate(reactionSchema), async (req, res) => {
-  try {
-    const comment = await Comment.findByPk(req.params.id);
-    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+app.post(
+  '/api/comments/:id/reactions',
+  authMiddleware,
+  validate(reactionSchema),
+  async (req, res) => {
     try {
-      await CommentReaction.create({
-        commentId: comment.id,
-        userId: req.user.id,
-        emoji: req.body.emoji,
-      });
-    } catch (e) {
-      // Unique constraint — already reacted with this emoji; treat as no-op success.
+      const comment = await Comment.findByPk(req.params.id);
+      if (!comment) return res.status(404).json({ error: 'Comment not found' });
+      try {
+        await CommentReaction.create({
+          commentId: comment.id,
+          userId: req.user.id,
+          emoji: req.body.emoji,
+        });
+      } catch (e) {
+        // Unique constraint — already reacted with this emoji; treat as no-op success.
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to add reaction' });
     }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to add reaction' });
-  }
-});
+  },
+);
 
 app.delete('/api/comments/:id/reactions/:emoji', authMiddleware, async (req, res) => {
   try {
@@ -1862,7 +1958,8 @@ app.post('/api/notifications/:id/read', authMiddleware, async (req, res) => {
   try {
     const notification = await Notification.findByPk(req.params.id);
     if (!notification) return res.status(404).json({ error: 'Notification not found' });
-    if (notification.userId !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (notification.userId !== req.user.id)
+      return res.status(403).json({ error: 'Access denied' });
     notification.read = true;
     await notification.save();
     res.json({ success: true });
@@ -1880,27 +1977,39 @@ app.post('/api/notifications/read-all', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/admin/games', authMiddleware, requireAdmin, validate(createGameSchema), async (req, res) => {
-  try {
-    const game = await Game.create(req.body);
-    res.json(game);
-  } catch (error) {
-    req.log.error({ err: error }, 'handler error');
-    res.status(500).json({ error: 'Failed to create game' });
-  }
-});
+app.post(
+  '/api/admin/games',
+  authMiddleware,
+  requireAdmin,
+  validate(createGameSchema),
+  async (req, res) => {
+    try {
+      const game = await Game.create(req.body);
+      res.json(game);
+    } catch (error) {
+      req.log.error({ err: error }, 'handler error');
+      res.status(500).json({ error: 'Failed to create game' });
+    }
+  },
+);
 
-app.put('/api/admin/games/:id', authMiddleware, requireAdmin, validate(updateGameSchema), async (req, res) => {
-  try {
-    const game = await Game.findByPk(req.params.id);
-    if (!game) return res.status(404).json({ error: 'Game not found' });
-    Object.assign(game, req.body);
-    await game.save();
-    res.json(game);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update game' });
-  }
-});
+app.put(
+  '/api/admin/games/:id',
+  authMiddleware,
+  requireAdmin,
+  validate(updateGameSchema),
+  async (req, res) => {
+    try {
+      const game = await Game.findByPk(req.params.id);
+      if (!game) return res.status(404).json({ error: 'Game not found' });
+      Object.assign(game, req.body);
+      await game.save();
+      res.json(game);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update game' });
+    }
+  },
+);
 
 app.delete('/api/admin/games/:id', authMiddleware, requireAdmin, async (req, res) => {
   try {
@@ -1935,27 +2044,33 @@ app.get('/api/admin/users', authMiddleware, requireAdmin, async (req, res) => {
         createdAt: u.createdAt,
         picksCount: picksByUser.get(u.id) || 0,
         groupsCount: groupsByUser.get(u.id) || 0,
-      }))
+      })),
     );
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
 
-app.post('/api/admin/users/:id/role', authMiddleware, requireAdmin, validate(roleSchema), async (req, res) => {
-  try {
-    if (req.params.id === req.user.id && req.body.role !== 'admin') {
-      return res.status(400).json({ error: 'You cannot demote yourself' });
+app.post(
+  '/api/admin/users/:id/role',
+  authMiddleware,
+  requireAdmin,
+  validate(roleSchema),
+  async (req, res) => {
+    try {
+      if (req.params.id === req.user.id && req.body.role !== 'admin') {
+        return res.status(400).json({ error: 'You cannot demote yourself' });
+      }
+      const target = await User.findByPk(req.params.id);
+      if (!target) return res.status(404).json({ error: 'User not found' });
+      target.role = req.body.role;
+      await target.save({ hooks: false });
+      res.json({ success: true, role: target.role });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update role' });
     }
-    const target = await User.findByPk(req.params.id);
-    if (!target) return res.status(404).json({ error: 'User not found' });
-    target.role = req.body.role;
-    await target.save({ hooks: false });
-    res.json({ success: true, role: target.role });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update role' });
-  }
-});
+  },
+);
 
 async function cascadeDeleteUser(target, { transaction } = {}) {
   const opts = transaction ? { transaction } : {};
@@ -2009,87 +2124,104 @@ async function cascadeDeleteGroup(group, { transaction } = {}) {
   await group.destroy(opts);
 }
 
-app.post('/api/admin/games/bulk', authMiddleware, requireAdmin, validate(bulkGameSchema), async (req, res) => {
-  const { ids, action, result } = req.body;
-  if (action === 'setResult' && !(result === 'home' || result === 'away' || result === null)) {
-    return res.status(400).json({ error: 'setResult requires result of home, away, or null' });
-  }
-  try {
-    const games = await Game.findAll({ where: { id: ids } });
-    const affected = [];
-    if (action === 'delete') {
-      for (const game of games) {
-        await sequelize.transaction(async (t) => {
-          await cascadeDeleteGame(game, { transaction: t });
-        });
-        affected.push(game.id);
-      }
-    } else if (action === 'setResult') {
-      for (const game of games) {
-        game.result = result;
-        await game.save();
-        if (result) {
-          const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
-          for (const pick of picksForGame) {
-            const points = scorePick(pick, game);
-            const isWin = pick.choice === result;
-            const title = isWin
-              ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
-              : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
-            notify(pick.userId, 'pick-scored', title).catch(() => {});
-            evaluateBadges(pick.userId).catch(() => {});
-          }
+app.post(
+  '/api/admin/games/bulk',
+  authMiddleware,
+  requireAdmin,
+  validate(bulkGameSchema),
+  async (req, res) => {
+    const { ids, action, result } = req.body;
+    if (action === 'setResult' && !(result === 'home' || result === 'away' || result === null)) {
+      return res.status(400).json({ error: 'setResult requires result of home, away, or null' });
+    }
+    try {
+      const games = await Game.findAll({ where: { id: ids } });
+      const affected = [];
+      if (action === 'delete') {
+        for (const game of games) {
+          await sequelize.transaction(async (t) => {
+            await cascadeDeleteGame(game, { transaction: t });
+          });
+          affected.push(game.id);
         }
-        affected.push(game.id);
+      } else if (action === 'setResult') {
+        for (const game of games) {
+          game.result = result;
+          await game.save();
+          if (result) {
+            const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
+            for (const pick of picksForGame) {
+              const points = scorePick(pick, game);
+              const isWin = pick.choice === result;
+              const title = isWin
+                ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
+                : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
+              notify(pick.userId, 'pick-scored', title).catch(() => {});
+              evaluateBadges(pick.userId).catch(() => {});
+            }
+          }
+          affected.push(game.id);
+        }
       }
+      if (affected.length > 0) leaderboardCache.invalidate('all');
+      res.json({ success: true, affected });
+    } catch (error) {
+      req.log.error({ err: error }, 'handler error');
+      res.status(500).json({ error: 'Bulk game action failed' });
     }
-    if (affected.length > 0) leaderboardCache.invalidate('all');
-    res.json({ success: true, affected });
-  } catch (error) {
-    req.log.error({ err: error }, 'handler error');
-    res.status(500).json({ error: 'Bulk game action failed' });
-  }
-});
+  },
+);
 
-app.post('/api/admin/users/bulk', authMiddleware, requireAdmin, validate(bulkUserSchema), async (req, res) => {
-  const { ids, action } = req.body;
-  const skipped = [];
-  const affected = [];
-  try {
-    const filteredIds = ids.filter((id) => {
-      if (id === req.user.id) {
-        skipped.push({ id, reason: 'self' });
-        return false;
+app.post(
+  '/api/admin/users/bulk',
+  authMiddleware,
+  requireAdmin,
+  validate(bulkUserSchema),
+  async (req, res) => {
+    const { ids, action } = req.body;
+    const skipped = [];
+    const affected = [];
+    try {
+      const filteredIds = ids.filter((id) => {
+        if (id === req.user.id) {
+          skipped.push({ id, reason: 'self' });
+          return false;
+        }
+        return true;
+      });
+      const users = await User.findAll({ where: { id: filteredIds } });
+      for (const target of users) {
+        if (action === 'promote') {
+          target.role = 'admin';
+          await target.save({ hooks: false });
+          affected.push(target.id);
+        } else if (action === 'demote') {
+          target.role = 'user';
+          await target.save({ hooks: false });
+          affected.push(target.id);
+        } else if (action === 'delete') {
+          await sequelize.transaction(async (t) => {
+            await cascadeDeleteUser(target, { transaction: t });
+          });
+          affected.push(target.id);
+        }
       }
-      return true;
-    });
-    const users = await User.findAll({ where: { id: filteredIds } });
-    for (const target of users) {
-      if (action === 'promote') {
-        target.role = 'admin';
-        await target.save({ hooks: false });
-        affected.push(target.id);
-      } else if (action === 'demote') {
-        target.role = 'user';
-        await target.save({ hooks: false });
-        affected.push(target.id);
-      } else if (action === 'delete') {
-        await sequelize.transaction(async (t) => {
-          await cascadeDeleteUser(target, { transaction: t });
-        });
-        affected.push(target.id);
-      }
+      if (affected.length > 0 && action === 'delete') leaderboardCache.invalidate('all');
+      res.json({ success: true, affected, skipped });
+    } catch (error) {
+      req.log.error({ err: error }, 'handler error');
+      res.status(500).json({ error: 'Bulk user action failed' });
     }
-    if (affected.length > 0 && action === 'delete') leaderboardCache.invalidate('all');
-    res.json({ success: true, affected, skipped });
-  } catch (error) {
-    req.log.error({ err: error }, 'handler error');
-    res.status(500).json({ error: 'Bulk user action failed' });
-  }
-});
+  },
+);
 
 app.get('/api/admin/cache-stats', authMiddleware, requireAdmin, (req, res) => {
   res.json(leaderboardCache.stats());
+});
+
+// Unmatched /api/* requests get a JSON 404 rather than falling through to the SPA shell.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 app.get('*', (req, res) => {

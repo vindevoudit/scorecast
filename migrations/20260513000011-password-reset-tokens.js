@@ -12,7 +12,9 @@ module.exports = {
         "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await queryInterface.sequelize.query(`CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens ("userId")`);
+    await queryInterface.sequelize.query(
+      `CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens ("userId")`,
+    );
   },
 
   async down(queryInterface) {

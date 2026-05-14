@@ -13,11 +13,11 @@ module.exports = {
     `);
     await queryInterface.sequelize.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS comment_reactions_unique
-       ON comment_reactions ("commentId", "userId", emoji)`
+       ON comment_reactions ("commentId", "userId", emoji)`,
     );
     await queryInterface.sequelize.query(
       `CREATE INDEX IF NOT EXISTS comment_reactions_comment_idx
-       ON comment_reactions ("commentId")`
+       ON comment_reactions ("commentId")`,
     );
   },
 

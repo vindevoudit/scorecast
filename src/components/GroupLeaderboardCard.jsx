@@ -44,7 +44,9 @@ function GroupLeaderboardCard({
                 className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
               >
                 {groups.map((group) => (
-                  <option key={group.id} value={group.id}>{group.name}</option>
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -57,7 +59,9 @@ function GroupLeaderboardCard({
                   className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
                 >
                   {SORT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>Sort: {opt.label}</option>
+                    <option key={opt.value} value={opt.value}>
+                      Sort: {opt.label}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -87,7 +91,9 @@ function GroupLeaderboardCard({
             ))}
             {viewerRow && !viewerIsOnPage && (
               <div className="border-t border-slate-800 pt-3">
-                <p className="mb-2 text-xs uppercase tracking-[0.25em] text-slate-500">Your position</p>
+                <p className="mb-2 text-xs uppercase tracking-[0.25em] text-slate-500">
+                  Your position
+                </p>
                 <LeaderboardRow
                   entry={viewerRow}
                   rank={viewerRow.rank}
@@ -102,7 +108,9 @@ function GroupLeaderboardCard({
 
       {(canPrev || canNext) && (
         <div className="mt-4 flex items-center justify-between text-xs text-slate-400">
-          <span>{offset + 1}–{Math.min(offset + leaderboardGroup.length, total)} of {total}</span>
+          <span>
+            {offset + 1}–{Math.min(offset + leaderboardGroup.length, total)} of {total}
+          </span>
           <div className="flex gap-2">
             <button
               type="button"

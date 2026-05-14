@@ -2,7 +2,9 @@
 
 module.exports = {
   async up(queryInterface) {
-    await queryInterface.sequelize.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "displayName" VARCHAR(60)`);
+    await queryInterface.sequelize.query(
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS "displayName" VARCHAR(60)`,
+    );
     await queryInterface.sequelize.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`);
   },
 

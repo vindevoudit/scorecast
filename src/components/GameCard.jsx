@@ -32,17 +32,25 @@ function teamCardClass(side, game) {
   return `${base} bg-slate-950/70 opacity-60`;
 }
 
-function GameCard({ game, existingPick, onPickSubmit, onPickRemove, currentUserId, request, onError }) {
+function GameCard({
+  game,
+  existingPick,
+  onPickSubmit,
+  onPickRemove,
+  currentUserId,
+  request,
+  onError,
+}) {
   const upcoming = isUpcomingGame(game);
   const countdown = useCountdown(game.date);
 
   const existingChoice = existingPick?.choice || null;
   const existingPickId = existingPick?.id || null;
 
-  const pickedTeam = existingChoice === 'home' ? game.homeTeam : existingChoice === 'away' ? game.awayTeam : null;
-  const pointsIfWon = game.result && existingChoice
-    ? scorePick({ choice: existingChoice }, game)
-    : 0;
+  const pickedTeam =
+    existingChoice === 'home' ? game.homeTeam : existingChoice === 'away' ? game.awayTeam : null;
+  const pointsIfWon =
+    game.result && existingChoice ? scorePick({ choice: existingChoice }, game) : 0;
 
   let outcomeBadge = null;
   if (game.result) {
@@ -75,7 +83,7 @@ function GameCard({ game, existingPick, onPickSubmit, onPickRemove, currentUserI
             <span>{formatDate(game.date)}</span>
             <span>{statusLabel(game, upcoming)}</span>
             {upcoming && (
-              <span className="rounded-full bg-slate-800/60 px-3 py-1 text-slate-300 normal-case tracking-normal">
+              <span className="rounded-full bg-slate-800/60 px-3 py-1 normal-case tracking-normal text-slate-300">
                 Picks lock in {countdown}
               </span>
             )}
@@ -84,12 +92,16 @@ function GameCard({ game, existingPick, onPickSubmit, onPickRemove, currentUserI
             <div className={teamCardClass('home', game)}>
               <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Home</p>
               <p className="mt-3 truncate text-xl font-semibold text-white">{game.homeTeam}</p>
-              <p className="mt-2 text-sm text-slate-400">Win chance: {formatProbability(game.homeProbability)}</p>
+              <p className="mt-2 text-sm text-slate-400">
+                Win chance: {formatProbability(game.homeProbability)}
+              </p>
             </div>
             <div className={teamCardClass('away', game)}>
               <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Away</p>
               <p className="mt-3 truncate text-xl font-semibold text-white">{game.awayTeam}</p>
-              <p className="mt-2 text-sm text-slate-400">Win chance: {formatProbability(game.awayProbability)}</p>
+              <p className="mt-2 text-sm text-slate-400">
+                Win chance: {formatProbability(game.awayProbability)}
+              </p>
             </div>
           </div>
         </div>
@@ -100,14 +112,14 @@ function GameCard({ game, existingPick, onPickSubmit, onPickRemove, currentUserI
               <p className="text-lg font-semibold text-white">
                 {game.result === 'home' ? game.homeTeam : game.awayTeam} won
               </p>
-              <div className="flex justify-end">
-                {outcomeBadge}
-              </div>
+              <div className="flex justify-end">{outcomeBadge}</div>
             </>
           ) : (
             <>
               <p className="text-sm text-slate-400">Potential reward</p>
-              <p className="text-lg font-semibold text-white">{scoreEstimate(game.homeProbability)} / {scoreEstimate(game.awayProbability)}</p>
+              <p className="text-lg font-semibold text-white">
+                {scoreEstimate(game.homeProbability)} / {scoreEstimate(game.awayProbability)}
+              </p>
               <p className="text-sm text-slate-500">Your pick: {pickedTeam || 'None'}</p>
             </>
           )}

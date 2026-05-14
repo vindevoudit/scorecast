@@ -96,7 +96,7 @@ function GameRow({ game, onSave, onSetResult, onDelete, busy }) {
               className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
           </label>
-          <div className="sm:col-span-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
             <button
               type="submit"
               disabled={busy}
@@ -336,7 +336,10 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
       </div>
 
       {creating && (
-        <form onSubmit={handleCreate} className="mt-4 grid gap-3 rounded-2xl bg-slate-950/70 p-4 sm:grid-cols-2">
+        <form
+          onSubmit={handleCreate}
+          className="mt-4 grid gap-3 rounded-2xl bg-slate-950/70 p-4 sm:grid-cols-2"
+        >
           <label className="text-xs text-slate-400">
             Home team
             <input
@@ -406,16 +409,49 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
       {games.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-slate-950/70 px-3 py-2 text-xs text-slate-300">
           <label className="inline-flex items-center gap-2">
-            <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all games" />
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+              aria-label="Select all games"
+            />
             Select all
           </label>
           {selectedIds.size > 0 && (
             <>
               <span className="ml-2 text-slate-500">{selectedIds.size} selected</span>
-              <button type="button" disabled={busy} onClick={() => runBulk('setResult', 'home')} className="ml-auto rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Result → Home</button>
-              <button type="button" disabled={busy} onClick={() => runBulk('setResult', 'away')} className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Result → Away</button>
-              <button type="button" disabled={busy} onClick={() => runBulk('setResult', null)} className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Clear result</button>
-              <button type="button" disabled={busy} onClick={() => runBulk('delete')} className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Delete</button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('setResult', 'home')}
+                className="ml-auto rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Result → Home
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('setResult', 'away')}
+                className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Result → Away
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('setResult', null)}
+                className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Clear result
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('delete')}
+                className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Delete
+              </button>
             </>
           )}
         </div>
@@ -434,7 +470,7 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
                 aria-label={`Select ${game.homeTeam} vs ${game.awayTeam}`}
                 className="mt-5 shrink-0"
               />
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <GameRow
                   game={game}
                   onSave={handleUpdate}
@@ -451,7 +487,11 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
       <ConfirmModal
         open={Boolean(pendingDelete)}
         title="Delete game?"
-        description={pendingDelete ? `${pendingDelete.homeTeam} vs ${pendingDelete.awayTeam} and all picks/comments on it will be removed.` : ''}
+        description={
+          pendingDelete
+            ? `${pendingDelete.homeTeam} vs ${pendingDelete.awayTeam} and all picks/comments on it will be removed.`
+            : ''
+        }
         confirmLabel="Delete"
         cancelLabel="Cancel"
         onConfirm={handleDelete}
@@ -461,7 +501,11 @@ function GameManager({ request, onAfterChange, onError, onSuccess }) {
       <ConfirmModal
         open={Boolean(pendingBulk)}
         title="Bulk delete games?"
-        description={pendingBulk ? `${pendingBulk.ids.length} game${pendingBulk.ids.length === 1 ? '' : 's'} and their picks/comments will be removed. This cannot be undone.` : ''}
+        description={
+          pendingBulk
+            ? `${pendingBulk.ids.length} game${pendingBulk.ids.length === 1 ? '' : 's'} and their picks/comments will be removed. This cannot be undone.`
+            : ''
+        }
         confirmLabel="Delete"
         cancelLabel="Cancel"
         onConfirm={() => pendingBulk && performBulk('delete')}

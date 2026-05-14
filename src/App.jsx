@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import GameCard from './components/GameCard';
 import LeaderboardCard, { LeaderboardRow } from './components/LeaderboardCard';
 import LoginForm from './components/LoginForm';
@@ -8,16 +8,21 @@ import ResetPasswordForm from './components/ResetPasswordForm';
 import TwoFactorChallenge from './components/TwoFactorChallenge';
 import GroupCard from './components/GroupCard';
 import GroupLeaderboardCard from './components/GroupLeaderboardCard';
-import PicksHistory from './components/PicksHistory';
 import ConfirmModal from './components/ConfirmModal';
 import EmptyState from './components/EmptyState';
 import { SkeletonGameCard, SkeletonLeaderboardRow } from './components/Skeleton';
-import ProfileView from './components/ProfileView';
 import ProfileDrawer from './components/ProfileDrawer';
 import FriendsList from './components/FriendsList';
 import NotificationBell from './components/NotificationBell';
-import AdminPanel from './components/admin/AdminPanel';
 import SearchBar from './components/SearchBar';
+
+const PicksHistory = lazy(() => import('./components/PicksHistory'));
+const ProfileView = lazy(() => import('./components/ProfileView'));
+const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
+
+function LazyFallback({ label = 'Loading…' }) {
+  return <p className="text-sm text-slate-400">{label}</p>;
+}
 import { setLastRequestId } from './lib/clientErrorReporter';
 import { getCookie } from './lib/cookies';
 
@@ -75,14 +80,11 @@ function App() {
   const userRef = useRef(user);
   userRef.current = user;
 
-  const pickMap = useMemo(
-    () => new Map(picks.map((pick) => [pick.gameId, pick])),
-    [picks]
-  );
+  const pickMap = useMemo(() => new Map(picks.map((pick) => [pick.gameId, pick])), [picks]);
 
   const tabs = useMemo(
     () => (user?.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS),
-    [user?.role]
+    [user?.role],
   );
 
   const { upcomingGames, liveGames, completedGames } = useMemo(() => {
@@ -128,18 +130,22 @@ function App() {
       if (csrf) headers['X-CSRF-Token'] = csrf;
     }
 
-    const doFetch = () => fetch(path, {
-      credentials: 'include',
-      ...options,
-      headers,
-    });
+    const doFetch = () =>
+      fetch(path, {
+        credentials: 'include',
+        ...options,
+        headers,
+      });
 
     let response = await doFetch();
     let reqId = response.headers.get('X-Request-Id');
     if (reqId) setLastRequestId(reqId);
 
     if (response.status === 401 && !path.startsWith('/api/auth/')) {
-      const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+      const refreshResp = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+      });
       if (refreshResp.status === 204) {
         response = await doFetch();
         const newReqId = response.headers.get('X-Request-Id');
@@ -252,9 +258,10 @@ function App() {
       setPendingInvites(invites || []);
       await refreshGames();
       const groupData = await refreshGroups();
-      const initialGroupId = selectedGroupId && groupData.some((group) => group.id === selectedGroupId)
-        ? selectedGroupId
-        : groupData[0]?.id || '';
+      const initialGroupId =
+        selectedGroupId && groupData.some((group) => group.id === selectedGroupId)
+          ? selectedGroupId
+          : groupData[0]?.id || '';
       setSelectedGroupId(initialGroupId);
       await Promise.all([
         refreshPicks(),
@@ -295,7 +302,7 @@ function App() {
       })
         .then((res) => {
           if (res.ok) {
-            setStatus('Email verified — you\'re all set.');
+            setStatus("Email verified — you're all set.");
           } else {
             setStatus('That verification link is invalid or expired.');
           }
@@ -318,7 +325,11 @@ function App() {
   useEffect(() => {
     loadDashboard()
       .catch((error) => {
-        if (error.status === 401 || error.message === 'Session expired' || error.message === 'Authentication required') {
+        if (
+          error.status === 401 ||
+          error.message === 'Session expired' ||
+          error.message === 'Authentication required'
+        ) {
           return;
         }
         showStatus(error.message);
@@ -387,7 +398,10 @@ function App() {
     try {
       const data = await request('/api/login', {
         method: 'POST',
-        body: JSON.stringify({ username: authData.loginUsername, password: authData.loginPassword }),
+        body: JSON.stringify({
+          username: authData.loginUsername,
+          password: authData.loginPassword,
+        }),
       });
       if (data?.challenge) {
         setAuthData((prev) => ({ ...prev, loginPassword: '' }));
@@ -497,19 +511,22 @@ function App() {
     }
   };
 
-  const fetchProfile = useCallback(async (username) => {
-    if (!username) return;
-    setProfileLoading(true);
-    try {
-      const data = await request(`/api/users/${encodeURIComponent(username)}/profile`);
-      setProfile(data);
-    } catch (error) {
-      if (error.message !== 'Session expired') showStatus(error.message);
-      setProfile(null);
-    } finally {
-      setProfileLoading(false);
-    }
-  }, [request]);
+  const fetchProfile = useCallback(
+    async (username) => {
+      if (!username) return;
+      setProfileLoading(true);
+      try {
+        const data = await request(`/api/users/${encodeURIComponent(username)}/profile`);
+        setProfile(data);
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+        setProfile(null);
+      } finally {
+        setProfileLoading(false);
+      }
+    },
+    [request],
+  );
 
   const openProfile = (username) => {
     setProfileUsername(username);
@@ -630,8 +647,12 @@ function App() {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      setUser((prev) => prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev);
-      setOwnProfile((prev) => prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev);
+      setUser((prev) =>
+        prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev,
+      );
+      setOwnProfile((prev) =>
+        prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev,
+      );
       showStatus('Profile updated');
     } catch (error) {
       if (error.message !== 'Session expired') showStatus(error.message);
@@ -691,7 +712,9 @@ function App() {
 
   const renderGameSection = (heading, list, emptyText) => (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">{heading}</h3>
+      <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+        {heading}
+      </h3>
       {list.length === 0 ? (
         <EmptyState title={emptyText} />
       ) : (
@@ -724,16 +747,24 @@ function App() {
           <div className="rounded-3xl bg-slate-950/90 px-5 py-4 shadow-inner shadow-slate-950/20">
             <p className="text-sm text-slate-400">Logged in as</p>
             <p className="mt-1 text-xl font-semibold text-white">{user?.username}</p>
-            <p className="mt-2 text-sm text-slate-400">Joined groups: {user?.joinedGroups?.length || 0}</p>
+            <p className="mt-2 text-sm text-slate-400">
+              Joined groups: {user?.joinedGroups?.length || 0}
+            </p>
             {pendingInvites.length > 0 && (
-              <p className="mt-2 text-sm text-amber-300">Pending invites: {pendingInvites.length}</p>
+              <p className="mt-2 text-sm text-amber-300">
+                Pending invites: {pendingInvites.length}
+              </p>
             )}
           </div>
         </div>
       </section>
 
       <section className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-        <div className="-mx-1 flex flex-1 gap-3 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Dashboard sections">
+        <div
+          className="-mx-1 flex flex-1 gap-3 overflow-x-auto px-1 pb-1"
+          role="tablist"
+          aria-label="Dashboard sections"
+        >
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -743,7 +774,9 @@ function App() {
               onClick={() => setView(tab.id)}
               className={`min-w-[10rem] shrink-0 rounded-3xl border px-5 py-4 text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${view === tab.id ? 'border-cyan-400 bg-cyan-500/10 text-white shadow-[0_10px_30px_rgba(6,182,212,0.18)]' : 'border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-600 hover:bg-slate-900/95'}`}
             >
-              <span className="block text-sm uppercase tracking-[0.24em] text-slate-400">{tab.kicker}</span>
+              <span className="block text-sm uppercase tracking-[0.24em] text-slate-400">
+                {tab.kicker}
+              </span>
               <span className="mt-2 block text-lg font-semibold text-white">{tab.label}</span>
             </button>
           ))}
@@ -782,15 +815,23 @@ function App() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-2xl font-semibold text-white">Games</h2>
-                    <p className="mt-2 text-slate-400">Pick winners, earn more points for underdog upsets.</p>
+                    <p className="mt-2 text-slate-400">
+                      Pick winners, earn more points for underdog upsets.
+                    </p>
                   </div>
-                  <span className="rounded-full bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">Future-proof picks only</span>
+                  <span className="rounded-full bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">
+                    Future-proof picks only
+                  </span>
                 </div>
               </div>
 
               {liveGames.length > 0 && renderGameSection('Live now', liveGames, '')}
 
-              {renderGameSection('Upcoming', upcomingGames, 'No upcoming games yet. Check back soon.')}
+              {renderGameSection(
+                'Upcoming',
+                upcomingGames,
+                'No upcoming games yet. Check back soon.',
+              )}
 
               {completedGames.length > 0 && (
                 <div className="space-y-4">
@@ -802,17 +843,18 @@ function App() {
                   >
                     {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
                   </button>
-                  {showCompleted && completedGames.map((game) => (
-                    <GameCard
-                      key={game.id}
-                      game={game}
-                      existingPick={pickMap.get(game.id)}
-                      onPickSubmit={submitPick}
-                      currentUserId={user?.id}
-                      request={request}
-                      onError={handleCommentError}
-                    />
-                  ))}
+                  {showCompleted &&
+                    completedGames.map((game) => (
+                      <GameCard
+                        key={game.id}
+                        game={game}
+                        existingPick={pickMap.get(game.id)}
+                        onPickSubmit={submitPick}
+                        currentUserId={user?.id}
+                        request={request}
+                        onError={handleCommentError}
+                      />
+                    ))}
                 </div>
               )}
             </div>
@@ -823,7 +865,9 @@ function App() {
                 <p className="mt-2 text-slate-400">Track your progress and compare with friends.</p>
                 <div className="mt-5 space-y-4">
                   <div className="rounded-3xl bg-slate-950/70 p-4">
-                    <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">Overall</h3>
+                    <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">
+                      Overall
+                    </h3>
                     <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
                       {leaderboard.overall.length === 0 ? (
                         <p className="text-sm text-slate-400">No data yet.</p>
@@ -843,8 +887,12 @@ function App() {
                   <div className="rounded-3xl bg-slate-950/70 p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">Group leaderboard</h3>
-                        <p className="mt-2 text-sm text-slate-400">Select one group to view its ranking.</p>
+                        <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">
+                          Group leaderboard
+                        </h3>
+                        <p className="mt-2 text-sm text-slate-400">
+                          Select one group to view its ranking.
+                        </p>
                       </div>
                       {groups.length > 0 ? (
                         <label className="sm:w-auto">
@@ -855,12 +903,16 @@ function App() {
                             className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
                           >
                             {groups.map((group) => (
-                              <option key={group.id} value={group.id}>{group.name}</option>
+                              <option key={group.id} value={group.id}>
+                                {group.name}
+                              </option>
                             ))}
                           </select>
                         </label>
                       ) : (
-                        <p className="text-sm text-slate-500">Join or create a group to see member rankings.</p>
+                        <p className="text-sm text-slate-500">
+                          Join or create a group to see member rankings.
+                        </p>
                       )}
                     </div>
                     <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
@@ -886,25 +938,35 @@ function App() {
         )}
 
         {view === 'mypicks' && (
-          <PicksHistory picks={picks} games={games} />
+          <Suspense fallback={<LazyFallback label="Loading your picks…" />}>
+            <PicksHistory picks={picks} games={games} />
+          </Suspense>
         )}
 
         {view === 'groups' && (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
               <h2 className="text-2xl font-semibold text-white">Create a new group</h2>
-              <p className="mt-2 text-slate-400">Invite friends and compare scores in your private pool.</p>
+              <p className="mt-2 text-slate-400">
+                Invite friends and compare scores in your private pool.
+              </p>
               <form onSubmit={handleCreateGroup} className="mt-6 space-y-4">
-                <label htmlFor="group-name" className="sr-only">Group name</label>
+                <label htmlFor="group-name" className="sr-only">
+                  Group name
+                </label>
                 <input
                   id="group-name"
                   value={authData.groupName}
-                  onChange={(event) => setAuthData((prev) => ({ ...prev, groupName: event.target.value }))}
+                  onChange={(event) =>
+                    setAuthData((prev) => ({ ...prev, groupName: event.target.value }))
+                  }
                   placeholder="Group name"
                   className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
                 />
                 <fieldset className="rounded-3xl border border-slate-800 bg-slate-950/50 px-4 py-3">
-                  <legend className="px-2 text-xs uppercase tracking-[0.25em] text-slate-400">Visibility</legend>
+                  <legend className="px-2 text-xs uppercase tracking-[0.25em] text-slate-400">
+                    Visibility
+                  </legend>
                   <div className="flex flex-wrap gap-3 pt-2 text-sm text-slate-200">
                     <label className="inline-flex items-center gap-2">
                       <input
@@ -912,7 +974,9 @@ function App() {
                         name="group-visibility"
                         value="private"
                         checked={authData.groupVisibility === 'private'}
-                        onChange={() => setAuthData((prev) => ({ ...prev, groupVisibility: 'private' }))}
+                        onChange={() =>
+                          setAuthData((prev) => ({ ...prev, groupVisibility: 'private' }))
+                        }
                       />
                       Private (invite-only)
                     </label>
@@ -922,19 +986,26 @@ function App() {
                         name="group-visibility"
                         value="public"
                         checked={authData.groupVisibility === 'public'}
-                        onChange={() => setAuthData((prev) => ({ ...prev, groupVisibility: 'public' }))}
+                        onChange={() =>
+                          setAuthData((prev) => ({ ...prev, groupVisibility: 'public' }))
+                        }
                       />
                       Public (discoverable)
                     </label>
                   </div>
                 </fieldset>
-                <button type="submit" className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+                <button
+                  type="submit"
+                  className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                >
                   Create group
                 </button>
               </form>
 
               <div className="mt-6 space-y-3">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Discover public groups</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  Discover public groups
+                </h3>
                 {discoverGroups.length === 0 ? (
                   <EmptyState
                     title="No public groups right now"
@@ -942,10 +1013,15 @@ function App() {
                   />
                 ) : (
                   discoverGroups.map((group) => (
-                    <div key={group.id} className="flex flex-col gap-3 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div
+                      key={group.id}
+                      className="flex flex-col gap-3 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-white">{group.name}</p>
-                        <p className="text-xs text-slate-400">{group.memberCount} member{group.memberCount === 1 ? '' : 's'}</p>
+                        <p className="text-xs text-slate-400">
+                          {group.memberCount} member{group.memberCount === 1 ? '' : 's'}
+                        </p>
                       </div>
                       <button
                         type="button"
@@ -978,13 +1054,21 @@ function App() {
               {pendingInvites.length > 0 && (
                 <div className="rounded-3xl border border-amber-800/50 bg-amber-950/30 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.32)]">
                   <h2 className="text-2xl font-semibold text-white">Pending Invitations</h2>
-                  <p className="mt-2 text-sm text-amber-200/80">You have {pendingInvites.length} pending group invitation{pendingInvites.length !== 1 ? 's' : ''}.</p>
+                  <p className="mt-2 text-sm text-amber-200/80">
+                    You have {pendingInvites.length} pending group invitation
+                    {pendingInvites.length !== 1 ? 's' : ''}.
+                  </p>
                   <div className="mt-4 space-y-3">
                     {pendingInvites.map((invite) => (
-                      <div key={invite.id} className="flex flex-col gap-3 rounded-3xl bg-slate-950/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div
+                        key={invite.id}
+                        className="flex flex-col gap-3 rounded-3xl bg-slate-950/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
                         <div className="min-w-0">
                           <p className="text-sm text-slate-300">Invited to join</p>
-                          <p className="mt-1 truncate font-semibold text-white">{invite.groupName}</p>
+                          <p className="mt-1 truncate font-semibold text-white">
+                            {invite.groupName}
+                          </p>
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -1033,15 +1117,17 @@ function App() {
             {!ownProfile ? (
               <p className="text-sm text-slate-400">Loading your profile…</p>
             ) : (
-              <ProfileView
-                profile={ownProfile}
-                editable
-                onSaveProfile={handleSaveProfile}
-                twoFactorEnabled={Boolean(user?.twoFactorEnabled)}
-                on2faSetup={handle2faSetup}
-                on2faConfirm={handle2faConfirm}
-                on2faDisable={handle2faDisable}
-              />
+              <Suspense fallback={<LazyFallback label="Loading profile…" />}>
+                <ProfileView
+                  profile={ownProfile}
+                  editable
+                  onSaveProfile={handleSaveProfile}
+                  twoFactorEnabled={Boolean(user?.twoFactorEnabled)}
+                  on2faSetup={handle2faSetup}
+                  on2faConfirm={handle2faConfirm}
+                  on2faDisable={handle2faDisable}
+                />
+              </Suspense>
             )}
           </div>
         )}
@@ -1072,15 +1158,17 @@ function App() {
         )}
 
         {view === 'admin' && user?.role === 'admin' && (
-          <AdminPanel
-            request={request}
-            currentUserId={user?.id}
-            onAfterGameChange={async () => {
-              await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
-            }}
-            onError={(msg) => msg && msg !== 'Session expired' && showStatus(msg)}
-            onSuccess={(msg) => msg && showStatus(msg)}
-          />
+          <Suspense fallback={<LazyFallback label="Loading admin panel…" />}>
+            <AdminPanel
+              request={request}
+              currentUserId={user?.id}
+              onAfterGameChange={async () => {
+                await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
+              }}
+              onError={(msg) => msg && msg !== 'Session expired' && showStatus(msg)}
+              onSuccess={(msg) => msg && showStatus(msg)}
+            />
+          </Suspense>
         )}
       </section>
 
@@ -1105,54 +1193,55 @@ function App() {
     </div>
   );
 
-  const authPanel = authView === 'twofa' ? (
-    <TwoFactorChallenge
-      onSubmit={handle2faVerify}
-      onCancel={() => {
-        setAuthView('auth');
-        setAuthData(initialAuthData);
-      }}
-    />
-  ) : authView === 'reset' ? (
-    <div className="mx-auto max-w-lg">
-      <ResetPasswordForm
-        authData={authData}
-        setAuthData={setAuthData}
-        onSubmit={handleResetPassword}
+  const authPanel =
+    authView === 'twofa' ? (
+      <TwoFactorChallenge
+        onSubmit={handle2faVerify}
         onCancel={() => {
-          setAuthData((prev) => ({ ...prev, resetPassword: '', resetToken: '' }));
           setAuthView('auth');
+          setAuthData(initialAuthData);
         }}
       />
-    </div>
-  ) : authView === 'forgot' ? (
-    <div className="mx-auto max-w-lg">
-      <ForgotPasswordForm
-        authData={authData}
-        setAuthData={setAuthData}
-        onSubmit={handleForgotPassword}
-        sent={forgotSent}
-        onCancel={() => {
-          setForgotSent(false);
-          setAuthData((prev) => ({ ...prev, forgotEmail: '' }));
-          setAuthView('auth');
-        }}
-      />
-    </div>
-  ) : (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <LoginForm
-        authData={authData}
-        setAuthData={setAuthData}
-        onSubmit={handleLogin}
-        onForgotPassword={() => {
-          setForgotSent(false);
-          setAuthView('forgot');
-        }}
-      />
-      <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
-    </div>
-  );
+    ) : authView === 'reset' ? (
+      <div className="mx-auto max-w-lg">
+        <ResetPasswordForm
+          authData={authData}
+          setAuthData={setAuthData}
+          onSubmit={handleResetPassword}
+          onCancel={() => {
+            setAuthData((prev) => ({ ...prev, resetPassword: '', resetToken: '' }));
+            setAuthView('auth');
+          }}
+        />
+      </div>
+    ) : authView === 'forgot' ? (
+      <div className="mx-auto max-w-lg">
+        <ForgotPasswordForm
+          authData={authData}
+          setAuthData={setAuthData}
+          onSubmit={handleForgotPassword}
+          sent={forgotSent}
+          onCancel={() => {
+            setForgotSent(false);
+            setAuthData((prev) => ({ ...prev, forgotEmail: '' }));
+            setAuthView('auth');
+          }}
+        />
+      </div>
+    ) : (
+      <div className="grid gap-6 lg:grid-cols-2">
+        <LoginForm
+          authData={authData}
+          setAuthData={setAuthData}
+          onSubmit={handleLogin}
+          onForgotPassword={() => {
+            setForgotSent(false);
+            setAuthView('forgot');
+          }}
+        />
+        <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
+      </div>
+    );
 
   const skeletonView = (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]" aria-busy="true">
@@ -1181,13 +1270,17 @@ function App() {
                 Join groups, make picks, and climb the leaderboards!
               </h1>
               <p className="mt-4 max-w-2xl text-slate-400 sm:text-lg">
-                Pick your match winners, compete against your friends and the world, earn points for risky calls and underdog upsets, and see how you stack up on the live leaderboards. It's football prediction made social, competitive, and fun!
+                Pick your match winners, compete against your friends and the world, earn points for
+                risky calls and underdog upsets, and see how you stack up on the live leaderboards.
+                It's football prediction made social, competitive, and fun!
               </p>
             </div>
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 px-6 py-5 text-center shadow-[0_24px_80px_rgba(15,23,42,0.4)]">
               <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Predict & Win</p>
               <p className="mt-3 text-2xl font-semibold text-white">ScoreCast</p>
-              <p className="mt-2 text-sm text-slate-400">Pick smart, earn points, dominate leaderboards.</p>
+              <p className="mt-2 text-sm text-slate-400">
+                Pick smart, earn points, dominate leaderboards.
+              </p>
             </div>
           </div>
 
@@ -1202,13 +1295,11 @@ function App() {
           )}
         </div>
 
-        {!bootDone || (loading && (!user || games.length === 0)) ? (
-          skeletonView
-        ) : user ? (
-          dashboard
-        ) : (
-          authPanel
-        )}
+        {!bootDone || (loading && (!user || games.length === 0))
+          ? skeletonView
+          : user
+            ? dashboard
+            : authPanel}
       </div>
     </div>
   );

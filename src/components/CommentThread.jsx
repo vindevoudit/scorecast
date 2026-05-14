@@ -44,7 +44,10 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => { setDraft(comment.body); setEditing(false); }}
+              onClick={() => {
+                setDraft(comment.body);
+                setEditing(false);
+              }}
               className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               Cancel
@@ -78,7 +81,8 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
                     : 'text-slate-500 hover:text-slate-300'
               }`}
             >
-              {emoji}{count > 0 ? ` ${count}` : ''}
+              {emoji}
+              {count > 0 ? ` ${count}` : ''}
             </button>
           );
         })}
@@ -162,9 +166,11 @@ function CommentThread({ gameId, currentUserId, request, onError }) {
         method: 'PUT',
         body: JSON.stringify({ body: nextBody }),
       });
-      setComments((prev) => prev.map((c) => (
-        c.id === id ? { ...c, body: updated.body, editedAt: updated.editedAt } : c
-      )));
+      setComments((prev) =>
+        prev.map((c) =>
+          c.id === id ? { ...c, body: updated.body, editedAt: updated.editedAt } : c,
+        ),
+      );
     } catch (error) {
       onError?.(error.message);
     }
@@ -172,19 +178,26 @@ function CommentThread({ gameId, currentUserId, request, onError }) {
 
   const toggleReaction = async (commentId, emoji, currentlyMine) => {
     const setLocal = (mutator) => {
-      setComments((prev) => prev.map((c) => {
-        if (c.id !== commentId) return c;
-        return mutator(c);
-      }));
+      setComments((prev) =>
+        prev.map((c) => {
+          if (c.id !== commentId) return c;
+          return mutator(c);
+        }),
+      );
     };
     if (currentlyMine) {
       setLocal((c) => ({
         ...c,
         yourReactions: (c.yourReactions || []).filter((e) => e !== emoji),
-        reactionCounts: { ...c.reactionCounts, [emoji]: Math.max(0, (c.reactionCounts?.[emoji] || 1) - 1) },
+        reactionCounts: {
+          ...c.reactionCounts,
+          [emoji]: Math.max(0, (c.reactionCounts?.[emoji] || 1) - 1),
+        },
       }));
       try {
-        await request(`/api/comments/${commentId}/reactions/${encodeURIComponent(emoji)}`, { method: 'DELETE' });
+        await request(`/api/comments/${commentId}/reactions/${encodeURIComponent(emoji)}`, {
+          method: 'DELETE',
+        });
       } catch (error) {
         onError?.(error.message);
         load();
@@ -221,7 +234,9 @@ function CommentThread({ gameId, currentUserId, request, onError }) {
       {open && (
         <div className="mt-3 space-y-3">
           <form onSubmit={submit} className="space-y-2">
-            <label htmlFor={`comment-${gameId}`} className="sr-only">Comment</label>
+            <label htmlFor={`comment-${gameId}`} className="sr-only">
+              Comment
+            </label>
             <textarea
               id={`comment-${gameId}`}
               value={body}

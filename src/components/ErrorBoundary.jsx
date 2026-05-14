@@ -36,9 +36,12 @@ class ErrorBoundary extends Component {
         <div className="mx-auto max-w-2xl">
           <div className="rounded-3xl border border-rose-700/40 bg-slate-900/85 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.4)]">
             <p className="text-sm uppercase tracking-[0.35em] text-rose-300/80">Something broke</p>
-            <h1 className="mt-3 text-3xl font-semibold text-white">ScoreCast hit an unexpected error</h1>
+            <h1 className="mt-3 text-3xl font-semibold text-white">
+              ScoreCast hit an unexpected error
+            </h1>
             <p className="mt-3 text-slate-300">
-              The error has been logged. Try reloading the page; if it keeps happening, sign out and back in.
+              The error has been logged. Try reloading the page; if it keeps happening, sign out and
+              back in.
             </p>
             {import.meta.env.DEV && this.state.message ? (
               <p className="mt-4 rounded-2xl bg-slate-950/70 px-4 py-3 font-mono text-xs text-rose-200">

@@ -13,8 +13,12 @@ module.exports = {
         "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await queryInterface.sequelize.query(`CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens ("userId")`);
-    await queryInterface.sequelize.query(`CREATE INDEX IF NOT EXISTS refresh_tokens_active_idx ON refresh_tokens ("userId") WHERE "revokedAt" IS NULL`);
+    await queryInterface.sequelize.query(
+      `CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens ("userId")`,
+    );
+    await queryInterface.sequelize.query(
+      `CREATE INDEX IF NOT EXISTS refresh_tokens_active_idx ON refresh_tokens ("userId") WHERE "revokedAt" IS NULL`,
+    );
   },
 
   async down(queryInterface) {

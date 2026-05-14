@@ -10,7 +10,7 @@ module.exports = {
       END $$;
     `);
     await queryInterface.sequelize.query(
-      `ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility "public"."enum_groups_visibility" NOT NULL DEFAULT 'private'`
+      `ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility "public"."enum_groups_visibility" NOT NULL DEFAULT 'private'`,
     );
   },
 

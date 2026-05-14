@@ -22,7 +22,10 @@ function FriendsList({
   };
 
   const renderRow = (entry, actions) => (
-    <div key={entry.id} className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      key={entry.id}
+      className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+    >
       <button
         type="button"
         onClick={() => onSelectUser?.(entry.username)}
@@ -57,10 +60,14 @@ function FriendsList({
   return (
     <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_60px_rgba(15,23,42,0.32)]">
       <h2 className="text-2xl font-semibold text-white">Friends</h2>
-      <p className="mt-2 text-sm text-slate-400">Send a request by username. Once accepted, you'll see head-to-head records on profiles.</p>
+      <p className="mt-2 text-sm text-slate-400">
+        Send a request by username. Once accepted, you'll see head-to-head records on profiles.
+      </p>
 
       <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-2 sm:flex-row">
-        <label htmlFor="friend-username" className="sr-only">Username</label>
+        <label htmlFor="friend-username" className="sr-only">
+          Username
+        </label>
         <input
           id="friend-username"
           value={username}
@@ -68,46 +75,54 @@ function FriendsList({
           placeholder="Username"
           className="flex-1 rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
         />
-        <button type="submit" className="rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400">
+        <button
+          type="submit"
+          className="rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        >
           Send request
         </button>
       </form>
 
       {incoming.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Incoming requests</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+            Incoming requests
+          </h3>
           <div className="mt-3 space-y-2">
-            {incoming.map((entry) => renderRow(entry, [
-              primaryBtn('Accept', () => onAccept(entry.id)),
-              ghostBtn('Decline', () => onDecline(entry.id)),
-            ]))}
+            {incoming.map((entry) =>
+              renderRow(entry, [
+                primaryBtn('Accept', () => onAccept(entry.id)),
+                ghostBtn('Decline', () => onDecline(entry.id)),
+              ]),
+            )}
           </div>
         </div>
       )}
 
       {outgoing.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Outgoing requests</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+            Outgoing requests
+          </h3>
           <div className="mt-3 space-y-2">
-            {outgoing.map((entry) => renderRow(entry, [
-              ghostBtn('Cancel', () => onCancel(entry.id)),
-            ]))}
+            {outgoing.map((entry) =>
+              renderRow(entry, [ghostBtn('Cancel', () => onCancel(entry.id))]),
+            )}
           </div>
         </div>
       )}
 
       <div className="mt-6">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">Friends</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+          Friends
+        </h3>
         <div className="mt-3 space-y-2">
           {friends.length === 0 ? (
-            <EmptyState
-              title="No friends yet"
-              description="Send a request above to get started."
-            />
+            <EmptyState title="No friends yet" description="Send a request above to get started." />
           ) : (
-            friends.map((entry) => renderRow(entry, [
-              ghostBtn('Unfriend', () => onUnfriend(entry.id)),
-            ]))
+            friends.map((entry) =>
+              renderRow(entry, [ghostBtn('Unfriend', () => onUnfriend(entry.id))]),
+            )
           )}
         </div>
       </div>

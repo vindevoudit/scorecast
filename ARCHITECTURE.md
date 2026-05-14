@@ -5,6 +5,7 @@
 > **Companion docs**: [CLAUDE.md](CLAUDE.md) is the quick-reference for day-to-day work; [README.md](README.md) is the marketing-style intro; [DATABASE_SETUP.md](DATABASE_SETUP.md) covers local Postgres setup. This file is the architectural deep-dive.
 
 ## Table of Contents
+
 1. [Purpose](#1-purpose)
 2. [High-Level Architecture](#2-high-level-architecture)
 3. [Tech Stack & Rationale](#3-tech-stack--rationale)
@@ -99,30 +100,30 @@ There is **one server process**, **one database**, **no message queue**, **no wo
 
 ## 3. Tech Stack & Rationale
 
-| Layer | Choice | Why |
-| --- | --- | --- |
-| Frontend framework | **React 18** with hooks-only | Familiar, easy hiring, no SSR needs |
-| Build tool | **Vite 5** | Fastest DX for vanilla React; dev proxy avoids CORS in development |
-| Styling | **Tailwind CSS 3** | Utility classes keep components self-contained; no design-token sprawl |
-| HTTP client | **`fetch`** (no axios) | Standard; the wrapper handles JSON + auth header + 401 |
-| State | **`useState` + `useMemo` + `useCallback`** | No Redux/Zustand/Context — App.jsx is the single state owner |
-| Backend | **Node 18+ / Express 4** | Tiny surface, no router framework, easy to read |
-| ORM | **Sequelize 6** | Predictable, supports raw SQL escape hatches |
-| Migrations | **sequelize-cli + umzug** (Tier 5.1) | sequelize-cli for `npm run db:*` scripts; umzug for programmatic dev-boot execution. Versioned files under `migrations/`. See §7.3 |
-| DB | **PostgreSQL** | Need ENUMs, partial unique indexes, and `LEAST/GREATEST` functional indexes — all Postgres-specific |
-| Auth | **HttpOnly cookie auth** (Tier 6.8): 15-min access JWT (HS256) + 30-day rotating refresh token, both via `res.cookie()`. Refresh tokens are SHA-256 hashed in `refresh_tokens` table. Bearer-header auth was removed in the same tier — there is **no token in the body** of login/register/refresh responses. |
-| 2FA | **TOTP** (Tier 6.9) via `speakeasy` + `qrcode`. Opt-in per user. 10 single-use recovery codes (bcrypt-hashed, rounds 8). 5-min `sc_challenge` cookie issued between password-OK and code-OK. |
-| Password hashing | **bcryptjs** (cost 10) | Pure-JS, no native build step needed on Windows |
-| CSRF | **Double-submit cookie** (Tier 6.7) via [middleware/csrf.js](middleware/csrf.js). `sc_csrf` cookie (readable) must match `X-CSRF-Token` header on POST/PUT/PATCH/DELETE; constant-time compare. Exempt list for unauthenticated mutation endpoints (login, register, password-reset, etc.). See §5.3 + §10.x. |
-| Security headers | **helmet** (Tier 6.2) — CSP tuned for Vite/Tailwind (inline styles allowed; `data:` URIs for Avatars and fonts; Sentry endpoints in `connectSrc`; HMR `ws://localhost:5173` in dev only), HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. COEP/COOP/CORP disabled to avoid breaking third-party assets. |
-| CORS | **Env allowlist** (Tier 6.1) via `CORS_ORIGINS` (comma-separated). Server **throws on boot** when unset in production. Dev falls back to `origin: true` if unset. `credentials: true` always. |
-| Email | **Resend SaaS** behind a pluggable abstraction at [lib/email.js](lib/email.js) (Tier 6.3). When `RESEND_API_KEY` is unset, `send()` logs the rendered payload to stdout — dev users grab verify/reset links from the server log. `send()` **never throws** (failures only log). |
-| Validation | **zod** | Schema-first request validation; emits structured error JSON |
-| Rate limiting | **express-rate-limit** | Per-IP, in-memory. Limiters: `loginLimiter` (5/15min), `registerLimiter` (3/h), `clientErrorLimiter` (30/5min), `commentLimiter` (10/min), `friendRequestLimiter` (10/5min), `pickLimiter` (30/min), `forgotPasswordLimiter` (3/h). Account lockout (5 fails → 15-min lock) layered on top — see §8.x. |
-| Logging | **pino + pino-http** (Tier 5.4) | Structured JSON in prod, `pino-pretty` in dev. Every request gets `req.id` (UUID or inbound `X-Request-Id`) and a `req.log` child logger |
-| HTTP compression | **`compression`** (Tier 5.6) | Gzip middleware mounted before static + body parser; ~75% size reduction on the JS bundle |
-| Leaderboard cache | **In-memory Map** with 30 s TTL (Tier 5.2) | No Redis dependency; appropriate for the current single-process deployment. See §8.14 |
-| Error reporting | **React `ErrorBoundary` + window listeners → `POST /api/client-errors`** (Tier 5.4b); **Sentry SDK** (`@sentry/node` + `@sentry/react`) gated behind `SENTRY_DSN` / `VITE_SENTRY_DSN` (lazy on both sides). See §6.7 + §10.1 |
+| Layer              | Choice                                                                                                                                                                                                                                                                                                                                                    | Why                                                                                                                                                                                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Frontend framework | **React 18** with hooks-only                                                                                                                                                                                                                                                                                                                              | Familiar, easy hiring, no SSR needs                                                                                                                                                                                                                                                                    |
+| Build tool         | **Vite 5**                                                                                                                                                                                                                                                                                                                                                | Fastest DX for vanilla React; dev proxy avoids CORS in development                                                                                                                                                                                                                                     |
+| Styling            | **Tailwind CSS 3**                                                                                                                                                                                                                                                                                                                                        | Utility classes keep components self-contained; no design-token sprawl                                                                                                                                                                                                                                 |
+| HTTP client        | **`fetch`** (no axios)                                                                                                                                                                                                                                                                                                                                    | Standard; the wrapper handles JSON + auth header + 401                                                                                                                                                                                                                                                 |
+| State              | **`useState` + `useMemo` + `useCallback`**                                                                                                                                                                                                                                                                                                                | No Redux/Zustand/Context — App.jsx is the single state owner                                                                                                                                                                                                                                           |
+| Backend            | **Node 18+ / Express 4**                                                                                                                                                                                                                                                                                                                                  | Tiny surface, no router framework, easy to read                                                                                                                                                                                                                                                        |
+| ORM                | **Sequelize 6**                                                                                                                                                                                                                                                                                                                                           | Predictable, supports raw SQL escape hatches                                                                                                                                                                                                                                                           |
+| Migrations         | **sequelize-cli + umzug** (Tier 5.1)                                                                                                                                                                                                                                                                                                                      | sequelize-cli for `npm run db:*` scripts; umzug for programmatic dev-boot execution. Versioned files under `migrations/`. See §7.3                                                                                                                                                                     |
+| DB                 | **PostgreSQL**                                                                                                                                                                                                                                                                                                                                            | Need ENUMs, partial unique indexes, and `LEAST/GREATEST` functional indexes — all Postgres-specific                                                                                                                                                                                                    |
+| Auth               | **HttpOnly cookie auth** (Tier 6.8): 15-min access JWT (HS256) + 30-day rotating refresh token, both via `res.cookie()`. Refresh tokens are SHA-256 hashed in `refresh_tokens` table. Bearer-header auth was removed in the same tier — there is **no token in the body** of login/register/refresh responses.                                            |
+| 2FA                | **TOTP** (Tier 6.9) via `speakeasy` + `qrcode`. Opt-in per user. 10 single-use recovery codes (bcrypt-hashed, rounds 8). 5-min `sc_challenge` cookie issued between password-OK and code-OK.                                                                                                                                                              |
+| Password hashing   | **bcryptjs** (cost 10)                                                                                                                                                                                                                                                                                                                                    | Pure-JS, no native build step needed on Windows                                                                                                                                                                                                                                                        |
+| CSRF               | **Double-submit cookie** (Tier 6.7) via [middleware/csrf.js](middleware/csrf.js). `sc_csrf` cookie (readable) must match `X-CSRF-Token` header on POST/PUT/PATCH/DELETE; constant-time compare. Exempt list for unauthenticated mutation endpoints (login, register, password-reset, etc.). See §5.3 + §10.x.                                             |
+| Security headers   | **helmet** (Tier 6.2) — CSP tuned for Vite/Tailwind (inline styles allowed; `data:` URIs for Avatars and fonts; Sentry endpoints in `connectSrc`; HMR `ws://localhost:5173` in dev only), HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. COEP/COOP/CORP disabled to avoid breaking third-party assets. |
+| CORS               | **Env allowlist** (Tier 6.1) via `CORS_ORIGINS` (comma-separated). Server **throws on boot** when unset in production. Dev falls back to `origin: true` if unset. `credentials: true` always.                                                                                                                                                             |
+| Email              | **Resend SaaS** behind a pluggable abstraction at [lib/email.js](lib/email.js) (Tier 6.3). When `RESEND_API_KEY` is unset, `send()` logs the rendered payload to stdout — dev users grab verify/reset links from the server log. `send()` **never throws** (failures only log).                                                                           |
+| Validation         | **zod**                                                                                                                                                                                                                                                                                                                                                   | Schema-first request validation; emits structured error JSON                                                                                                                                                                                                                                           |
+| Rate limiting      | **express-rate-limit**                                                                                                                                                                                                                                                                                                                                    | Per-IP, in-memory. Limiters: `loginLimiter` (5/15min), `registerLimiter` (3/h), `clientErrorLimiter` (30/5min), `commentLimiter` (10/min), `friendRequestLimiter` (10/5min), `pickLimiter` (30/min), `forgotPasswordLimiter` (3/h). Account lockout (5 fails → 15-min lock) layered on top — see §8.x. |
+| Logging            | **pino + pino-http** (Tier 5.4)                                                                                                                                                                                                                                                                                                                           | Structured JSON in prod, `pino-pretty` in dev. Every request gets `req.id` (UUID or inbound `X-Request-Id`) and a `req.log` child logger                                                                                                                                                               |
+| HTTP compression   | **`compression`** (Tier 5.6)                                                                                                                                                                                                                                                                                                                              | Gzip middleware mounted before static + body parser; ~75% size reduction on the JS bundle                                                                                                                                                                                                              |
+| Leaderboard cache  | **In-memory Map** with 30 s TTL (Tier 5.2)                                                                                                                                                                                                                                                                                                                | No Redis dependency; appropriate for the current single-process deployment. See §8.14                                                                                                                                                                                                                  |
+| Error reporting    | **React `ErrorBoundary` + window listeners → `POST /api/client-errors`** (Tier 5.4b); **Sentry SDK** (`@sentry/node` + `@sentry/react`) gated behind `SENTRY_DSN` / `VITE_SENTRY_DSN` (lazy on both sides). See §6.7 + §10.1                                                                                                                              |
 
 Notable **non-choices**: no TypeScript, no testing framework wired up, no Docker, no CI/CD config. These are deliberate scope decisions documented in [CLAUDE.md](CLAUDE.md).
 
@@ -287,7 +288,9 @@ If the URL doesn't match any `/api/*` route, the catch-all `app.get('*')` return
 ### 5.3 Middleware
 
 #### Request ID + Logger child — `requestId` (Tier 5.4)
+
 Defined in [middleware/requestId.js](middleware/requestId.js). Runs **before every other middleware**. For each request:
+
 - Reads inbound `X-Request-Id` if present and ≤200 chars; otherwise generates a UUID v4 via `crypto.randomUUID()`.
 - Assigns `req.id` and echoes it back on the response (`X-Request-Id` header).
 - Attaches `req.log = logger.child({ reqId: req.id })` — every handler uses this child logger so error lines are auto-tagged with the request ID.
@@ -295,23 +298,25 @@ Defined in [middleware/requestId.js](middleware/requestId.js). Runs **before eve
 Then `pino-http` runs to emit a single structured access log per request (`req: {id, method, url}`, `res: {statusCode}`, `responseTime`). Its `customLogLevel` maps `>=500` → `error`, `>=400` → `warn`, else `info`.
 
 #### Authentication — `authMiddleware` (Tier 6.8: cookie-only)
+
 Defined inline in [server.js](server.js). Reads `req.cookies.sc_access` only — **Bearer-header auth was removed in Tier 6.8**.
 
 Verifies the JWT with `jwt.verify(token, JWT_SECRET)`. On success, attaches the decoded payload `{id, username, role}` to `req.user`. On failure, returns `401 {error: 'Invalid token'}` or `401 {error: 'Authentication required'}`.
 
 **Cookies issued by `setAuthCookies(res, user, {userAgent})`** (called by login, register, refresh, and 2FA verify):
 
-| Cookie | Type | Path | HttpOnly | TTL | Contents |
-| --- | --- | --- | --- | --- | --- |
-| `sc_access` | JWT (HS256) | `/` | yes | 15 min | `{id, username, role}` |
-| `sc_refresh` | opaque random (32 bytes hex) | `/api/auth` | yes | 30 days | raw value; SHA-256 hash stored in `refresh_tokens` |
-| `sc_csrf` | random 32-byte hex | `/` | **no** (frontend must read it) | 30 days | rotates only on explicit `clearCookie` |
+| Cookie       | Type                         | Path        | HttpOnly                       | TTL     | Contents                                           |
+| ------------ | ---------------------------- | ----------- | ------------------------------ | ------- | -------------------------------------------------- |
+| `sc_access`  | JWT (HS256)                  | `/`         | yes                            | 15 min  | `{id, username, role}`                             |
+| `sc_refresh` | opaque random (32 bytes hex) | `/api/auth` | yes                            | 30 days | raw value; SHA-256 hash stored in `refresh_tokens` |
+| `sc_csrf`    | random 32-byte hex           | `/`         | **no** (frontend must read it) | 30 days | rotates only on explicit `clearCookie`             |
 
 `Secure: true` is set on all three in production (`NODE_ENV === 'production'`); `false` in dev so HTTP works.
 
 **Access JWT** is created by `createAccessToken(user)`:
+
 ```js
-jwt.sign({ id, username, role }, JWT_SECRET, { expiresIn: 900 })   // 15 minutes
+jwt.sign({ id, username, role }, JWT_SECRET, { expiresIn: 900 }); // 15 minutes
 ```
 
 **Refresh token rotation**: every `POST /api/auth/refresh` revokes the inbound row (`refresh_tokens.revokedAt = NOW()`) and issues a fresh pair. Multiple concurrent sessions (different devices) each have their own active chain; logging in on a new device does **not** revoke other sessions.
@@ -319,25 +324,31 @@ jwt.sign({ id, username, role }, JWT_SECRET, { expiresIn: 900 })   // 15 minutes
 **Force-logout-everywhere** uses `revokeAllUserRefreshTokens(userId)`, currently called only from password reset.
 
 `JWT_SECRET` resolution:
+
 - Read from `process.env.JWT_SECRET`.
 - If absent **and** `NODE_ENV === 'production'` → server throws on startup (refuses to boot).
 - If absent in dev → logs a warning and uses the literal `'scorecast-dev-only-do-not-use'`. Tokens issued under this secret are not portable across environments and are not safe in production.
 
 #### Authorization — `requireAdmin`
+
 Trivial: `if (req.user?.role !== 'admin') return 403`. Must always run **after** `authMiddleware`. Used by all `/api/admin/*` routes and by `POST /api/games/:gameId/result`.
 
 #### Validation — `validate(schema)`
+
 Factory in [validation/middleware.js](validation/middleware.js). Runs `schema.safeParse(req.body)`. On failure returns:
+
 ```json
-{ "error": "Invalid request body",
-  "issues": [{"path": "homeProbability", "message": "..."}] }
+{ "error": "Invalid request body", "issues": [{ "path": "homeProbability", "message": "..." }] }
 ```
+
 On success it **replaces `req.body` with the parsed (sanitized, defaulted) value** so handlers can trust it. All input mutations from zod (`.trim()`, `.toLowerCase()`, coercions) take effect here.
 
 Schemas live in [validation/schemas.js](validation/schemas.js): `registerSchema` (now includes `email`), `loginSchema`, `forgotPasswordSchema`, `resetPasswordSchema`, `setEmailSchema`, `totpConfirmSchema`, `totpVerifySchema`, `createGroupSchema` (with optional `visibility`), `inviteSchema`, `pickSchema`, `resultSchema`, `friendRequestSchema`, `visibilitySchema`, `commentSchema`, `createGameSchema`, `updateGameSchema`, `roleSchema`, `transferOwnerSchema`, `editProfileSchema`, `reactionSchema` (emoji ∈ `ALLOWED_EMOJIS`), `bulkGameSchema`, `bulkUserSchema`, `clientErrorSchema`.
 
 #### Rate limiting (Tier 6.10 expanded the original three)
+
 Seven limiters from `express-rate-limit`, all configured `standardHeaders: true, legacyHeaders: false`:
+
 - `loginLimiter`: 5 / 15 min per IP. `POST /api/login`.
 - `registerLimiter`: 3 / hour per IP. `POST /api/register`.
 - `clientErrorLimiter` (Tier 5.4b): 30 / 5 min per IP. `POST /api/client-errors`. Tuned so a runaway client-side throw can't flood the server log.
@@ -351,10 +362,14 @@ In-memory store, so a server restart wipes the counters. Acceptable for a single
 **Account lockout (Tier 6.6)** is layered on top of `loginLimiter`. After 5 failed password attempts against a single user, `users.lockedUntil` is set 15 min in the future. Subsequent attempts return the same generic 401 regardless of password correctness. Counter clears on successful login or password reset.
 
 #### CORS (Tier 6.1)
+
 Allowlist driven by `CORS_ORIGINS` (comma-separated). Server **throws on boot** when `NODE_ENV=production` and the env is unset:
 
 ```js
-const corsOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const corsOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 if (process.env.NODE_ENV === 'production' && corsOrigins.length === 0) {
   throw new Error('CORS_ORIGINS env var is required in production');
 }
@@ -364,6 +379,7 @@ app.use(cors({ origin: corsOrigins.length ? corsOrigins : true, credentials: tru
 Dev with `CORS_ORIGINS` unset falls back to `origin: true` so the Vite dev server (`:5173`) and direct curl both work without setup. `credentials: true` is always on — required so the browser sends `sc_access`/`sc_refresh` cookies on cross-origin XHRs.
 
 #### Security headers — `helmet` (Tier 6.2)
+
 Wired before `cors` in the middleware chain. CSP directives tuned for the current asset surface:
 
 ```
@@ -381,6 +397,7 @@ objectSrc:  'none'
 `frameguard: 'deny'` overrides helmet's default `SAMEORIGIN` to `X-Frame-Options: DENY`. `crossOriginEmbedderPolicy` / `crossOriginOpenerPolicy` / `crossOriginResourcePolicy` are disabled because the strict defaults break embedded third-party assets (Sentry, future CDN images).
 
 #### CSRF — `csrfMiddleware` (Tier 6.7)
+
 Defined in [middleware/csrf.js](middleware/csrf.js). Implements **double-submit cookie**:
 
 1. On every request, if `sc_csrf` cookie is absent, generate 32 random bytes (hex), set as a non-HttpOnly cookie (`Secure` in prod, `SameSite=Lax`, `Path=/`).
@@ -398,6 +415,7 @@ Frontend reads the cookie via [src/lib/cookies.js](src/lib/cookies.js) `getCooki
 ### 5.4 Route Catalogue
 
 Routes are registered in [server.js](server.js) in roughly this order:
+
 1. **Auth (Tier 6 expanded)**:
    - `POST /api/register` — accepts `{username, password, email}`. Body response: `{user}` only (auth cookies set via `setAuthCookies`). Fires `sendVerificationEmail` fire-and-forget.
    - `POST /api/login` — accepts `{username, password}`. On lockout, on bad pw, and on unknown user, returns identical 401 `{error: 'Invalid credentials'}`. Lockout state mutates `users.loginAttempts` / `lockedUntil` (Tier 6.6). If `user.totpEnabledAt` is set, issues `sc_challenge` cookie and returns `{challenge: true}` instead of auth cookies (Tier 6.9).
@@ -434,26 +452,26 @@ Routes are registered in [server.js](server.js) in roughly this order:
 
 These are pure-Node helpers, not endpoints. They live inside `server.js` and are called from multiple route handlers:
 
-| Helper | Purpose | Called from |
-| --- | --- | --- |
-| `scorePick(pick, game)` | Authoritative scoring formula | `buildUserSummary`, `buildGroupLeaderboard`, profile endpoint, result + bulk-result hooks |
-| `notify(userId, type, title, body?, link?)` | Creates a `Notification` row; swallows errors | Invite, accept, friend-request, friend-accept, public-group join, group leave/transfer/delete, badge award, game result |
-| `awardBadge(userId, slug)` | Inserts a `Badge` row (unique-constrained); fires a `badge` notification | `evaluateBadges` only |
-| `evaluateBadges(userId, ctx?)` | Re-runs all badge unlock conditions for a user; idempotent | `POST /api/picks`, `POST /api/groups`, per-user inside the result hook (single + bulk) |
-| `getFriendshipBetween(a, b)` | Finds the single row (in either direction) | Profile endpoint, friend-request guards |
-| `friendStatusFrom(friendship, viewer, target)` | Returns `'self' \| 'none' \| 'pending-in' \| 'pending-out' \| 'friends'` | Profile endpoint |
-| `buildUserSummary()` | Overall leaderboard rows (includes displayName) | `GET /api/leaderboard` |
-| `buildGroupLeaderboard(groupId)` | Group-scoped rows (includes displayName + winRate) | `GET /api/leaderboard?groupId=` |
-| `sortLeaderboard(rows, orderBy)` | Sort by `points / winRate / username`, attach `rank` | Group leaderboard pagination path |
-| `cascadeDeleteUser(target, {transaction})` | 9-step user cascade (groups owned, picks, comments, friendships, memberships, invites, then user). Tier 5.3: accepts `{transaction}` and forwards to every internal `destroy()`. | `DELETE /api/admin/users/:id`, `POST /api/admin/users/bulk` |
-| `cascadeDeleteGame(game, {transaction})` | Pick + comment cleanup, then game. Tier 5.3: tx-aware. | `DELETE /api/admin/games/:id`, `POST /api/admin/games/bulk` |
-| `cascadeDeleteGroup(group, {transaction})` | (Tier 5.3) Members + invites + group. Extracted from the inline body of `DELETE /api/groups/:groupId`. | `DELETE /api/groups/:groupId` |
-| `createAccessToken(user)` (Tier 6.8) | 15-min HS256 JWT with `{id, username, role}`. Replaces the 7-day `createToken` from before Tier 6. | `setAuthCookies` only |
-| `setAuthCookies(res, user, {userAgent})` (Tier 6.8) | Signs access JWT, generates random refresh token, inserts a `RefreshToken` row, sets both cookies on `res`. Async (writes DB). | `POST /api/login`, `/api/register`, `/api/auth/refresh`, `/api/auth/2fa/verify` |
-| `clearAuthCookies(res)` (Tier 6.8) | `res.clearCookie` for `sc_access` + `sc_refresh` at their correct paths. | `POST /api/auth/logout`, refresh-failure paths |
-| `revokeAllUserRefreshTokens(userId)` (Tier 6.8) | Sets `revokedAt = NOW()` on every non-revoked row for the user. | `POST /api/auth/reset-password` |
-| `generateRawToken()` / `hashToken(raw)` (Tier 6) | 32 random hex bytes; SHA-256 hex digest. Used for high-entropy single-use tokens (verify-email, password-reset, refresh). | All three token issuers + verifiers |
-| `sendVerificationEmail(user)` (Tier 6.5) | Generates a token row + dispatches verify email via `lib/email`. Fire-and-forget at the caller. | `POST /api/register`, `PATCH /api/me/email` |
+| Helper                                              | Purpose                                                                                                                                                                          | Called from                                                                                                             |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `scorePick(pick, game)`                             | Authoritative scoring formula                                                                                                                                                    | `buildUserSummary`, `buildGroupLeaderboard`, profile endpoint, result + bulk-result hooks                               |
+| `notify(userId, type, title, body?, link?)`         | Creates a `Notification` row; swallows errors                                                                                                                                    | Invite, accept, friend-request, friend-accept, public-group join, group leave/transfer/delete, badge award, game result |
+| `awardBadge(userId, slug)`                          | Inserts a `Badge` row (unique-constrained); fires a `badge` notification                                                                                                         | `evaluateBadges` only                                                                                                   |
+| `evaluateBadges(userId, ctx?)`                      | Re-runs all badge unlock conditions for a user; idempotent                                                                                                                       | `POST /api/picks`, `POST /api/groups`, per-user inside the result hook (single + bulk)                                  |
+| `getFriendshipBetween(a, b)`                        | Finds the single row (in either direction)                                                                                                                                       | Profile endpoint, friend-request guards                                                                                 |
+| `friendStatusFrom(friendship, viewer, target)`      | Returns `'self' \| 'none' \| 'pending-in' \| 'pending-out' \| 'friends'`                                                                                                         | Profile endpoint                                                                                                        |
+| `buildUserSummary()`                                | Overall leaderboard rows (includes displayName)                                                                                                                                  | `GET /api/leaderboard`                                                                                                  |
+| `buildGroupLeaderboard(groupId)`                    | Group-scoped rows (includes displayName + winRate)                                                                                                                               | `GET /api/leaderboard?groupId=`                                                                                         |
+| `sortLeaderboard(rows, orderBy)`                    | Sort by `points / winRate / username`, attach `rank`                                                                                                                             | Group leaderboard pagination path                                                                                       |
+| `cascadeDeleteUser(target, {transaction})`          | 9-step user cascade (groups owned, picks, comments, friendships, memberships, invites, then user). Tier 5.3: accepts `{transaction}` and forwards to every internal `destroy()`. | `DELETE /api/admin/users/:id`, `POST /api/admin/users/bulk`                                                             |
+| `cascadeDeleteGame(game, {transaction})`            | Pick + comment cleanup, then game. Tier 5.3: tx-aware.                                                                                                                           | `DELETE /api/admin/games/:id`, `POST /api/admin/games/bulk`                                                             |
+| `cascadeDeleteGroup(group, {transaction})`          | (Tier 5.3) Members + invites + group. Extracted from the inline body of `DELETE /api/groups/:groupId`.                                                                           | `DELETE /api/groups/:groupId`                                                                                           |
+| `createAccessToken(user)` (Tier 6.8)                | 15-min HS256 JWT with `{id, username, role}`. Replaces the 7-day `createToken` from before Tier 6.                                                                               | `setAuthCookies` only                                                                                                   |
+| `setAuthCookies(res, user, {userAgent})` (Tier 6.8) | Signs access JWT, generates random refresh token, inserts a `RefreshToken` row, sets both cookies on `res`. Async (writes DB).                                                   | `POST /api/login`, `/api/register`, `/api/auth/refresh`, `/api/auth/2fa/verify`                                         |
+| `clearAuthCookies(res)` (Tier 6.8)                  | `res.clearCookie` for `sc_access` + `sc_refresh` at their correct paths.                                                                                                         | `POST /api/auth/logout`, refresh-failure paths                                                                          |
+| `revokeAllUserRefreshTokens(userId)` (Tier 6.8)     | Sets `revokedAt = NOW()` on every non-revoked row for the user.                                                                                                                  | `POST /api/auth/reset-password`                                                                                         |
+| `generateRawToken()` / `hashToken(raw)` (Tier 6)    | 32 random hex bytes; SHA-256 hex digest. Used for high-entropy single-use tokens (verify-email, password-reset, refresh).                                                        | All three token issuers + verifiers                                                                                     |
+| `sendVerificationEmail(user)` (Tier 6.5)            | Generates a token row + dispatches verify email via `lib/email`. Fire-and-forget at the caller.                                                                                  | `POST /api/register`, `PATCH /api/me/email`                                                                             |
 
 `notify` and `evaluateBadges` are **fire-and-forget with `.catch(() => {})`** — a failure inside them never breaks the user-facing response. They also fire **outside** every cascade transaction so a rollback never produces ghost notifications. The trade-off is silent failures; the structured `req.log.warn`/`logger.warn` calls inside `notify()` and `evaluateBadges()` (Tier 5.4) at least leave a trail.
 
@@ -531,23 +549,36 @@ const request = useCallback(async (path, options = {}) => {
   // Refresh-then-retry: on 401, try POST /api/auth/refresh once and retry.
   // /api/auth/* are exempt to prevent recursion.
   if (response.status === 401 && !path.startsWith('/api/auth/')) {
-    const refreshResp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+    const refreshResp = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      credentials: 'include',
+    });
     if (refreshResp.status === 204) {
       response = await doFetch();
       const newReqId = response.headers.get('X-Request-Id');
-      if (newReqId) { setLastRequestId(newReqId); reqId = newReqId; }
+      if (newReqId) {
+        setLastRequestId(newReqId);
+        reqId = newReqId;
+      }
     }
   }
 
   if (response.status === 401) {
-    if (userRef.current) { handleSessionExpired(); throw new Error('Session expired'); }
-    const err = new Error('Authentication required'); err.reqId = reqId; err.status = 401; throw err;
+    if (userRef.current) {
+      handleSessionExpired();
+      throw new Error('Session expired');
+    }
+    const err = new Error('Authentication required');
+    err.reqId = reqId;
+    err.status = 401;
+    throw err;
   }
   // ... 204 / non-ok / JSON parsing as before
 }, []);
 ```
 
 Important properties:
+
 - **Always sends `credentials: 'include'`** so the browser attaches `sc_access`/`sc_refresh`/`sc_csrf` cookies. No `Authorization` header is ever set.
 - **CSRF auto-injection**: state-changing methods read `sc_csrf` via [src/lib/cookies.js](src/lib/cookies.js) and send it as `X-CSRF-Token`. The cookie is set by the server's CSRF middleware on the first request of any session — so by the time the SPA needs to send a mutation, the cookie is already present.
 - **Refresh-then-retry**: a 401 on a non-`/api/auth/*` path triggers one `POST /api/auth/refresh`. On success (204 + new cookies), the original request is retried. On failure, the original 401 is surfaced. This is what lets the user keep using the app for 30 days without re-logging-in, even though access tokens expire every 15 minutes.
@@ -563,7 +594,12 @@ useEffect(() => {
   loadDashboard()
     .catch((error) => {
       // 401 or "Authentication required" → no session, silently show login
-      if (error.status === 401 || error.message === 'Session expired' || error.message === 'Authentication required') return;
+      if (
+        error.status === 401 ||
+        error.message === 'Session expired' ||
+        error.message === 'Authentication required'
+      )
+        return;
       showStatus(error.message);
     })
     .finally(() => setBootDone(true));
@@ -579,6 +615,7 @@ Routing is **fake**: the URL never changes. The `view` state determines which to
 ### 6.5 Polling Patterns
 
 Two timers run inside the app:
+
 - **`NotificationBell`**: `setInterval` calling `GET /api/notifications` every 30 s. Started on mount, cleared on unmount.
 - **`useCountdown(date)`** in `time.js`: per-`GameCard` interval that re-formats the countdown label every 30 s. Cheap; the hook returns a string label.
 
@@ -679,22 +716,26 @@ Three failure modes, three UX paths, one logging sink.
 ```
 
 **Files touched**:
+
 - [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx): class component (React requires class for error boundaries). `getDerivedStateFromError` sets `hasError = true`; `componentDidCatch` calls `reportClientError` and Sentry `captureException`. Fallback UI matches the slate/cyan/rose theme, offers **Reload page** and **Try again**. Raw error message rendered **only when `import.meta.env.DEV` is true** — Vite strips the branch from the prod bundle so users never see `Cannot read properties of undefined…` style messages.
 - [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js): installs `window.error` and `unhandledrejection` listeners. Hard-throttled to **5 reports per 60 s window** (the rest are dropped silently — prevents runaway-error storms). `reportClientError` posts via `fetch({keepalive: true})` so reports complete even if the page is unloading. Clips `stack` and `componentStack` to **8 KB** each and `message` to 500 chars, matching the server's zod ceilings. Failures inside the reporter are swallowed (never re-feed the listener). Also dispatches a `scorecast:client-error` DOM event so App.jsx can show a toast.
 - [src/lib/sentry.js](src/lib/sentry.js): `initSentry()` is `async` — reads `import.meta.env.VITE_SENTRY_DSN` and, if set, does a dynamic `await import('@sentry/react')` then calls `init({dsn, environment, tracesSampleRate: 0})`. If unset, **the entire dynamic-import branch is dead-code-eliminated by Vite** — zero `@sentry/react` bytes in the bundle (verified: 0 occurrences of "sentry" in `dist/assets/*.js` when DSN unset).
 - [src/main.jsx](src/main.jsx): bootstrap order — `initSentry()` (fire-and-forget async), `installClientErrorReporter()` (synchronous), then `createRoot().render(<StrictMode><ErrorBoundary><App/></ErrorBoundary></StrictMode>)`.
-- [src/App.jsx](src/App.jsx): single `useEffect` listens for `scorecast:client-error` and triggers a *"Something went wrong — refresh if things look off."* toast via the existing `setStatus`/clearTimeout machinery.
+- [src/App.jsx](src/App.jsx): single `useEffect` listens for `scorecast:client-error` and triggers a _"Something went wrong — refresh if things look off."_ toast via the existing `setStatus`/clearTimeout machinery.
 
 **Server-side wiring**:
+
 - [lib/instrument.js](lib/instrument.js): MUST be the **very first `require()`** in [server.js](server.js) (currently line 1). Loads `dotenv` then conditionally `require('@sentry/node').init({dsn, …})`. Required this early because `@sentry/node` v8+ uses OpenTelemetry, which needs to instrument Express/Sequelize/etc. **before** they're imported.
 - [lib/sentry.js](lib/sentry.js): exports `captureException` and `setupExpressErrorHandler(app)`. Both no-op if `SENTRY_DSN` is unset. `setupExpressErrorHandler(app)` is mounted **after** all routes including the catch-all `app.get('*')` so it sees errors propagated via `next(err)`.
 
 **Why three paths and not one**:
+
 - Render errors need the React tree to swap in a fallback — that's what `componentDidCatch` does and a window listener cannot.
 - Window errors / unhandled rejections happen outside React's render cycle — boundary doesn't see them; they need their own listener.
 - Handled API errors (`request()` throw) are caught by app code (e.g., `submitPick`) which already shows a contextual toast; piping them through the boundary or reporter would double-toast and lose context.
 
 **What's logged**:
+
 - Backend: every report becomes one structured `client error` log line with `reqId` (the server's own request id for the POST), `userId` (from soft-decoded token if present), and the full `clientError` object (`message`, `stack`, `componentStack`, `url`, the **client-side** `reqId` of the most recent server interaction, `userAgent`, `level`). Pino-formatted JSON in prod, pretty-printed in dev.
 
 **Sentry activation** (when ready): paste the project DSN(s) into `.env` as `SENTRY_DSN` (server) and `VITE_SENTRY_DSN` (browser); restart the server; rebuild the frontend (`VITE_SENTRY_DSN` is read at Vite build time). Verification trick: throw via `setTimeout(() => { throw new Error('test') }, 0)` — direct console throws are filtered by Sentry as "developer-intentional" in some browser builds.
@@ -706,13 +747,19 @@ Three failure modes, three UX paths, one logging sink.
 ### 7.1 Connection
 
 A single Sequelize instance is configured in [models/index.js](models/index.js):
+
 ```js
-new Sequelize(process.env.DATABASE_URL || {
-  host: 'localhost', database: 'scorecast_db',
-  username: 'postgres', password: 'postgres',
-  dialect: 'postgres',
-})
+new Sequelize(
+  process.env.DATABASE_URL || {
+    host: 'localhost',
+    database: 'scorecast_db',
+    username: 'postgres',
+    password: 'postgres',
+    dialect: 'postgres',
+  },
+);
 ```
+
 If `DATABASE_URL` is set, it overrides everything else. Otherwise the local defaults apply. Connection pooling is left at Sequelize defaults (max 5).
 
 ### 7.2 Schema Initialization
@@ -729,6 +776,7 @@ On every server boot, `initDatabase()` runs (in order):
 Schema evolution is managed by **sequelize-cli** (CLI for engineers + production deploys) and **umzug** (programmatic API used by the dev-mode boot path). Both read from the same `migrations/` directory and share the `SequelizeMeta` bookkeeping table, so either entry point applies the same set of versioned migrations exactly once.
 
 **Layout**:
+
 ```
 .sequelizerc                 → points sequelize-cli at the directories below
 config/database.js           → dev/test/production blocks; reads DATABASE_URL or falls back to local Postgres
@@ -746,26 +794,27 @@ seeders/                     → idempotent seeders (e.g. password backfill)
 | `npm run db:seed:undo` | Roll back all seeders (rarely useful) |
 
 **Boot behavior**:
+
 - **Development** (`NODE_ENV !== 'production'`): `runMigrations()` calls `umzug.up()` so the dev server is always on the latest schema with no manual step.
 - **Production**: boot-time auto-migrate is **off** by default. Run `npm run db:migrate` as part of the deploy pipeline. Set `MIGRATE_ON_BOOT=true` to override (useful for single-node deploys where you accept the risk of a long boot pause).
 
 **Initial migration set** (all idempotent — they're no-ops against DBs that were upgraded by the old boot-time SQL):
 
-| File | Effect |
-| --- | --- |
-| `20260513000001-add-user-role.js` | ENUM `enum_users_role` + `users.role` column |
-| `20260513000002-pick-unique-index.js` | `picks_user_game_unique (userId, gameId)` |
-| `20260513000003-group-visibility-enum.js` | ENUM `enum_groups_visibility` + `groups.visibility` column |
-| `20260513000004-friendship-pair-unique.js` | Functional unique index on `LEAST/GREATEST(requesterId, addresseeId)` |
-| `20260513000005-user-displayname-bio.js` | `users.displayName VARCHAR(60)` + `users.bio TEXT` |
-| `20260513000006-comment-edited-at.js` | `comments.editedAt TIMESTAMPTZ` |
-| `20260513000007-comment-reactions-table.js` | `CREATE TABLE comment_reactions IF NOT EXISTS` (existing DBs already had it from `sync({alter:false})`) |
-| `20260513000008-user-login-attempts.js` | Tier 6.6: `users.loginAttempts` + `users.lockedUntil` |
-| `20260513000009-user-email-columns.js` | Tier 6.5: `users.email` + `users.emailVerifiedAt` + functional unique index `users_email_lower_unique` on `LOWER(email)` |
-| `20260513000010-email-verification-tokens.js` | Tier 6.5: `CREATE TABLE email_verification_tokens` |
-| `20260513000011-password-reset-tokens.js` | Tier 6.4: `CREATE TABLE password_reset_tokens` |
-| `20260513000012-refresh-tokens.js` | Tier 6.8: `CREATE TABLE refresh_tokens` + partial active-rows index |
-| `20260513000013-user-totp.js` | Tier 6.9: `users.totpSecret`, `users.totpEnabledAt`, `users.totpRecoveryCodes` JSONB |
+| File                                          | Effect                                                                                                                   |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `20260513000001-add-user-role.js`             | ENUM `enum_users_role` + `users.role` column                                                                             |
+| `20260513000002-pick-unique-index.js`         | `picks_user_game_unique (userId, gameId)`                                                                                |
+| `20260513000003-group-visibility-enum.js`     | ENUM `enum_groups_visibility` + `groups.visibility` column                                                               |
+| `20260513000004-friendship-pair-unique.js`    | Functional unique index on `LEAST/GREATEST(requesterId, addresseeId)`                                                    |
+| `20260513000005-user-displayname-bio.js`      | `users.displayName VARCHAR(60)` + `users.bio TEXT`                                                                       |
+| `20260513000006-comment-edited-at.js`         | `comments.editedAt TIMESTAMPTZ`                                                                                          |
+| `20260513000007-comment-reactions-table.js`   | `CREATE TABLE comment_reactions IF NOT EXISTS` (existing DBs already had it from `sync({alter:false})`)                  |
+| `20260513000008-user-login-attempts.js`       | Tier 6.6: `users.loginAttempts` + `users.lockedUntil`                                                                    |
+| `20260513000009-user-email-columns.js`        | Tier 6.5: `users.email` + `users.emailVerifiedAt` + functional unique index `users_email_lower_unique` on `LOWER(email)` |
+| `20260513000010-email-verification-tokens.js` | Tier 6.5: `CREATE TABLE email_verification_tokens`                                                                       |
+| `20260513000011-password-reset-tokens.js`     | Tier 6.4: `CREATE TABLE password_reset_tokens`                                                                           |
+| `20260513000012-refresh-tokens.js`            | Tier 6.8: `CREATE TABLE refresh_tokens` + partial active-rows index                                                      |
+| `20260513000013-user-totp.js`                 | Tier 6.9: `users.totpSecret`, `users.totpEnabledAt`, `users.totpRecoveryCodes` JSONB                                     |
 
 **Seeder set**:
 | File | Effect |
@@ -773,6 +822,7 @@ seeders/                     → idempotent seeders (e.g. password backfill)
 | `seeders/20260513000001-seed-password-backfill.js` | Re-hashes any plaintext password that still matches a `data.json` entry. Skips already-bcrypt rows. |
 
 **Rules for adding new migrations**:
+
 - `npx sequelize-cli migration:generate --name <short-description>`, edit the generated `up` and `down`.
 - Every `up` statement should be **safely re-runnable**: `IF NOT EXISTS` for columns/indexes/tables, and `DO $$ BEGIN ... EXCEPTION WHEN duplicate_object THEN null; END $$;` blocks for `CREATE TYPE`. This isn't required by sequelize-cli (which tracks applied migrations in `SequelizeMeta`), but matches our existing migrations and is friendly against DBs that pre-existed the migration framework.
 - `down` paths are best-effort, intended for local rollback only. `DROP COLUMN IF EXISTS`, `DROP INDEX IF EXISTS`, etc.
@@ -785,160 +835,174 @@ seeders/                     → idempotent seeders (e.g. password backfill)
 UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defaultValue: DataTypes.UUIDV4`.
 
 #### `users`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `username` | STRING UNIQUE NOT NULL | Case-insensitive lookup via `iLike` |
-| `password` | STRING NOT NULL | bcrypt hash; the model's `beforeCreate`/`beforeUpdate` hooks auto-hash anything not already matching `^\$2[aby]\$` |
-| `role` | ENUM('user','admin') NOT NULL DEFAULT 'user' | Added via migration |
-| `displayName` | VARCHAR(60) NULLABLE | Tier 8. Used in place of username everywhere when set |
-| `bio` | TEXT NULLABLE | Tier 8. Length-capped at 280 by zod, no DB-level constraint |
-| `email` | VARCHAR(254) NULLABLE | Tier 6.5. Private (not exposed except on `GET /api/me`). Functional unique index `users_email_lower_unique` on `LOWER(email) WHERE email IS NOT NULL` for case-insensitive uniqueness that tolerates legacy null rows |
-| `emailVerifiedAt` | TIMESTAMPTZ NULLABLE | Tier 6.5. Required to be non-null before `/api/auth/forgot-password` will dispatch a reset link |
-| `loginAttempts` | INTEGER NOT NULL DEFAULT 0 | Tier 6.6. Incremented per bad password; cleared on success or password reset |
-| `lockedUntil` | TIMESTAMPTZ NULLABLE | Tier 6.6. When `> NOW()`, login returns generic 401 |
-| `totpSecret` | TEXT NULLABLE | Tier 6.9. base32-encoded TOTP secret. Populated by `/api/me/2fa/setup` but enabled only after `/api/me/2fa/confirm` |
-| `totpEnabledAt` | TIMESTAMPTZ NULLABLE | Tier 6.9. `IS NOT NULL` ⇔ 2FA is required for this user's logins |
-| `totpRecoveryCodes` | JSONB NULLABLE | Tier 6.9. Array of bcrypt-hashed (rounds 8) single-use recovery codes. Used codes are spliced out |
-| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
+
+| Column              | Type                                         | Notes                                                                                                                                                                                                                 |
+| ------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | UUID PK                                      |                                                                                                                                                                                                                       |
+| `username`          | STRING UNIQUE NOT NULL                       | Case-insensitive lookup via `iLike`                                                                                                                                                                                   |
+| `password`          | STRING NOT NULL                              | bcrypt hash; the model's `beforeCreate`/`beforeUpdate` hooks auto-hash anything not already matching `^\$2[aby]\$`                                                                                                    |
+| `role`              | ENUM('user','admin') NOT NULL DEFAULT 'user' | Added via migration                                                                                                                                                                                                   |
+| `displayName`       | VARCHAR(60) NULLABLE                         | Tier 8. Used in place of username everywhere when set                                                                                                                                                                 |
+| `bio`               | TEXT NULLABLE                                | Tier 8. Length-capped at 280 by zod, no DB-level constraint                                                                                                                                                           |
+| `email`             | VARCHAR(254) NULLABLE                        | Tier 6.5. Private (not exposed except on `GET /api/me`). Functional unique index `users_email_lower_unique` on `LOWER(email) WHERE email IS NOT NULL` for case-insensitive uniqueness that tolerates legacy null rows |
+| `emailVerifiedAt`   | TIMESTAMPTZ NULLABLE                         | Tier 6.5. Required to be non-null before `/api/auth/forgot-password` will dispatch a reset link                                                                                                                       |
+| `loginAttempts`     | INTEGER NOT NULL DEFAULT 0                   | Tier 6.6. Incremented per bad password; cleared on success or password reset                                                                                                                                          |
+| `lockedUntil`       | TIMESTAMPTZ NULLABLE                         | Tier 6.6. When `> NOW()`, login returns generic 401                                                                                                                                                                   |
+| `totpSecret`        | TEXT NULLABLE                                | Tier 6.9. base32-encoded TOTP secret. Populated by `/api/me/2fa/setup` but enabled only after `/api/me/2fa/confirm`                                                                                                   |
+| `totpEnabledAt`     | TIMESTAMPTZ NULLABLE                         | Tier 6.9. `IS NOT NULL` ⇔ 2FA is required for this user's logins                                                                                                                                                      |
+| `totpRecoveryCodes` | JSONB NULLABLE                               | Tier 6.9. Array of bcrypt-hashed (rounds 8) single-use recovery codes. Used codes are spliced out                                                                                                                     |
+| `createdAt`         | TIMESTAMPTZ NOT NULL DEFAULT NOW             |                                                                                                                                                                                                                       |
 
 #### `games`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `homeTeam` / `awayTeam` | STRING NOT NULL | |
-| `date` | TIMESTAMPTZ NOT NULL | UTC; the kickoff time |
-| `homeProbability` / `awayProbability` | DECIMAL(3,2) NOT NULL | Float in `[0,1]`; admin form validates sum-to-1.0 ±0.01 |
-| `result` | ENUM('home','away') NULLABLE | `NULL` = not yet resolved |
+
+| Column                                | Type                         | Notes                                                   |
+| ------------------------------------- | ---------------------------- | ------------------------------------------------------- |
+| `id`                                  | UUID PK                      |                                                         |
+| `homeTeam` / `awayTeam`               | STRING NOT NULL              |                                                         |
+| `date`                                | TIMESTAMPTZ NOT NULL         | UTC; the kickoff time                                   |
+| `homeProbability` / `awayProbability` | DECIMAL(3,2) NOT NULL        | Float in `[0,1]`; admin form validates sum-to-1.0 ±0.01 |
+| `result`                              | ENUM('home','away') NULLABLE | `NULL` = not yet resolved                               |
 
 #### `groups`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `name` | STRING NOT NULL | |
-| `ownerId` | UUID NOT NULL | FK loose (no DB constraint); enforced in app |
-| `visibility` | ENUM('private','public') NOT NULL DEFAULT 'private' | |
-| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
+
+| Column       | Type                                                | Notes                                        |
+| ------------ | --------------------------------------------------- | -------------------------------------------- |
+| `id`         | UUID PK                                             |                                              |
+| `name`       | STRING NOT NULL                                     |                                              |
+| `ownerId`    | UUID NOT NULL                                       | FK loose (no DB constraint); enforced in app |
+| `visibility` | ENUM('private','public') NOT NULL DEFAULT 'private' |                                              |
+| `createdAt`  | TIMESTAMPTZ NOT NULL DEFAULT NOW                    |                                              |
 
 #### `group_members`
+
 Composite primary key `(groupId, userId)`. No additional columns.
 
 #### `group_invites`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `groupId` | UUID NOT NULL | |
-| `username` | STRING NOT NULL | Stored as username, not userId, so case-insensitive invites resolve at accept-time |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
+
+| Column      | Type                    | Notes                                                                              |
+| ----------- | ----------------------- | ---------------------------------------------------------------------------------- |
+| `id`        | UUID PK                 |                                                                                    |
+| `groupId`   | UUID NOT NULL           |                                                                                    |
+| `username`  | STRING NOT NULL         | Stored as username, not userId, so case-insensitive invites resolve at accept-time |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW |                                                                                    |
 
 #### `picks`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `userId` | UUID NOT NULL | |
-| `gameId` | UUID NOT NULL | |
-| `choice` | ENUM('home','away') NOT NULL | |
-| `submittedAt` | TIMESTAMPTZ DEFAULT NOW | Updated on edit, not just create |
+
+| Column        | Type                         | Notes                            |
+| ------------- | ---------------------------- | -------------------------------- |
+| `id`          | UUID PK                      |                                  |
+| `userId`      | UUID NOT NULL                |                                  |
+| `gameId`      | UUID NOT NULL                |                                  |
+| `choice`      | ENUM('home','away') NOT NULL |                                  |
+| `submittedAt` | TIMESTAMPTZ DEFAULT NOW      | Updated on edit, not just create |
 
 **Unique index**: `picks_user_game_unique (userId, gameId)`. App-level upsert is in `POST /api/picks`.
 
 #### `badges`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `userId` | UUID NOT NULL → users(id) ON DELETE CASCADE | |
-| `slug` | STRING NOT NULL | Must exist in [badges/catalog.js](badges/catalog.js) |
-| `awardedAt` | TIMESTAMPTZ DEFAULT NOW | |
+
+| Column      | Type                                        | Notes                                                |
+| ----------- | ------------------------------------------- | ---------------------------------------------------- |
+| `id`        | UUID PK                                     |                                                      |
+| `userId`    | UUID NOT NULL → users(id) ON DELETE CASCADE |                                                      |
+| `slug`      | STRING NOT NULL                             | Must exist in [badges/catalog.js](badges/catalog.js) |
+| `awardedAt` | TIMESTAMPTZ DEFAULT NOW                     |                                                      |
 
 **Unique index**: `badges_user_slug_unique (userId, slug)`. `awardBadge()` relies on the constraint to make repeated calls idempotent (catches the conflict).
 
 #### `friendships`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `requesterId` / `addresseeId` | UUID NOT NULL → users(id) | `ON DELETE NO ACTION` (Sequelize default); the user-delete admin endpoint cleans these up explicitly |
-| `status` | ENUM('pending','accepted') NOT NULL DEFAULT 'pending' | |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
-| `acceptedAt` | TIMESTAMPTZ NULLABLE | Set on accept |
+
+| Column                        | Type                                                  | Notes                                                                                                |
+| ----------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `id`                          | UUID PK                                               |                                                                                                      |
+| `requesterId` / `addresseeId` | UUID NOT NULL → users(id)                             | `ON DELETE NO ACTION` (Sequelize default); the user-delete admin endpoint cleans these up explicitly |
+| `status`                      | ENUM('pending','accepted') NOT NULL DEFAULT 'pending' |                                                                                                      |
+| `createdAt`                   | TIMESTAMPTZ DEFAULT NOW                               |                                                                                                      |
+| `acceptedAt`                  | TIMESTAMPTZ NULLABLE                                  | Set on accept                                                                                        |
 
 **Unique functional index**: `friendships_pair_unique (LEAST(requesterId, addresseeId), GREATEST(requesterId, addresseeId))`. This prevents both `(A, B)` and `(B, A)` from existing simultaneously, regardless of who sent the request. Postgres-only feature.
 
 #### `comments`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `gameId` | UUID NOT NULL → games(id) ON DELETE CASCADE | |
-| `userId` | UUID NOT NULL → users(id) ON DELETE NO ACTION | Cleaned up in admin user-delete |
-| `body` | TEXT NOT NULL | Validation: trim, 1–500 chars |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
-| `editedAt` | TIMESTAMPTZ NULLABLE | Tier 8. Set on every successful `PUT /api/comments/:id`. Frontend renders `(edited)` in the row |
+
+| Column      | Type                                          | Notes                                                                                           |
+| ----------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `id`        | UUID PK                                       |                                                                                                 |
+| `gameId`    | UUID NOT NULL → games(id) ON DELETE CASCADE   |                                                                                                 |
+| `userId`    | UUID NOT NULL → users(id) ON DELETE NO ACTION | Cleaned up in admin user-delete                                                                 |
+| `body`      | TEXT NOT NULL                                 | Validation: trim, 1–500 chars                                                                   |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW                       |                                                                                                 |
+| `editedAt`  | TIMESTAMPTZ NULLABLE                          | Tier 8. Set on every successful `PUT /api/comments/:id`. Frontend renders `(edited)` in the row |
 
 **Index**: `comments_game_idx (gameId)` for fast thread fetch.
 
 #### `comment_reactions` (Tier 8)
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `commentId` | UUID NOT NULL → comments(id) ON DELETE CASCADE | |
-| `userId` | UUID NOT NULL | Cleaned up in admin user-delete (best-effort) |
-| `emoji` | STRING NOT NULL | Free-form at the DB layer, gated by `ALLOWED_EMOJIS` zod enum at the API layer |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
+
+| Column      | Type                                           | Notes                                                                          |
+| ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| `id`        | UUID PK                                        |                                                                                |
+| `commentId` | UUID NOT NULL → comments(id) ON DELETE CASCADE |                                                                                |
+| `userId`    | UUID NOT NULL                                  | Cleaned up in admin user-delete (best-effort)                                  |
+| `emoji`     | STRING NOT NULL                                | Free-form at the DB layer, gated by `ALLOWED_EMOJIS` zod enum at the API layer |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW                        |                                                                                |
 
 **Unique index**: `comment_reactions_unique (commentId, userId, emoji)` — `POST /api/comments/:id/reactions` relies on the constraint for idempotency (catches the duplicate-insert error).
 **Index**: `comment_reactions_comment_idx (commentId)` for fast thread fetch.
 
 #### `notifications`
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `userId` | UUID NOT NULL → users(id) ON DELETE CASCADE | |
-| `type` | STRING NOT NULL | Free-form: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`. **Not an ENUM** so adding new types doesn't require a migration |
-| `title` | STRING NOT NULL | |
-| `body` | TEXT NULLABLE | |
-| `link` | STRING NULLABLE | Reserved for deep-linking; not yet rendered |
-| `read` | BOOLEAN NOT NULL DEFAULT false | |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW | |
+
+| Column      | Type                                        | Notes                                                                                                                                        |
+| ----------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | UUID PK                                     |                                                                                                                                              |
+| `userId`    | UUID NOT NULL → users(id) ON DELETE CASCADE |                                                                                                                                              |
+| `type`      | STRING NOT NULL                             | Free-form: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`. **Not an ENUM** so adding new types doesn't require a migration |
+| `title`     | STRING NOT NULL                             |                                                                                                                                              |
+| `body`      | TEXT NULLABLE                               |                                                                                                                                              |
+| `link`      | STRING NULLABLE                             | Reserved for deep-linking; not yet rendered                                                                                                  |
+| `read`      | BOOLEAN NOT NULL DEFAULT false              |                                                                                                                                              |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW                     |                                                                                                                                              |
 
 **Index**: `notifications_user_read_idx (userId, read, createdAt)`.
 
 #### `email_verification_tokens` (Tier 6.5)
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `userId` | UUID NOT NULL → users(id) ON DELETE CASCADE | |
-| `tokenHash` | VARCHAR(64) UNIQUE NOT NULL | SHA-256 hex of the raw token. Raw value only exists in the email link |
-| `expiresAt` | TIMESTAMPTZ NOT NULL | 24h after issue |
-| `consumedAt` | TIMESTAMPTZ NULLABLE | Set on first successful verify. Single-use semantics |
-| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
+
+| Column       | Type                                        | Notes                                                                 |
+| ------------ | ------------------------------------------- | --------------------------------------------------------------------- |
+| `id`         | UUID PK                                     |                                                                       |
+| `userId`     | UUID NOT NULL → users(id) ON DELETE CASCADE |                                                                       |
+| `tokenHash`  | VARCHAR(64) UNIQUE NOT NULL                 | SHA-256 hex of the raw token. Raw value only exists in the email link |
+| `expiresAt`  | TIMESTAMPTZ NOT NULL                        | 24h after issue                                                       |
+| `consumedAt` | TIMESTAMPTZ NULLABLE                        | Set on first successful verify. Single-use semantics                  |
+| `createdAt`  | TIMESTAMPTZ NOT NULL DEFAULT NOW            |                                                                       |
 
 **Index**: `email_verification_tokens_user_idx (userId)`.
 
 #### `password_reset_tokens` (Tier 6.4)
+
 Same shape as `email_verification_tokens` — `id`, `userId` FK cascade, `tokenHash` unique, `expiresAt` (15-min), `consumedAt`, `createdAt`. Indexed by `userId`.
 
 #### `refresh_tokens` (Tier 6.8)
-| Column | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID PK | |
-| `userId` | UUID NOT NULL → users(id) ON DELETE CASCADE | |
-| `tokenHash` | VARCHAR(64) UNIQUE NOT NULL | SHA-256 hex of the raw refresh token (sent only via `sc_refresh` cookie) |
-| `expiresAt` | TIMESTAMPTZ NOT NULL | 30 days after issue |
-| `revokedAt` | TIMESTAMPTZ NULLABLE | Set by `/api/auth/refresh` rotation, `/api/auth/logout`, and `/api/auth/reset-password` (revokes all rows for the user) |
-| `userAgent` | TEXT NULLABLE | Truncated to 500 chars; informational only |
-| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW | |
+
+| Column      | Type                                        | Notes                                                                                                                   |
+| ----------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `id`        | UUID PK                                     |                                                                                                                         |
+| `userId`    | UUID NOT NULL → users(id) ON DELETE CASCADE |                                                                                                                         |
+| `tokenHash` | VARCHAR(64) UNIQUE NOT NULL                 | SHA-256 hex of the raw refresh token (sent only via `sc_refresh` cookie)                                                |
+| `expiresAt` | TIMESTAMPTZ NOT NULL                        | 30 days after issue                                                                                                     |
+| `revokedAt` | TIMESTAMPTZ NULLABLE                        | Set by `/api/auth/refresh` rotation, `/api/auth/logout`, and `/api/auth/reset-password` (revokes all rows for the user) |
+| `userAgent` | TEXT NULLABLE                               | Truncated to 500 chars; informational only                                                                              |
+| `createdAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW            |                                                                                                                         |
 
 **Indexes**: `refresh_tokens_user_idx (userId)`, partial `refresh_tokens_active_idx (userId) WHERE revokedAt IS NULL`.
 
 ### 7.5 Cascade Behavior Summary
 
-| Parent → Child | On parent delete |
-| --- | --- |
-| `games` → `picks` | App-level cleanup in `cascadeDeleteGame()` (single + bulk admin paths) |
-| `games` → `comments` | `ON DELETE CASCADE` at DB level **and** app-level cleanup in `cascadeDeleteGame()` (belt-and-braces) |
-| `comments` → `comment_reactions` | `ON DELETE CASCADE` at DB level + explicit `CommentReaction.destroy({where: {commentId}})` in `DELETE /api/comments/:id` |
-| `users` → `badges`, `notifications` | `ON DELETE CASCADE` at DB level |
+| Parent → Child                                                                                               | On parent delete                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `games` → `picks`                                                                                            | App-level cleanup in `cascadeDeleteGame()` (single + bulk admin paths)                                                                                             |
+| `games` → `comments`                                                                                         | `ON DELETE CASCADE` at DB level **and** app-level cleanup in `cascadeDeleteGame()` (belt-and-braces)                                                               |
+| `comments` → `comment_reactions`                                                                             | `ON DELETE CASCADE` at DB level + explicit `CommentReaction.destroy({where: {commentId}})` in `DELETE /api/comments/:id`                                           |
+| `users` → `badges`, `notifications`                                                                          | `ON DELETE CASCADE` at DB level                                                                                                                                    |
 | `users` → `picks`, `comments`, `friendships`, `group_members`, owned `groups`, `group_invites` (by username) | **App-level cleanup only** in `cascadeDeleteUser()` (single + bulk admin paths). The user-delete handler is the most complex deletion path in the system; see §8.9 |
-| `groups` → `group_members`, `group_invites` | App-level cleanup in `DELETE /api/groups/:groupId` (Tier 8) |
+| `groups` → `group_members`, `group_invites`                                                                  | App-level cleanup in `DELETE /api/groups/:groupId` (Tier 8)                                                                                                        |
 
 ---
 
@@ -956,6 +1020,7 @@ function scorePick(pick, game):
 ```
 
 **The formula is intentionally duplicated** in two places:
+
 - [server.js](server.js) — authoritative, used to compute leaderboards and the pre-result preview displayed inside notifications.
 - [src/utils/scoring.js](src/utils/scoring.js) — client-side, used by `GameCard` to render the outcome badge (`✓ Correct +N pts`) and by `PicksHistory` to display per-pick points.
 
@@ -984,6 +1049,7 @@ edited (user re-submits)  ──┘
 ```
 
 **Lock rules** (enforced in `POST /api/picks` and `DELETE /api/picks/:id`):
+
 - `game.date <= now` → 400 `Picks can only be created or changed for upcoming games` (POST) / `Picks can only be removed before kickoff` (DELETE)
 - `game.result !== null` → same error in both directions
 
@@ -993,18 +1059,18 @@ edited (user re-submits)  ──┘
 
 Three primitives: **Group**, **GroupMember**, **GroupInvite**.
 
-| Action | Endpoint | Effect |
-| --- | --- | --- |
-| Create | `POST /api/groups` | Inserts Group + GroupMember (creator). Fires `group-founder` badge eval. Body accepts `visibility: 'private' \| 'public'` (default private). |
-| Invite | `POST /api/groups/:groupId/invite` | Member-only. Stores `GroupInvite { groupId, username }`. Notifies invitee. |
-| Accept invite | `POST /api/groups/:groupId/invite/:inviteId/accept` | Username on JWT must match invite username. Inserts GroupMember, deletes the invite, notifies owner. |
-| Decline invite | `POST /api/groups/:groupId/invite/:inviteId/decline` | Just deletes the invite row. |
-| Discover | `GET /api/groups/discover` | Returns up to 20 public groups the caller is **not** in, with member counts. |
-| Join (public) | `POST /api/groups/:groupId/join` | Only succeeds if `visibility='public'`. Inserts GroupMember, notifies owner. |
-| Leave (Tier 8) | `POST /api/groups/:groupId/leave` | Removes caller from `group_members`. **400 if owner** — must transfer first. Notifies owner. |
-| Transfer (Tier 8) | `POST /api/groups/:groupId/transfer` | Owner-only. Body `{newOwnerId}`. Must be a current member. Updates `groups.ownerId`. Notifies new owner. |
-| Delete (Tier 8) | `DELETE /api/groups/:groupId` | Owner-only. Cascades members + invites, then destroys the group. Notifies all (former) non-owner members. |
-| Toggle visibility | `POST /api/groups/:groupId/visibility` | Owner-only. |
+| Action            | Endpoint                                             | Effect                                                                                                                                       |
+| ----------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create            | `POST /api/groups`                                   | Inserts Group + GroupMember (creator). Fires `group-founder` badge eval. Body accepts `visibility: 'private' \| 'public'` (default private). |
+| Invite            | `POST /api/groups/:groupId/invite`                   | Member-only. Stores `GroupInvite { groupId, username }`. Notifies invitee.                                                                   |
+| Accept invite     | `POST /api/groups/:groupId/invite/:inviteId/accept`  | Username on JWT must match invite username. Inserts GroupMember, deletes the invite, notifies owner.                                         |
+| Decline invite    | `POST /api/groups/:groupId/invite/:inviteId/decline` | Just deletes the invite row.                                                                                                                 |
+| Discover          | `GET /api/groups/discover`                           | Returns up to 20 public groups the caller is **not** in, with member counts.                                                                 |
+| Join (public)     | `POST /api/groups/:groupId/join`                     | Only succeeds if `visibility='public'`. Inserts GroupMember, notifies owner.                                                                 |
+| Leave (Tier 8)    | `POST /api/groups/:groupId/leave`                    | Removes caller from `group_members`. **400 if owner** — must transfer first. Notifies owner.                                                 |
+| Transfer (Tier 8) | `POST /api/groups/:groupId/transfer`                 | Owner-only. Body `{newOwnerId}`. Must be a current member. Updates `groups.ownerId`. Notifies new owner.                                     |
+| Delete (Tier 8)   | `DELETE /api/groups/:groupId`                        | Owner-only. Cascades members + invites, then destroys the group. Notifies all (former) non-owner members.                                    |
+| Toggle visibility | `POST /api/groups/:groupId/visibility`               | Owner-only.                                                                                                                                  |
 
 **Invite storage choice**: invites are keyed by username (string), not userId. This means renaming a user (not currently possible) would orphan their invites. Acceptable trade-off for now.
 
@@ -1013,10 +1079,12 @@ Three primitives: **Group**, **GroupMember**, **GroupInvite**.
 A friendship is **one row** representing an unordered pair `{requesterId, addresseeId}`. The `friendships_pair_unique` functional index ensures only one row can exist per pair regardless of direction.
 
 States:
+
 - `pending` → only the `addressee` can accept or decline; either party can cancel (DELETE).
 - `accepted` → either party can unfriend (DELETE).
 
 `GET /api/users/:username/profile` includes `friendStatus`:
+
 - `'self'` — viewer is the target
 - `'friends'` — accepted row exists
 - `'pending-out'` — viewer requested
@@ -1032,6 +1100,7 @@ Two collaborating pieces:
 **Catalog** — [badges/catalog.js](badges/catalog.js) is a flat array of `{slug, name, description, emoji}`. The frontend's `BadgeWall` renders one tile per catalog entry, gray-scaled if the user hasn't earned it. Adding a new badge means editing this file **and** adding an unlock condition.
 
 **Evaluator** — `evaluateBadges(userId, ctx)` in [server.js](server.js) reads the user's current picks + the games' results, computes:
+
 - total correct picks
 - count of correct picks where the chosen team had probability < 0.4 (upset wins)
 - whether `ctx.groupCreated` was set
@@ -1039,6 +1108,7 @@ Two collaborating pieces:
 …then calls `awardBadge(userId, slug)` for each newly-eligible badge. The DB's unique `(userId, slug)` constraint makes repeat calls idempotent: `awardBadge` catches the duplicate-insert error and returns `false`.
 
 **Trigger points** (must all call `evaluateBadges` after their primary action):
+
 - `POST /api/picks` — for first-pick.
 - `POST /api/games/:gameId/result` — for every user with a pick on this game (so first-win, correct-N, upset-specialist can land).
 - `POST /api/groups` — with `{ groupCreated: true }` for group-founder.
@@ -1064,16 +1134,19 @@ notify(userId, type, title, body=null, link=null)
 Per-game thread, rendered as a collapsible section at the bottom of every `GameCard`. Pulled lazily: the first open of a thread issues `GET /api/games/:gameId/comments` (newest first, capped at 50). New comments are appended optimistically to the local state.
 
 The `GET` endpoint enriches every comment row with the Tier 8 reaction summary:
+
 - `editedAt` — nullable; frontend shows `(edited)` next to the timestamp when set
 - `reactionCounts: {emoji: N}` — counts across all reactors
-- `yourReactions: [emoji...]` — the *caller's* reactions only, so the UI can highlight toggled buttons
+- `yourReactions: [emoji...]` — the _caller's_ reactions only, so the UI can highlight toggled buttons
 
 Authorization:
+
 - **Post**: any authenticated user.
 - **Edit** (Tier 8): author only via `PUT /api/comments/:id`. Sets `editedAt = NOW`.
 - **Delete**: author **or** any admin. The frontend hides the edit/delete buttons unless `comment.userId === currentUserId`, but the server is the actual gate. Cascades comment_reactions.
 
 **Reactions** (Tier 8): a fixed palette of 5 emojis — 👍 ❤️ 😂 😮 🔥 — defined as `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [CommentThread.jsx](src/components/CommentThread.jsx). The two arrays must stay in sync.
+
 - `POST /api/comments/:id/reactions` is idempotent: the unique `(commentId, userId, emoji)` constraint catches duplicate inserts and the handler returns 200.
 - `DELETE /api/comments/:id/reactions/:emoji` is a no-op when no such row exists (still returns 200).
 - The frontend [CommentThread.jsx](src/components/CommentThread.jsx) optimistically updates `reactionCounts` and `yourReactions` locally, then issues the request; on failure it calls `load()` to resync.
@@ -1081,6 +1154,7 @@ Authorization:
 ### 8.8 Profile Subsystem
 
 `GET /api/users/:username/profile` is one of the heavier endpoints. It composes:
+
 - The target user's basic fields (id, username, role, `displayName`, `bio`, joinedAt).
 - All of the target's picks, joined with games to compute `totalPoints, picksMade, picksWon, picksScored, winRate`.
 - A 10-row `recentPicks` array sorted by game date descending.
@@ -1096,6 +1170,7 @@ This endpoint is **not cached**. On a large dataset it would be a target for Tie
 **displayName precedence**: every surface that shows a username (leaderboard rows, profile header, head-to-head string, search results) prefers `displayName` when set, falling back to `username`. Avatars however **always** hash on `username` so renaming doesn't shuffle colors.
 
 Frontend rendering: two callers.
+
 - **Drawer**: any leaderboard row click (overall, group, sidebar) opens `<ProfileDrawer>` with the target's username. The drawer mounts `<ProfileView>` and shows a friend-action button driven by `friendStatus`. **Not editable**.
 - **Tab**: clicking the **Profile** tab opens a full-width `<ProfileView editable onSaveProfile>` for the current user (no drawer wrapper). The edit button reveals an inline form for `displayName` + `bio`. The `ownProfile` state is refetched whenever picks or games change (so newly-scored points appear immediately).
 
@@ -1104,6 +1179,7 @@ Frontend rendering: two callers.
 Eight endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in the UI is conditionally added to the tabs array only when `user.role === 'admin'`.
 
 **Game CRUD**:
+
 - `POST /api/admin/games` — body validated by `createGameSchema` including a `.refine()` that ensures `homeProbability + awayProbability` sums to 1.0 ±0.01.
 - `PUT /api/admin/games/:id` — `updateGameSchema` allows all fields optional; if **both** probabilities are sent they must sum to 1.0.
 - `DELETE /api/admin/games/:id` — uses `cascadeDeleteGame()` helper to delete picks and comments before destroying the game. Doesn't preserve point totals; affected leaderboards will reflect the deletion on the next computation.
@@ -1114,6 +1190,7 @@ Eight endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in t
 **Result-setting** is **not** under `/api/admin/*` — it's the original `POST /api/games/:gameId/result` from Tier 1 and remains there for backward compatibility. The Admin UI calls it for the per-row "Home won / Away won / Clear" buttons. Bulk uses the bulk endpoint instead.
 
 **User moderation**:
+
 - `GET /api/admin/users` — returns every user enriched with `picksCount` and `groupsCount` (in-memory aggregation over a single Pick + GroupMember fetch).
 - `POST /api/admin/users/:id/role` — body `{role}`. **Self-demote guard**: if `params.id === req.user.id && body.role !== 'admin'` → 400 `You cannot demote yourself`. Saves the user with `{hooks: false}` so the password isn't re-hashed.
 - `DELETE /api/admin/users/:id` — **self-delete guard** (400 same as above). Calls `cascadeDeleteUser()` which performs cascading cleanup in a specific order (because some FKs are `ON DELETE NO ACTION`):
@@ -1133,11 +1210,13 @@ Eight endpoints all gated by `authMiddleware + requireAdmin`. The Admin tab in t
 ### 8.10 Search Subsystem (Tier 8.4)
 
 `GET /api/search?q=&type=` is a single endpoint that returns up to 5 matches per type. Implementation in [server.js](server.js):
+
 - Minimum 2 characters; shorter queries short-circuit to empty arrays.
 - Uses Postgres `iLike '%term%'` for case-insensitive substring matches across `username`, `displayName`, group `name`, and game `homeTeam` / `awayTeam`.
 - Group results respect membership: returns groups where the caller is a member **or** the group is public. Private groups the caller isn't in are hidden.
 
 Frontend [SearchBar.jsx](src/components/SearchBar.jsx) lives in the dashboard header, debounces input by 250 ms, and renders a type-grouped dropdown:
+
 - **User result** → calls `openProfile(username)` which opens `<ProfileDrawer>`.
 - **Group result** → if member, switches to the Groups tab; if public non-member, calls the join handler and then switches tabs.
 - **Game result** → switches to the Games tab.
@@ -1147,9 +1226,10 @@ Click-outside + Esc close behaviour follows the same pattern as `<NotificationBe
 ### 8.11 Avatar Subsystem (Tier 8.3)
 
 `<Avatar username displayName size>` is a pure presentational component in [src/components/Avatar.jsx](src/components/Avatar.jsx). It:
+
 - Hashes the **lowercased username** via FNV-1a → a 360° hue.
 - Renders an inline `<span>` with `hsl(hue, 55%, 35%)` background, a slightly brighter border, and the username's first letter centered.
-- Uses `displayName` for the displayed *letter* when set; the **color is always derived from `username`** so renames don't shuffle the user's color identity.
+- Uses `displayName` for the displayed _letter_ when set; the **color is always derived from `username`** so renames don't shuffle the user's color identity.
 
 The component is mounted in many places: profile header (size 64), leaderboard rows (size 28), group member chips (size 22), comment author headers (size 20). It's stateless and adds nothing to network traffic — no avatar upload story (deliberately out of scope per the roadmap).
 
@@ -1176,6 +1256,7 @@ Frontend [GroupLeaderboardCard.jsx](src/components/GroupLeaderboardCard.jsx) ren
 ### 8.13 Bulk Admin Endpoints (Tier 8.9)
 
 Single-item and bulk admin paths share helpers — see §8.9. The bulk endpoints add:
+
 - **Idempotent self-skipping** (only on user bulk actions): the caller's own id is silently filtered before the loop and returned in `skipped`. Game bulk has no self-protection because games are not user-owned.
 - **Per-action loop**: there is no transaction wrapping the batch; a partial failure leaves earlier-affected rows committed and later rows untouched. The endpoint returns the affected list so the frontend can resync the table even on partial success.
 - **Set-result side effects**: the bulk-game `setResult` path runs the full notification + badge eval loop per game per pick, just like the single-game version. For a large batch on a popular fixture this can produce many notification rows; future Tier 7 work should consider batching/deduplication.
@@ -1185,37 +1266,39 @@ Single-item and bulk admin paths share helpers — see §8.9. The bulk endpoints
 [lib/leaderboardCache.js](lib/leaderboardCache.js) is a small in-process cache that sits in front of `buildUserSummary()` and `buildGroupLeaderboard()`. Three operations:
 
 ```js
-const value = await cache.getOrBuild(key, builder);   // serve from cache or rebuild + store
-cache.invalidate(key | 'all');                         // drop one key (or everything)
-cache.stats();                                         // { size, hits, misses, keys: [{key, ageMs, ttlRemainingMs}] }
+const value = await cache.getOrBuild(key, builder); // serve from cache or rebuild + store
+cache.invalidate(key | 'all'); // drop one key (or everything)
+cache.stats(); // { size, hits, misses, keys: [{key, ageMs, ttlRemainingMs}] }
 ```
 
 **Shape**: `Map<string, { value, expiresAt }>` with a 30 s TTL (matches the frontend notification poll cadence so cache misses are bounded). The cached value is the **unsorted full array** of rows — sort, slice, and `viewerRow` computation happen per request **on top of** the cached array, so one cache entry serves all `orderBy` / `offset` / `limit` combinations.
 
 **Keys**:
+
 - `'overall'` — the global leaderboard
 - `group:<groupId>` — per-group leaderboard
 
 **Invalidation policy** is conservative: most mutations call `cache.invalidate('all')` because picks affect the overall standings and may cross group boundaries. Group-scoped mutations (`/join`, `/leave`, accept-invite, group delete) invalidate only their `group:<id>` key.
 
-| Mutation endpoint | Invalidation |
-| --- | --- |
-| `POST /api/picks`, `DELETE /api/picks/:id` | `'all'` |
-| `POST /api/games/:gameId/result` | `'all'` |
-| `DELETE /api/admin/games/:id` | `'all'` |
-| `POST /api/admin/games/bulk` (any affected) | `'all'` |
-| `DELETE /api/admin/users/:id` | `'all'` |
-| `POST /api/admin/users/bulk` (delete only) | `'all'` |
+| Mutation endpoint                                   | Invalidation |
+| --------------------------------------------------- | ------------ |
+| `POST /api/picks`, `DELETE /api/picks/:id`          | `'all'`      |
+| `POST /api/games/:gameId/result`                    | `'all'`      |
+| `DELETE /api/admin/games/:id`                       | `'all'`      |
+| `POST /api/admin/games/bulk` (any affected)         | `'all'`      |
+| `DELETE /api/admin/users/:id`                       | `'all'`      |
+| `POST /api/admin/users/bulk` (delete only)          | `'all'`      |
 | `POST /api/groups/:groupId/invite/:inviteId/accept` | `group:<id>` |
-| `POST /api/groups/:groupId/join` | `group:<id>` |
-| `POST /api/groups/:groupId/leave` | `group:<id>` |
-| `DELETE /api/groups/:groupId` | `group:<id>` |
+| `POST /api/groups/:groupId/join`                    | `group:<id>` |
+| `POST /api/groups/:groupId/leave`                   | `group:<id>` |
+| `DELETE /api/groups/:groupId`                       | `group:<id>` |
 
 **Promote / demote** (admin role change) don't invalidate — the cached rows hold username + displayName + points, not role.
 
 **Observability**: `GET /api/admin/cache-stats` (admin-only) returns the live `stats()` snapshot. Useful for verifying invalidation during development.
 
 **Limits**:
+
 - **Single-process only**: the cache is process-local. A multi-instance deploy would see stale reads across replicas. Today the app is single-process so this is fine; a future move to Redis would be a small interface swap (the `lib/leaderboardCache.js` module already encapsulates the storage).
 - **No background refresh**: invalidation is purely mutation-driven; expired entries are rebuilt lazily on the next read.
 - **`viewerRow` is not cached** — it's per-caller, computed downstream of the cached array.
@@ -1438,12 +1521,14 @@ DELETE /api/admin/users/<bobId>
 ### 10.1 Error Handling
 
 **Server**:
+
 - Every route handler is wrapped in `try { ... } catch (error) { res.status(500).json({error: '...'}) }`. Catch blocks call `req.log.error({err}, 'handler error')` (Tier 5.4) and return a generic message; no stack trace leaks to the client. The structured log carries `reqId`, so a 500 returned to a user can be traced back to the exact handler invocation via the response's `X-Request-Id` header.
 - **zod validation errors** are 400 with the `issues` array (path + message).
 - **Specific business errors** (e.g. duplicate friend request) are 400 with a human-readable string.
 - **Sentry error middleware** (Tier 5.4b) is mounted via `sentry.setupExpressErrorHandler(app)` after all routes. It captures any error propagated via `next(err)` to Sentry — no-op when `SENTRY_DSN` is unset.
 
 **Frontend** (Tier 5.4b restructured this from "no error boundary" to a three-path strategy — see §6.7):
+
 1. **React render errors** → caught by [ErrorBoundary](src/components/ErrorBoundary.jsx) → fallback UI + report.
 2. **Window-level errors / unhandled rejections** → [clientErrorReporter](src/lib/clientErrorReporter.js) → POST `/api/client-errors` + custom DOM event → App.jsx shows a cyan toast.
 3. **Handled API errors** (anything `request()` throws) → caller's `.catch()` → `showStatus(error.message)`. The special `'Session expired'` error is not re-toasted (the session-expired handler already toasted).
@@ -1451,32 +1536,33 @@ DELETE /api/admin/users/<bobId>
 All three paths converge on the **server-side structured log** via `POST /api/client-errors`. Sentry sees paths 1 + 2 directly (its browser SDK installs its own `window.error` listener at `init`).
 
 **What users see** by failure type:
+
 - Render error → full-page fallback card (Reload / Try again buttons; raw error text only in dev builds).
-- Window/async error → 3.5 s cyan toast: *"Something went wrong — refresh if things look off."*
-- API error → contextual cyan toast with the server's `error` message (or *"Request failed"* fallback).
+- Window/async error → 3.5 s cyan toast: _"Something went wrong — refresh if things look off."_
+- API error → contextual cyan toast with the server's `error` message (or _"Request failed"_ fallback).
 
 ### 10.2 Security Posture (post-Tier 6)
 
-| Concern | Status |
-| --- | --- |
-| Password storage | bcrypt cost 10, enforced via model hooks |
-| Auth secret | JWT_SECRET required in prod; insecure dev fallback never reaches prod |
-| Session transport | **HttpOnly cookie auth** (Tier 6.8): `sc_access` (15-min JWT) + `sc_refresh` (30-day opaque, rotating, hashed in DB). Bearer-header path removed. XSS payloads can't lift either cookie |
-| Token storage in DB | SHA-256 hashes of high-entropy random tokens (refresh, verify-email, password-reset); bcrypt for low-entropy recovery codes |
-| Brute force | Per-route rate limits across login, register, comments, friend-requests, picks, forgot-password, client-errors (Tier 6.10); per-user lockout after 5 failed logins (Tier 6.6); generic 401 to avoid enumeration |
-| Input validation | zod on every body; no trust placed in client-side validation |
-| SQL injection | Sequelize parameterizes everything; raw SQL in migrations has no user input |
-| RBAC | `requireAdmin` middleware; admin endpoints under `/api/admin/*` plus the legacy `POST /api/games/:gameId/result` |
-| Self-protection | Admin cannot demote or delete self (server-side, not just UI) |
-| XSS | React's default escaping; no `dangerouslySetInnerHTML` anywhere. CSP `default-src 'self'` blocks inline `<script>` injection |
-| CSRF | **Double-submit cookie** (Tier 6.7): `sc_csrf` cookie + `X-CSRF-Token` header, `crypto.timingSafeEqual` compare. SameSite=Lax is the first wall; double-submit is belt-and-braces |
-| CORS | **Env allowlist** (Tier 6.1) via `CORS_ORIGINS`; server throws on boot in prod when empty |
-| Security headers | **helmet** (Tier 6.2) with CSP tuned for Vite+Tailwind+Sentry; HSTS; `X-Frame-Options: DENY`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff` |
-| Password reset | **Email-based** (Tier 6.4): 15-min single-use tokens, always-204 response shape (no enumeration). Reset additionally revokes all refresh tokens (force-logout-everywhere) |
-| Email verification | **Required at register** (Tier 6.5): 24h single-use tokens. `forgot-password` only sends to verified emails |
-| 2FA | **Opt-in TOTP** (Tier 6.9) via speakeasy. 10 single-use recovery codes (bcrypt-hashed). 5-min `sc_challenge` cookie between password-OK and code-OK |
-| Audit log | None — captured under Tier 4b in the roadmap |
-| Multi-device session listing | Not implemented today; `refresh_tokens.userAgent` is captured to support a future "active sessions" UI |
+| Concern                      | Status                                                                                                                                                                                                          |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Password storage             | bcrypt cost 10, enforced via model hooks                                                                                                                                                                        |
+| Auth secret                  | JWT_SECRET required in prod; insecure dev fallback never reaches prod                                                                                                                                           |
+| Session transport            | **HttpOnly cookie auth** (Tier 6.8): `sc_access` (15-min JWT) + `sc_refresh` (30-day opaque, rotating, hashed in DB). Bearer-header path removed. XSS payloads can't lift either cookie                         |
+| Token storage in DB          | SHA-256 hashes of high-entropy random tokens (refresh, verify-email, password-reset); bcrypt for low-entropy recovery codes                                                                                     |
+| Brute force                  | Per-route rate limits across login, register, comments, friend-requests, picks, forgot-password, client-errors (Tier 6.10); per-user lockout after 5 failed logins (Tier 6.6); generic 401 to avoid enumeration |
+| Input validation             | zod on every body; no trust placed in client-side validation                                                                                                                                                    |
+| SQL injection                | Sequelize parameterizes everything; raw SQL in migrations has no user input                                                                                                                                     |
+| RBAC                         | `requireAdmin` middleware; admin endpoints under `/api/admin/*` plus the legacy `POST /api/games/:gameId/result`                                                                                                |
+| Self-protection              | Admin cannot demote or delete self (server-side, not just UI)                                                                                                                                                   |
+| XSS                          | React's default escaping; no `dangerouslySetInnerHTML` anywhere. CSP `default-src 'self'` blocks inline `<script>` injection                                                                                    |
+| CSRF                         | **Double-submit cookie** (Tier 6.7): `sc_csrf` cookie + `X-CSRF-Token` header, `crypto.timingSafeEqual` compare. SameSite=Lax is the first wall; double-submit is belt-and-braces                               |
+| CORS                         | **Env allowlist** (Tier 6.1) via `CORS_ORIGINS`; server throws on boot in prod when empty                                                                                                                       |
+| Security headers             | **helmet** (Tier 6.2) with CSP tuned for Vite+Tailwind+Sentry; HSTS; `X-Frame-Options: DENY`; `Referrer-Policy: no-referrer`; `X-Content-Type-Options: nosniff`                                                 |
+| Password reset               | **Email-based** (Tier 6.4): 15-min single-use tokens, always-204 response shape (no enumeration). Reset additionally revokes all refresh tokens (force-logout-everywhere)                                       |
+| Email verification           | **Required at register** (Tier 6.5): 24h single-use tokens. `forgot-password` only sends to verified emails                                                                                                     |
+| 2FA                          | **Opt-in TOTP** (Tier 6.9) via speakeasy. 10 single-use recovery codes (bcrypt-hashed). 5-min `sc_challenge` cookie between password-OK and code-OK                                                             |
+| Audit log                    | None — captured under Tier 4b in the roadmap                                                                                                                                                                    |
+| Multi-device session listing | Not implemented today; `refresh_tokens.userAgent` is captured to support a future "active sessions" UI                                                                                                          |
 
 ### 10.3 Performance
 
@@ -1490,6 +1576,7 @@ All three paths converge on the **server-side structured log** via `POST /api/cl
 ### 10.4 Accessibility
 
 Established floor (Tier 2):
+
 - Every form input has a matching `<label htmlFor=...>` or `aria-label`.
 - All interactive elements have `focus-visible:ring-2 focus-visible:ring-cyan-400`.
 - Tabs use `aria-current="page"` for the active tab.
@@ -1498,6 +1585,7 @@ Established floor (Tier 2):
 - Modal dialogs use `role="dialog" aria-modal="true"` and Esc-to-close.
 
 Not yet:
+
 - No keyboard-only audit of the drawer/modal focus traps.
 - Skeleton loading states don't announce themselves to screen readers.
 - No WCAG color-contrast audit run formally.
@@ -1508,7 +1596,7 @@ Not yet:
 - **Request correlation**: [middleware/requestId.js](middleware/requestId.js) assigns `req.id` (UUID v4 or honored inbound `X-Request-Id`), echoes it back on the response, and attaches `req.log = logger.child({reqId})`. Every handler error log line carries the `reqId`, so a client error can be traced back to the exact request.
 - **Access log**: `pino-http` emits one structured line per request (`req`, `res`, `responseTime`). `customLogLevel` maps `>=500` to `error` and `>=400` to `warn`, so warn/error filters surface the bad requests automatically.
 - **Client-error pipeline (Tier 5.4b)**: see §6.7. Browser failures of any kind flow to `POST /api/client-errors`, get a `req.log.error` line on the server side, and (if `SENTRY_DSN`/`VITE_SENTRY_DSN` are set) also flow into Sentry. The browser sends along the most recent server-side `reqId` it observed via `X-Request-Id`, so each client error can be tied back to the exact server request that rendered the failing page.
-- **Sentry (Tier 5.4b)**: opt-in via env. When unset, both server and browser ship without Sentry overhead (server-side `lib/sentry.js` exports no-ops; client-side Vite tree-shakes the dynamic `@sentry/react` import). When set, server uses `@sentry/node` with OpenTelemetry instrumentation (initialized in [lib/instrument.js](lib/instrument.js) *before* Express is required); browser uses `@sentry/react` with its own window listeners + the ErrorBoundary's explicit `captureException` calls.
+- **Sentry (Tier 5.4b)**: opt-in via env. When unset, both server and browser ship without Sentry overhead (server-side `lib/sentry.js` exports no-ops; client-side Vite tree-shakes the dynamic `@sentry/react` import). When set, server uses `@sentry/node` with OpenTelemetry instrumentation (initialized in [lib/instrument.js](lib/instrument.js) _before_ Express is required); browser uses `@sentry/react` with its own window listeners + the ErrorBoundary's explicit `captureException` calls.
 - **Still missing**: no `/metrics` endpoint, no APM beyond Sentry, no log shipping to a managed log aggregator (CloudWatch / Application Insights / Loki). Captured under Tier 10 — Observability & scale in the forward roadmap.
 
 ---
@@ -1518,6 +1606,7 @@ Not yet:
 ### 11.1 Environment Variables
 
 See [.env.example](.env.example):
+
 - **`JWT_SECRET`** — must be set in production; generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. Server refuses to start in `NODE_ENV=production` without it.
 - **`CORS_ORIGINS`** — (Tier 6.1) comma-separated allowlist of origins permitted with `credentials: true`. **Required in production** — server throws on boot when empty. In dev, falls back to `origin: true`. Example: `CORS_ORIGINS=https://scorecast.com,https://www.scorecast.com`.
 - **`DATABASE_URL`** — Postgres connection string. Optional; defaults to `postgres://postgres:postgres@localhost/scorecast_db` (see [config/database.js](config/database.js)).
@@ -1553,6 +1642,7 @@ npm run dev
 ```
 
 On first boot, [data.json](data.json) is seeded into an empty `users` table. Seed users:
+
 - `vo123` / `password123` — admin
 - `alice` / `secret` — user
 - `bob` / `secret` — user
@@ -1609,24 +1699,24 @@ Standard Postgres tooling (`pg_dump`, `pg_restore`). No app-specific export. See
 
 ## 12. Known Limitations & Technical Debt
 
-| Area | Issue | Tier |
-| --- | --- | --- |
-| Tests | No automated tests at all (Playwright deferred from 5.5 because it needs Docker) | 5.5 / 9.4 |
-| External data | No football API integration; admin enters games manually | 4b (deferred) |
-| Live scores | No live score display; no auto-poll | 4b (deferred) |
-| Leagues / seasons | Single global game pool; no `league` / `season` fields | 4b (deferred) |
-| Pick types | Only winner picks; no spread / over-under / score prediction | 4b (deferred) |
-| Streaks | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits after 4b adds season ordering) | 4b |
-| Real-time | No WebSocket; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time | 7 |
-| Audit log | No record of admin actions (single or bulk) | 4b.6 |
-| Profile privacy | Every authenticated user can view every profile | 8.6 (parked) |
-| Notification spam | Bulk-setResult can produce many notifications in one request; no batching/dedup | 7 |
-| Cache scope | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so they survive a restart, but the rate-limit + lockout counters are in-memory. Today the app runs single-process so this is fine | Tier 10.4 (Redis backend) |
-| Server-side log shipping | pino → stdout only; no managed log aggregator (CloudWatch / Application Insights / Loki). Sentry covers errors but not access logs | Tier 10.6 |
-| Health / readiness probes | No `/healthz` or `/readyz` endpoint; load balancers / Container Apps probes have nothing to hit | Tier 10.1 |
-| Metrics | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters | Tier 10.3 |
-| Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset today | future |
-| Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code | future |
+| Area                         | Issue                                                                                                                                                                                                                                                                    | Tier                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| Tests                        | No automated tests at all (Playwright deferred from 5.5 because it needs Docker)                                                                                                                                                                                         | 5.5 / 9.4                 |
+| External data                | No football API integration; admin enters games manually                                                                                                                                                                                                                 | 4b (deferred)             |
+| Live scores                  | No live score display; no auto-poll                                                                                                                                                                                                                                      | 4b (deferred)             |
+| Leagues / seasons            | Single global game pool; no `league` / `season` fields                                                                                                                                                                                                                   | 4b (deferred)             |
+| Pick types                   | Only winner picks; no spread / over-under / score prediction                                                                                                                                                                                                             | 4b (deferred)             |
+| Streaks                      | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits after 4b adds season ordering)                                                                                                                                                             | 4b                        |
+| Real-time                    | No WebSocket; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time                                                                                                                                                     | 7                         |
+| Audit log                    | No record of admin actions (single or bulk)                                                                                                                                                                                                                              | 4b.6                      |
+| Profile privacy              | Every authenticated user can view every profile                                                                                                                                                                                                                          | 8.6 (parked)              |
+| Notification spam            | Bulk-setResult can produce many notifications in one request; no batching/dedup                                                                                                                                                                                          | 7                         |
+| Cache scope                  | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so they survive a restart, but the rate-limit + lockout counters are in-memory. Today the app runs single-process so this is fine | Tier 10.4 (Redis backend) |
+| Server-side log shipping     | pino → stdout only; no managed log aggregator (CloudWatch / Application Insights / Loki). Sentry covers errors but not access logs                                                                                                                                       | Tier 10.6                 |
+| Health / readiness probes    | No `/healthz` or `/readyz` endpoint; load balancers / Container Apps probes have nothing to hit                                                                                                                                                                          | Tier 10.1                 |
+| Metrics                      | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters                                                                                                                                                                        | Tier 10.3                 |
+| Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset today                                                   | future                    |
+| Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code                                                                                                                   | future                    |
 
 ---
 
@@ -1655,35 +1745,35 @@ Summary:
 
 ## 14. Glossary
 
-| Term | Meaning |
-| --- | --- |
-| **Pick** | A user's prediction `'home' \| 'away'` for a single game. Unique per `(userId, gameId)`. |
-| **Result** | The actual outcome of a game, set by an admin: `'home' \| 'away' \| null`. `null` means the game hasn't been resolved (or was unresolved). |
-| **Probability** | Implied win-chance for one team in `[0,1]`. Home + away must sum to 1.0 ±0.01. Drives the scoring formula. |
-| **Upset bonus** | Mechanic where picking the underdog (lower probability) pays more. Mathematically baked into `round((1 − probability) × 100)`. |
-| **Group** | A user-created pool of members with its own scoped leaderboard. May be `private` (invite-only) or `public` (joinable). |
-| **Invite** | A pending request, stored by username, that grants a user the right to accept membership in a group. |
-| **Friendship** | An unordered pair of users in `pending` or `accepted` state. One row per pair, enforced by a functional unique index. |
-| **Badge** | A milestone achievement awarded server-side. Defined in [badges/catalog.js](badges/catalog.js); awarded by `evaluateBadges()`. |
-| **Notification** | An in-app feed item created by the `notify()` helper. Polled every 30 s by `NotificationBell`. |
-| **Drawer** | The right-side overlay panel that shows another user's `ProfileView`. Opened by clicking any leaderboard row. |
-| **Tab** | The pseudo-routing primitive in `App.jsx`. Tabs are strings (`'games' | 'mypicks' | ...`) stored in the `view` state. |
-| **Sync** | (Tier 4, deferred) The act of pulling fixtures + results from an external football API. |
-| **Tier** | Roadmap grouping. Tiers 1–3, 4a, 5 (core), and 8 (minus 8.6) are shipped; Tiers 4b, 6, 7, 8.6, 9 remain. |
-| **Migration** | A versioned file under `migrations/` (Tier 5.1) that evolves the schema. Applied by sequelize-cli (`npm run db:migrate`) or by umzug on dev boot. Statements should be idempotent so they're safe against DBs that pre-existed the framework. |
-| **Cascade transaction** | (Tier 5.3) A `sequelize.transaction()` block wrapping a `cascadeDeleteUser/Game/Group()` call, so a mid-cascade failure rolls back every prior `destroy()` rather than leaving orphans. |
-| **Leaderboard cache key** | `'overall'` for the global block; `group:<groupId>` per group. Invalidated on every mutation that affects standings. See §8.14. |
-| **Request ID** | A UUID v4 assigned by [middleware/requestId.js](middleware/requestId.js) on every request, attached to `req.id`, echoed in the response's `X-Request-Id` header, and included in every log line produced by `req.log`. Honored inbound `X-Request-Id` headers (≤200 chars) are reused instead of generating a new one — useful for client-side correlation. |
-| **ErrorBoundary** | (Tier 5.4b) React class component in [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx) that wraps `<App />` in `main.jsx`. Catches *render-phase* errors below it via `componentDidCatch`, swaps in a slate/rose fallback card, and reports through `reportClientError` + Sentry `captureException`. Does **not** catch errors thrown from event handlers, async code, or `setTimeout` callbacks — those go through the window-level listeners in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js). |
-| **clientErrorReporter** | (Tier 5.4b) Module in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) that installs `window.error` and `unhandledrejection` listeners, throttles reports to 5 per 60 s, posts to `POST /api/client-errors`, and dispatches a `scorecast:client-error` DOM event for App.jsx to toast. Exports `reportClientError({...})` for explicit calls and `setLastRequestId(id)` to record the most recent server reqId observed via response headers. |
-| **`/api/client-errors`** | (Tier 5.4b) Public endpoint accepting `{message, stack?, componentStack?, url?, reqId?, userAgent?, level?}` (zod-validated, all string fields capped — stack at 8 KB). Soft-decodes the JWT to attach `userId` if present, else logs anonymously. Rate-limited 30/5 min per IP. Always returns 204. |
-| **`SENTRY_DSN` / `VITE_SENTRY_DSN`** | (Tier 5.4b) Opt-in env vars enabling server-side and browser-side Sentry capture respectively. Both are no-ops when unset (server exports stubs; Vite tree-shakes the dynamic `@sentry/react` import). `VITE_SENTRY_DSN` is read at Vite build time — change requires `npm run build`. |
-| **`sc_access` / `sc_refresh` / `sc_csrf` / `sc_challenge`** | (Tier 6.8 / 6.7 / 6.9) The four cookies that drive auth. `sc_access` is a 15-min HttpOnly access JWT (Path=/). `sc_refresh` is a 30-day HttpOnly opaque token (Path=/api/auth) whose SHA-256 hash is stored in `refresh_tokens`. `sc_csrf` is JS-readable 30-day random token used by the double-submit pattern. `sc_challenge` is a 5-min HttpOnly JWT issued between password-OK and 2FA-code-OK when the user has 2FA enabled. |
-| **Refresh-then-retry** | (Tier 6.8) The frontend `request()` helper's behavior on 401: try `POST /api/auth/refresh` once, then re-fetch the original. `/api/auth/*` paths are exempted from the retry to prevent recursion. This is what makes 15-min access tokens invisible to the user — they live 30 days from one login. |
-| **CSRF double-submit** | (Tier 6.7) Defence against cross-site request forgery. The frontend reads the (non-HttpOnly) `sc_csrf` cookie via `getCookie('sc_csrf')` and echoes it as the `X-CSRF-Token` header on every state-changing request. Server compares the two via `crypto.timingSafeEqual`. Relies on same-origin policy preventing cross-origin reads of the cookie. |
-| **EXEMPT_PATHS** | (Tier 6.7) The set in [middleware/csrf.js](middleware/csrf.js) listing routes that skip CSRF enforcement. Only **pre-auth or anonymous** mutation endpoints belong here (login, register, refresh, verify-email, forgot/reset, client-errors). Adding any **post-auth** endpoint to this set is a security mistake. |
-| **Token storage pattern** | (Tier 6) Single-use tokens (verify-email, password-reset, refresh) are 32 random bytes hex, SHA-256-hashed on insert (`tokenHash` column), and looked up via that hash's unique index. Raw values only exist in transit. Recovery codes are the exception (low entropy → bcrypt). |
-| **Account lockout** | (Tier 6.6) After 5 failed password attempts against a single user, `users.lockedUntil = NOW + 15min`. Subsequent attempts return a generic 401 regardless of password correctness. State clears on successful login or password reset. |
-| **TOTP challenge cookie** | (Tier 6.9) `sc_challenge` — a short-lived signed JWT (`{id, type: '2fa-pending'}`) issued by `POST /api/login` when the user has 2FA enabled. The next step in the flow, `POST /api/auth/2fa/verify`, reads this cookie + a TOTP code or recovery code, and only on success issues the real auth cookies. |
-| **Recovery code** | (Tier 6.9) A human-typable 10-character string (format `XXXXX-XXXXX`). 10 codes generated at 2FA setup, shown once, bcrypt-hashed (rounds 8) in `users.totpRecoveryCodes` JSONB. Single-use — consumed codes are spliced out of the array. |
-| **`lib/email.send()`** | (Tier 6.3) Pluggable transport wrapper. Loads Resend lazily when `RESEND_API_KEY` is set; otherwise emits structured `info`-level logs with the email payload (dev-log mode). **Never throws** — failures are logged and signaled by the returned `{delivered: false}` shape, so calling code can fire-and-forget. |
+| Term                                                        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------- |
+| **Pick**                                                    | A user's prediction `'home' \| 'away'` for a single game. Unique per `(userId, gameId)`.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Result**                                                  | The actual outcome of a game, set by an admin: `'home' \| 'away' \| null`. `null` means the game hasn't been resolved (or was unresolved).                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Probability**                                             | Implied win-chance for one team in `[0,1]`. Home + away must sum to 1.0 ±0.01. Drives the scoring formula.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Upset bonus**                                             | Mechanic where picking the underdog (lower probability) pays more. Mathematically baked into `round((1 − probability) × 100)`.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Group**                                                   | A user-created pool of members with its own scoped leaderboard. May be `private` (invite-only) or `public` (joinable).                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **Invite**                                                  | A pending request, stored by username, that grants a user the right to accept membership in a group.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Friendship**                                              | An unordered pair of users in `pending` or `accepted` state. One row per pair, enforced by a functional unique index.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Badge**                                                   | A milestone achievement awarded server-side. Defined in [badges/catalog.js](badges/catalog.js); awarded by `evaluateBadges()`.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Notification**                                            | An in-app feed item created by the `notify()` helper. Polled every 30 s by `NotificationBell`.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Drawer**                                                  | The right-side overlay panel that shows another user's `ProfileView`. Opened by clicking any leaderboard row.                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Tab**                                                     | The pseudo-routing primitive in `App.jsx`. Tabs are strings (`'games'                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 'mypicks' | ...`) stored in the `view` state. |
+| **Sync**                                                    | (Tier 4, deferred) The act of pulling fixtures + results from an external football API.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Tier**                                                    | Roadmap grouping. Tiers 1–3, 4a, 5 (core), and 8 (minus 8.6) are shipped; Tiers 4b, 6, 7, 8.6, 9 remain.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Migration**                                               | A versioned file under `migrations/` (Tier 5.1) that evolves the schema. Applied by sequelize-cli (`npm run db:migrate`) or by umzug on dev boot. Statements should be idempotent so they're safe against DBs that pre-existed the framework.                                                                                                                                                                                                                                                                                          |
+| **Cascade transaction**                                     | (Tier 5.3) A `sequelize.transaction()` block wrapping a `cascadeDeleteUser/Game/Group()` call, so a mid-cascade failure rolls back every prior `destroy()` rather than leaving orphans.                                                                                                                                                                                                                                                                                                                                                |
+| **Leaderboard cache key**                                   | `'overall'` for the global block; `group:<groupId>` per group. Invalidated on every mutation that affects standings. See §8.14.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Request ID**                                              | A UUID v4 assigned by [middleware/requestId.js](middleware/requestId.js) on every request, attached to `req.id`, echoed in the response's `X-Request-Id` header, and included in every log line produced by `req.log`. Honored inbound `X-Request-Id` headers (≤200 chars) are reused instead of generating a new one — useful for client-side correlation.                                                                                                                                                                            |
+| **ErrorBoundary**                                           | (Tier 5.4b) React class component in [src/components/ErrorBoundary.jsx](src/components/ErrorBoundary.jsx) that wraps `<App />` in `main.jsx`. Catches _render-phase_ errors below it via `componentDidCatch`, swaps in a slate/rose fallback card, and reports through `reportClientError` + Sentry `captureException`. Does **not** catch errors thrown from event handlers, async code, or `setTimeout` callbacks — those go through the window-level listeners in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js). |
+| **clientErrorReporter**                                     | (Tier 5.4b) Module in [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) that installs `window.error` and `unhandledrejection` listeners, throttles reports to 5 per 60 s, posts to `POST /api/client-errors`, and dispatches a `scorecast:client-error` DOM event for App.jsx to toast. Exports `reportClientError({...})` for explicit calls and `setLastRequestId(id)` to record the most recent server reqId observed via response headers.                                                                          |
+| **`/api/client-errors`**                                    | (Tier 5.4b) Public endpoint accepting `{message, stack?, componentStack?, url?, reqId?, userAgent?, level?}` (zod-validated, all string fields capped — stack at 8 KB). Soft-decodes the JWT to attach `userId` if present, else logs anonymously. Rate-limited 30/5 min per IP. Always returns 204.                                                                                                                                                                                                                                   |
+| **`SENTRY_DSN` / `VITE_SENTRY_DSN`**                        | (Tier 5.4b) Opt-in env vars enabling server-side and browser-side Sentry capture respectively. Both are no-ops when unset (server exports stubs; Vite tree-shakes the dynamic `@sentry/react` import). `VITE_SENTRY_DSN` is read at Vite build time — change requires `npm run build`.                                                                                                                                                                                                                                                 |
+| **`sc_access` / `sc_refresh` / `sc_csrf` / `sc_challenge`** | (Tier 6.8 / 6.7 / 6.9) The four cookies that drive auth. `sc_access` is a 15-min HttpOnly access JWT (Path=/). `sc_refresh` is a 30-day HttpOnly opaque token (Path=/api/auth) whose SHA-256 hash is stored in `refresh_tokens`. `sc_csrf` is JS-readable 30-day random token used by the double-submit pattern. `sc_challenge` is a 5-min HttpOnly JWT issued between password-OK and 2FA-code-OK when the user has 2FA enabled.                                                                                                      |
+| **Refresh-then-retry**                                      | (Tier 6.8) The frontend `request()` helper's behavior on 401: try `POST /api/auth/refresh` once, then re-fetch the original. `/api/auth/*` paths are exempted from the retry to prevent recursion. This is what makes 15-min access tokens invisible to the user — they live 30 days from one login.                                                                                                                                                                                                                                   |
+| **CSRF double-submit**                                      | (Tier 6.7) Defence against cross-site request forgery. The frontend reads the (non-HttpOnly) `sc_csrf` cookie via `getCookie('sc_csrf')` and echoes it as the `X-CSRF-Token` header on every state-changing request. Server compares the two via `crypto.timingSafeEqual`. Relies on same-origin policy preventing cross-origin reads of the cookie.                                                                                                                                                                                   |
+| **EXEMPT_PATHS**                                            | (Tier 6.7) The set in [middleware/csrf.js](middleware/csrf.js) listing routes that skip CSRF enforcement. Only **pre-auth or anonymous** mutation endpoints belong here (login, register, refresh, verify-email, forgot/reset, client-errors). Adding any **post-auth** endpoint to this set is a security mistake.                                                                                                                                                                                                                    |
+| **Token storage pattern**                                   | (Tier 6) Single-use tokens (verify-email, password-reset, refresh) are 32 random bytes hex, SHA-256-hashed on insert (`tokenHash` column), and looked up via that hash's unique index. Raw values only exist in transit. Recovery codes are the exception (low entropy → bcrypt).                                                                                                                                                                                                                                                      |
+| **Account lockout**                                         | (Tier 6.6) After 5 failed password attempts against a single user, `users.lockedUntil = NOW + 15min`. Subsequent attempts return a generic 401 regardless of password correctness. State clears on successful login or password reset.                                                                                                                                                                                                                                                                                                 |
+| **TOTP challenge cookie**                                   | (Tier 6.9) `sc_challenge` — a short-lived signed JWT (`{id, type: '2fa-pending'}`) issued by `POST /api/login` when the user has 2FA enabled. The next step in the flow, `POST /api/auth/2fa/verify`, reads this cookie + a TOTP code or recovery code, and only on success issues the real auth cookies.                                                                                                                                                                                                                              |
+| **Recovery code**                                           | (Tier 6.9) A human-typable 10-character string (format `XXXXX-XXXXX`). 10 codes generated at 2FA setup, shown once, bcrypt-hashed (rounds 8) in `users.totpRecoveryCodes` JSONB. Single-use — consumed codes are spliced out of the array.                                                                                                                                                                                                                                                                                             |
+| **`lib/email.send()`**                                      | (Tier 6.3) Pluggable transport wrapper. Loads Resend lazily when `RESEND_API_KEY` is set; otherwise emits structured `info`-level logs with the email payload (dev-log mode). **Never throws** — failures are logged and signaled by the returned `{delivered: false}` shape, so calling code can fire-and-forget.                                                                                                                                                                                                                     |

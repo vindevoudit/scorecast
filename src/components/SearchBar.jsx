@@ -59,12 +59,17 @@ function SearchBar({ request, onSelectUser, onSelectGroup, onSelectGame, onError
 
   return (
     <div ref={containerRef} className="relative">
-      <label htmlFor="search-input" className="sr-only">Search</label>
+      <label htmlFor="search-input" className="sr-only">
+        Search
+      </label>
       <input
         id="search-input"
         type="search"
         value={q}
-        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onChange={(e) => {
+          setQ(e.target.value);
+          setOpen(true);
+        }}
         onFocus={() => setOpen(true)}
         placeholder="Search users, groups, games…"
         className="h-12 w-48 rounded-3xl border border-slate-700 bg-slate-900/80 px-4 text-sm text-white outline-none transition duration-200 focus:w-64 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
@@ -86,7 +91,10 @@ function SearchBar({ request, onSelectUser, onSelectGroup, onSelectGame, onError
                       <li key={u.id}>
                         <button
                           type="button"
-                          onClick={() => { onSelectUser?.(u.username); close(); }}
+                          onClick={() => {
+                            onSelectUser?.(u.username);
+                            close();
+                          }}
                           className="block w-full truncate rounded-2xl px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           {u.displayName ? `${u.displayName} (@${u.username})` : u.username}
@@ -104,12 +112,16 @@ function SearchBar({ request, onSelectUser, onSelectGroup, onSelectGame, onError
                       <li key={g.id}>
                         <button
                           type="button"
-                          onClick={() => { onSelectGroup?.(g); close(); }}
+                          onClick={() => {
+                            onSelectGroup?.(g);
+                            close();
+                          }}
                           className="flex w-full items-center justify-between gap-2 rounded-2xl px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           <span className="truncate">{g.name}</span>
                           <span className="shrink-0 text-xs text-slate-500">
-                            {g.visibility === 'public' ? 'public' : 'private'}{g.isMember ? ' · joined' : ''}
+                            {g.visibility === 'public' ? 'public' : 'private'}
+                            {g.isMember ? ' · joined' : ''}
                           </span>
                         </button>
                       </li>
@@ -125,11 +137,16 @@ function SearchBar({ request, onSelectUser, onSelectGroup, onSelectGame, onError
                       <li key={g.id}>
                         <button
                           type="button"
-                          onClick={() => { onSelectGame?.(g); close(); }}
+                          onClick={() => {
+                            onSelectGame?.(g);
+                            close();
+                          }}
                           className="block w-full truncate rounded-2xl px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           {g.homeTeam} vs {g.awayTeam}
-                          <span className="ml-2 text-xs text-slate-500">· {formatGameDate(g.date)}</span>
+                          <span className="ml-2 text-xs text-slate-500">
+                            · {formatGameDate(g.date)}
+                          </span>
                         </button>
                       </li>
                     ))}

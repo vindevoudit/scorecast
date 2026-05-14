@@ -61,13 +61,15 @@ The current seeder set:
 2. Fill in `up` and `down`. Examples:
 
    **Add a column** (idempotent):
+
    ```js
    await queryInterface.sequelize.query(
-     `ALTER TABLE games ADD COLUMN IF NOT EXISTS "broadcaster" VARCHAR(80)`
+     `ALTER TABLE games ADD COLUMN IF NOT EXISTS "broadcaster" VARCHAR(80)`,
    );
    ```
 
    **Add an ENUM type** (idempotent, Postgres-only):
+
    ```js
    await queryInterface.sequelize.query(`
      DO $$ BEGIN
@@ -98,14 +100,14 @@ The current seeder set:
 
 These were extracted from the legacy `runMigrations()` body (now removed). Each is idempotent so it's a no-op against existing DBs that already ran the old boot-time migrations.
 
-| File | Effect |
-| --- | --- |
-| `20260513000001-add-user-role.js` | `users.role` ENUM + default `'user'` |
-| `20260513000002-pick-unique-index.js` | `picks_user_game_unique` on `(userId, gameId)` |
-| `20260513000003-group-visibility-enum.js` | `groups.visibility` ENUM `'private' \| 'public'` |
-| `20260513000004-friendship-pair-unique.js` | functional unique index on `LEAST/GREATEST(requesterId, addresseeId)` |
-| `20260513000005-user-displayname-bio.js` | `users.displayName VARCHAR(60)` + `users.bio TEXT` |
-| `20260513000006-comment-edited-at.js` | `comments.editedAt TIMESTAMPTZ` |
+| File                                        | Effect                                                                            |
+| ------------------------------------------- | --------------------------------------------------------------------------------- |
+| `20260513000001-add-user-role.js`           | `users.role` ENUM + default `'user'`                                              |
+| `20260513000002-pick-unique-index.js`       | `picks_user_game_unique` on `(userId, gameId)`                                    |
+| `20260513000003-group-visibility-enum.js`   | `groups.visibility` ENUM `'private' \| 'public'`                                  |
+| `20260513000004-friendship-pair-unique.js`  | functional unique index on `LEAST/GREATEST(requesterId, addresseeId)`             |
+| `20260513000005-user-displayname-bio.js`    | `users.displayName VARCHAR(60)` + `users.bio TEXT`                                |
+| `20260513000006-comment-edited-at.js`       | `comments.editedAt TIMESTAMPTZ`                                                   |
 | `20260513000007-comment-reactions-table.js` | `comment_reactions` table + unique `(commentId, userId, emoji)` + commentId index |
 
 ## Production deploy checklist

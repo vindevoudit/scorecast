@@ -105,9 +105,10 @@ function renderGames() {
     clone.querySelector('.game-result').textContent = game.result
       ? `Result: ${game.result === 'home' ? game.homeTeam : game.awayTeam} won`
       : upcoming
-      ? 'Status: upcoming'
-      : 'Status: closed';
-    clone.querySelector('.game-forecast').textContent = `Correct home pick: ${buildScoreEstimate(game.homeProbability)} · correct away pick: ${buildScoreEstimate(game.awayProbability)}`;
+        ? 'Status: upcoming'
+        : 'Status: closed';
+    clone.querySelector('.game-forecast').textContent =
+      `Correct home pick: ${buildScoreEstimate(game.homeProbability)} · correct away pick: ${buildScoreEstimate(game.awayProbability)}`;
 
     const homeButton = clone.querySelector('.home-pick');
     const awayButton = clone.querySelector('.away-pick');
@@ -133,7 +134,8 @@ function renderGames() {
 function renderGroups() {
   groupsContainer.innerHTML = '';
   if (state.groups.length === 0) {
-    groupsContainer.innerHTML = '<p class="card">You have no groups yet. Create one to start inviting friends.</p>';
+    groupsContainer.innerHTML =
+      '<p class="card">You have no groups yet. Create one to start inviting friends.</p>';
     return;
   }
 

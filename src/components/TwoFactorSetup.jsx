@@ -69,9 +69,13 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
     <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Two-factor authentication</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+            Two-factor authentication
+          </h3>
           <p className="mt-1 text-sm text-slate-300">
-            {enabled ? 'Enabled — codes from your authenticator are required at sign-in.' : 'Add an authenticator code on top of your password.'}
+            {enabled
+              ? 'Enabled — codes from your authenticator are required at sign-in.'
+              : 'Add an authenticator code on top of your password.'}
           </p>
         </div>
         {mode === 'idle' && !enabled && (
@@ -87,7 +91,10 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
         {mode === 'idle' && enabled && (
           <button
             type="button"
-            onClick={() => { setMode('disable'); setErr(''); }}
+            onClick={() => {
+              setMode('disable');
+              setErr('');
+            }}
             disabled={busy}
             className="rounded-2xl border border-rose-700/50 bg-slate-900 px-4 py-2 text-sm font-semibold text-rose-200 hover:border-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
           >
@@ -107,14 +114,19 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
             <div className="min-w-0 space-y-2 text-sm text-slate-300">
               <p>Scan with Google Authenticator, 1Password, Authy, or any TOTP app.</p>
               <p className="break-all text-xs text-slate-400">
-                Or enter this secret manually: <span className="font-mono text-slate-200">{setupData.secret}</span>
+                Or enter this secret manually:{' '}
+                <span className="font-mono text-slate-200">{setupData.secret}</span>
               </p>
             </div>
           </div>
           <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-amber-300">Recovery codes — shown only once</p>
+            <p className="text-xs uppercase tracking-[0.25em] text-amber-300">
+              Recovery codes — shown only once
+            </p>
             <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm text-amber-100">
-              {setupData.recoveryCodes.map((c) => (<li key={c}>{c}</li>))}
+              {setupData.recoveryCodes.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
             </ul>
             <button
               type="button"
@@ -182,7 +194,10 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
           )}
           <button
             type="button"
-            onClick={() => { setUseRecovery((v) => !v); setErr(''); }}
+            onClick={() => {
+              setUseRecovery((v) => !v);
+              setErr('');
+            }}
             className="text-sm text-cyan-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             {useRecovery ? 'Use authenticator code instead' : 'Use a recovery code instead'}

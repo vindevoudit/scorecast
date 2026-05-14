@@ -20,10 +20,15 @@ function TwoFactorChallenge({ onSubmit, onCancel, busy }) {
   return (
     <div className="mx-auto max-w-lg rounded-3xl border border-slate-800 bg-slate-900/85 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
       <h2 className="text-2xl font-semibold text-white">Two-factor authentication</h2>
-      <p className="mt-2 text-slate-400">Enter the 6-digit code from your authenticator app to finish signing in.</p>
+      <p className="mt-2 text-slate-400">
+        Enter the 6-digit code from your authenticator app to finish signing in.
+      </p>
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         {useRecovery ? (
-          <label htmlFor="challenge-recovery" className="block text-sm font-semibold text-slate-300">
+          <label
+            htmlFor="challenge-recovery"
+            className="block text-sm font-semibold text-slate-300"
+          >
             Recovery code
             <input
               id="challenge-recovery"
@@ -62,7 +67,10 @@ function TwoFactorChallenge({ onSubmit, onCancel, busy }) {
       <div className="mt-4 flex justify-between gap-3 text-sm">
         <button
           type="button"
-          onClick={() => { setUseRecovery((v) => !v); setErr(''); }}
+          onClick={() => {
+            setUseRecovery((v) => !v);
+            setErr('');
+          }}
           className="text-cyan-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
         >
           {useRecovery ? 'Use authenticator code instead' : 'Use a recovery code instead'}

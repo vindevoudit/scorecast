@@ -16,7 +16,7 @@ module.exports = {
     const seedRoleByUsername = new Map(seed.users.map((u) => [u.username, u.role || 'user']));
 
     const [users] = await queryInterface.sequelize.query(
-      `SELECT id, username, password, role FROM users`
+      `SELECT id, username, password, role FROM users`,
     );
 
     for (const user of users) {
@@ -43,7 +43,7 @@ module.exports = {
         }
         await queryInterface.sequelize.query(
           `UPDATE users SET ${setParts.join(', ')} WHERE id = :id`,
-          { replacements }
+          { replacements },
         );
       }
     }

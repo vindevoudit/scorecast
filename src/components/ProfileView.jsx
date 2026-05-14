@@ -17,15 +17,30 @@ function recentPickStatus(pick) {
 
 function friendButtonProps(friendStatus) {
   switch (friendStatus) {
-    case 'none': return { label: 'Add friend', action: 'request' };
-    case 'pending-out': return { label: 'Cancel request', action: 'cancel' };
-    case 'pending-in': return { label: 'Accept request', action: 'accept' };
-    case 'friends': return { label: 'Unfriend', action: 'unfriend' };
-    default: return null;
+    case 'none':
+      return { label: 'Add friend', action: 'request' };
+    case 'pending-out':
+      return { label: 'Cancel request', action: 'cancel' };
+    case 'pending-in':
+      return { label: 'Accept request', action: 'accept' };
+    case 'friends':
+      return { label: 'Unfriend', action: 'unfriend' };
+    default:
+      return null;
   }
 }
 
-function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, twoFactorEnabled, on2faSetup, on2faConfirm, on2faDisable }) {
+function ProfileView({
+  profile,
+  onFriendAction,
+  onSaveProfile,
+  busy,
+  editable,
+  twoFactorEnabled,
+  on2faSetup,
+  on2faConfirm,
+  on2faDisable,
+}) {
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
   const [bio, setBio] = useState(profile?.bio || '');
@@ -67,7 +82,9 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, t
             )}
             <p className="mt-1 text-sm text-slate-400">
               {profile.role === 'admin' && (
-                <span className="mr-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">Admin</span>
+                <span className="mr-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">
+                  Admin
+                </span>
               )}
               Joined {formatDate(profile.joinedAt)}
             </p>
@@ -118,7 +135,9 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, t
               placeholder="Tell people who you are…"
               className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
-            <span className="mt-1 block text-right text-xs text-slate-500 tabular-nums">{bio.length} / 280</span>
+            <span className="mt-1 block text-right text-xs tabular-nums text-slate-500">
+              {bio.length} / 280
+            </span>
           </label>
           <div className="flex gap-2">
             <button
@@ -139,26 +158,30 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, t
         </form>
       ) : (
         profile.bio && (
-          <p className="whitespace-pre-wrap rounded-3xl bg-slate-950/70 p-4 text-sm text-slate-200">{profile.bio}</p>
+          <p className="whitespace-pre-wrap rounded-3xl bg-slate-950/70 p-4 text-sm text-slate-200">
+            {profile.bio}
+          </p>
         )
       )}
 
       <div className="grid gap-3 sm:grid-cols-4">
         <div className="rounded-3xl bg-slate-950/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Total points</p>
-          <p className="mt-2 text-2xl font-semibold text-white tabular-nums">{profile.totalPoints}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">
+            {profile.totalPoints}
+          </p>
         </div>
         <div className="rounded-3xl bg-slate-950/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Picks made</p>
-          <p className="mt-2 text-2xl font-semibold text-white tabular-nums">{profile.picksMade}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{profile.picksMade}</p>
         </div>
         <div className="rounded-3xl bg-slate-950/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Picks won</p>
-          <p className="mt-2 text-2xl font-semibold text-white tabular-nums">{profile.picksWon}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{profile.picksWon}</p>
         </div>
         <div className="rounded-3xl bg-slate-950/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Win rate</p>
-          <p className="mt-2 text-2xl font-semibold text-white tabular-nums">{winRatePct}%</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{winRatePct}%</p>
         </div>
       </div>
 
@@ -166,8 +189,10 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, t
         <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Head-to-head</p>
           <p className="mt-2 text-sm text-slate-200">
-            You {profile.headToHead.viewerWins} — {profile.headToHead.targetWins} {profile.displayName || profile.username}
-            {profile.headToHead.ties > 0 && ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`}
+            You {profile.headToHead.viewerWins} — {profile.headToHead.targetWins}{' '}
+            {profile.displayName || profile.username}
+            {profile.headToHead.ties > 0 &&
+              ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`}
           </p>
         </div>
       )}
@@ -190,7 +215,9 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, t
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Recent picks</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+          Recent picks
+        </h3>
         <div className="mt-3 space-y-2">
           {profile.recentPicks.length === 0 ? (
             <p className="text-sm text-slate-500">No picks yet.</p>
@@ -199,14 +226,21 @@ function ProfileView({ profile, onFriendAction, onSaveProfile, busy, editable, t
               const status = recentPickStatus(pick);
               const team = pick.choice === 'home' ? pick.homeTeam : pick.awayTeam;
               return (
-                <div key={pick.gameId} className="flex items-center justify-between gap-3 rounded-2xl bg-slate-950/70 px-4 py-3">
+                <div
+                  key={pick.gameId}
+                  className="flex items-center justify-between gap-3 rounded-2xl bg-slate-950/70 px-4 py-3"
+                >
                   <div className="min-w-0">
                     <p className="truncate text-sm text-slate-200">
                       {pick.homeTeam} <span className="text-slate-500">vs</span> {pick.awayTeam}
                     </p>
-                    <p className="text-xs text-slate-500">Picked {team} · {formatDate(pick.date)}</p>
+                    <p className="text-xs text-slate-500">
+                      Picked {team} · {formatDate(pick.date)}
+                    </p>
                   </div>
-                  <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${status.cls}`}>
+                  <span
+                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${status.cls}`}
+                  >
                     {status.label}
                   </span>
                 </div>

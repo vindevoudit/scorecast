@@ -12,9 +12,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
   const [transferring, setTransferring] = useState(false);
   const [transferTarget, setTransferTarget] = useState('');
 
-  const transferCandidates = group.members.filter(
-    (m) => (m.userId || m) !== group.ownerId
-  );
+  const transferCandidates = group.members.filter((m) => (m.userId || m) !== group.ownerId);
 
   const handleConfirmLeave = () => {
     setConfirmingLeave(false);
@@ -39,14 +37,18 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h2 className="truncate text-xl font-semibold text-white">{group.name}</h2>
-          <p className="text-sm text-slate-400">{group.members.length} member{group.members.length === 1 ? '' : 's'}</p>
+          <p className="text-sm text-slate-400">
+            {group.members.length} member{group.members.length === 1 ? '' : 's'}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest ${
-            group.visibility === 'public'
-              ? 'bg-emerald-500/15 text-emerald-300'
-              : 'bg-slate-700/60 text-slate-300'
-          }`}>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest ${
+              group.visibility === 'public'
+                ? 'bg-emerald-500/15 text-emerald-300'
+                : 'bg-slate-700/60 text-slate-300'
+            }`}
+          >
             {group.visibility === 'public' ? 'Public' : 'Private'}
           </span>
           {isOwner && (
@@ -62,14 +64,21 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
           <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Members</p>
           <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
             {group.members.map((member) => {
-              const userId = (member && typeof member === 'object' ? member.userId : member) || member;
-              const username = (member && typeof member === 'object' ? member.username : member) || member;
+              const userId =
+                (member && typeof member === 'object' ? member.userId : member) || member;
+              const username =
+                (member && typeof member === 'object' ? member.username : member) || member;
               return (
-                <span key={userId} className="flex min-w-0 items-center gap-2 rounded-2xl bg-slate-900/80 px-3 py-2">
+                <span
+                  key={userId}
+                  className="flex min-w-0 items-center gap-2 rounded-2xl bg-slate-900/80 px-3 py-2"
+                >
                   <Avatar username={username} size={22} />
                   <span className="min-w-0 truncate">{username}</span>
                   {userId === group.ownerId && (
-                    <span className="ml-auto text-[10px] uppercase tracking-widest text-cyan-300">owner</span>
+                    <span className="ml-auto text-[10px] uppercase tracking-widest text-cyan-300">
+                      owner
+                    </span>
                   )}
                 </span>
               );
@@ -112,8 +121,14 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
         )}
 
         {transferring && (
-          <form onSubmit={handleSubmitTransfer} className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 p-3 sm:flex-row sm:items-center">
-            <label htmlFor={`transfer-${group.id}`} className="text-xs uppercase tracking-[0.25em] text-slate-400">
+          <form
+            onSubmit={handleSubmitTransfer}
+            className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 p-3 sm:flex-row sm:items-center"
+          >
+            <label
+              htmlFor={`transfer-${group.id}`}
+              className="text-xs uppercase tracking-[0.25em] text-slate-400"
+            >
               Transfer to
             </label>
             <select
@@ -128,7 +143,9 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
                 const userId = (m && typeof m === 'object' ? m.userId : m) || m;
                 const username = (m && typeof m === 'object' ? m.username : m) || m;
                 return (
-                  <option key={userId} value={userId}>{username}</option>
+                  <option key={userId} value={userId}>
+                    {username}
+                  </option>
                 );
               })}
             </select>

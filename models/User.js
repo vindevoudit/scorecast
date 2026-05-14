@@ -10,79 +10,83 @@ async function hashPasswordIfNeeded(user) {
 }
 
 module.exports = (sequelize) => {
-  const User = sequelize.define('User', {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-    username: {
-      type: DataTypes.STRING,
-      unique: true,
-      allowNull: false,
-    },
-    email: {
-      type: DataTypes.STRING(254),
-      allowNull: true,
-      validate: {
-        isEmail: true,
+  const User = sequelize.define(
+    'User',
+    {
+      id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true,
+      },
+      username: {
+        type: DataTypes.STRING,
+        unique: true,
+        allowNull: false,
+      },
+      email: {
+        type: DataTypes.STRING(254),
+        allowNull: true,
+        validate: {
+          isEmail: true,
+        },
+      },
+      emailVerifiedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      password: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      role: {
+        type: DataTypes.ENUM('user', 'admin'),
+        allowNull: false,
+        defaultValue: 'user',
+      },
+      displayName: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      bio: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      loginAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
+      lockedUntil: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      totpSecret: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      totpEnabledAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      totpRecoveryCodes: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
       },
     },
-    emailVerifiedAt: {
-      type: DataTypes.DATE,
-      allowNull: true,
+    {
+      tableName: 'users',
+      timestamps: false,
+      hooks: {
+        beforeCreate: hashPasswordIfNeeded,
+        beforeUpdate: hashPasswordIfNeeded,
+      },
     },
-    password: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    role: {
-      type: DataTypes.ENUM('user', 'admin'),
-      allowNull: false,
-      defaultValue: 'user',
-    },
-    displayName: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-    bio: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    loginAttempts: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 0,
-    },
-    lockedUntil: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-    totpSecret: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    totpEnabledAt: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
-    totpRecoveryCodes: {
-      type: DataTypes.JSONB,
-      allowNull: true,
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-    },
-  }, {
-    tableName: 'users',
-    timestamps: false,
-    hooks: {
-      beforeCreate: hashPasswordIfNeeded,
-      beforeUpdate: hashPasswordIfNeeded,
-    },
-  });
+  );
 
   return User;
 };

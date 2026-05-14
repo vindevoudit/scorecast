@@ -4,14 +4,14 @@ Full-stack football prediction web app. React 18 + Vite frontend, Node/Express b
 
 ## Where to find more
 
-| Doc | Use for |
-| --- | --- |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Full architecture — repo layout (§4), backend internals (§5), database schema (§7), domain subsystems (§8), data flows (§9), operational notes (§11), known limits (§12). Read before any non-trivial change. |
-| [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) | How to add a database migration. |
-| [MIGRATIONS_PRIMER.md](MIGRATIONS_PRIMER.md) | Plain-language explainer of the migrations framework. |
-| [DATABASE_SETUP.md](DATABASE_SETUP.md) | Local Postgres install + setup. |
-| [README.md](README.md) | Feature overview, demo users, npm scripts. |
-| Forward roadmap | `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` — Tiers 4b, 7, 8.6, 9 (Tiers 5, 5.4b, 6 shipped). |
+| Doc                                          | Use for                                                                                                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ARCHITECTURE.md](ARCHITECTURE.md)           | Full architecture — repo layout (§4), backend internals (§5), database schema (§7), domain subsystems (§8), data flows (§9), operational notes (§11), known limits (§12). Read before any non-trivial change. |
+| [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)     | How to add a database migration.                                                                                                                                                                              |
+| [MIGRATIONS_PRIMER.md](MIGRATIONS_PRIMER.md) | Plain-language explainer of the migrations framework.                                                                                                                                                         |
+| [DATABASE_SETUP.md](DATABASE_SETUP.md)       | Local Postgres install + setup.                                                                                                                                                                               |
+| [README.md](README.md)                       | Feature overview, demo users, npm scripts.                                                                                                                                                                    |
+| Forward roadmap                              | `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md` — Tiers 4b, 7, 8.6, 9 (Tiers 5, 5.4b, 6 shipped).                                                                                       |
 
 ## Tech stack at a glance
 
@@ -70,10 +70,10 @@ Every item below is a load-bearing invariant or gotcha that **isn't obvious from
 
 - **Scoring formula is duplicated**: [server.js](server.js) (`scorePick`, authoritative — used for leaderboard) and [src/utils/scoring.js](src/utils/scoring.js) (client-side preview). Must stay in sync in the same commit.
 - **Badge + notification side effects**: any code path that sets a result, creates a pick, creates a group, or accepts an invite must call `evaluateBadges()` and `notify()` from [server.js](server.js). Existing wires: `POST /api/picks`, `POST /api/games/:gameId/result`, `POST /api/groups`, invite-accept, friend-request/accept, public-group-join.
-- **Route ordering**: `/api/groups/discover` is registered *before* `/api/groups/:groupId` so Express doesn't treat `discover` as a path param. Same convention for any new `/api/groups/<literal>` route.
+- **Route ordering**: `/api/groups/discover` is registered _before_ `/api/groups/:groupId` so Express doesn't treat `discover` as a path param. Same convention for any new `/api/groups/<literal>` route.
 - **Reaction emoji palette is fixed**: 👍 ❤️ 😂 😮 🔥 — defined as `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [src/components/CommentThread.jsx](src/components/CommentThread.jsx). Adding an emoji requires editing both.
 - **`pickMap` shape**: in [App.jsx](src/App.jsx) it stores full pick objects keyed by `gameId` (not just `choice`), so GameCard can pass `existingPickId` to the undo handler. Audit [GameCard.jsx](src/components/GameCard.jsx) (`existingChoice` / `existingPickId`) if you change the shape.
-- **Avatars are deterministic**: [Avatar.jsx](src/components/Avatar.jsx) hashes the *lowercased username* via FNV-1a → HSL. `displayName` never affects color — so renaming doesn't shuffle existing users' avatars.
+- **Avatars are deterministic**: [Avatar.jsx](src/components/Avatar.jsx) hashes the _lowercased username_ via FNV-1a → HSL. `displayName` never affects color — so renaming doesn't shuffle existing users' avatars.
 - **Bulk admin self-skip**: the bulk-user endpoints filter the caller's own id and return it in `skipped: [{id, reason: 'self'}]` rather than erroring the whole batch.
 - **`save({hooks: false})`** is intentional in the role-update endpoint, `PUT /api/me`, the bcrypt backfill seeder, and bulk role flips — without it, the `beforeUpdate` hook would re-hash an already-hashed password.
 - **Migrations framework (Tier 5.1)**: **never** add raw DDL to `runMigrations()` — it's a thin umzug shim. Add a new file under [migrations/](migrations/) via `npx sequelize-cli migration:generate --name foo` and use `IF NOT EXISTS` guards. `migrations/` and `seeders/` are versioned source code — always commit them. See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md).
@@ -87,7 +87,7 @@ Every item below is a load-bearing invariant or gotcha that **isn't obvious from
 - **Account lockout (Tier 6.6)**: 5 failed logins → 15-min lock (`users.lockedUntil`). Counter resets on success. Response is identical 401 "Invalid credentials" for wrong-pw / unknown-user / locked — no enumeration. Lockout state is also **cleared on password reset**.
 - **Token storage pattern (Tier 6.4/6.5/6.8)**: high-entropy tokens (verify-email, password-reset, refresh) are stored as **SHA-256 hashes** indexed by `tokenHash` — O(1) lookup, no bcrypt. The raw token only exists in transit (email URL or cookie value). **Recovery codes are different** — they're human-readable (low entropy) so they're **bcrypt-hashed** at rounds 8, looped through on verify. Don't mix the two patterns.
 - **Email service (Tier 6.3)**: [lib/email.js](lib/email.js) `send({to, subject, html, text})` **never throws** — a failed transport must not break registration or password reset. When `RESEND_API_KEY` is unset, it logs the payload to stdout in dev (handy for grabbing verify/reset links from server logs). Wire new outbound emails through this module, not raw transport calls.
-- **2FA (Tier 6.9)**: opt-in TOTP via `speakeasy` + `qrcode`. **Setup is two-step**: `POST /api/me/2fa/setup` stores an *unconfirmed* `totpSecret` + 10 bcrypt-hashed recovery codes, returns raw codes ONCE. User must then `POST /api/me/2fa/confirm` with a valid code to set `totpEnabledAt`. Login with `totpEnabledAt` set issues `sc_challenge` cookie (HttpOnly, 5-min JWT, Path=/api/auth) and returns `{challenge: true}` **instead** of auth cookies — auth cookies are only issued by `POST /api/auth/2fa/verify` after a valid code or recovery code. Used recovery codes are **spliced out** of the array; no regenerate-without-disable endpoint.
+- **2FA (Tier 6.9)**: opt-in TOTP via `speakeasy` + `qrcode`. **Setup is two-step**: `POST /api/me/2fa/setup` stores an _unconfirmed_ `totpSecret` + 10 bcrypt-hashed recovery codes, returns raw codes ONCE. User must then `POST /api/me/2fa/confirm` with a valid code to set `totpEnabledAt`. Login with `totpEnabledAt` set issues `sc_challenge` cookie (HttpOnly, 5-min JWT, Path=/api/auth) and returns `{challenge: true}` **instead** of auth cookies — auth cookies are only issued by `POST /api/auth/2fa/verify` after a valid code or recovery code. Used recovery codes are **spliced out** of the array; no regenerate-without-disable endpoint.
 - **Password reset cascading (Tier 6.4 + 6.8)**: `POST /api/auth/reset-password` does three things atomically — updates the password (Sequelize `beforeUpdate` re-hashes), clears lockout state, and revokes **all** refresh tokens for the user (`revokeAllUserRefreshTokens`). Any new "force-logout-everywhere" trigger should reuse that helper.
 
 ---

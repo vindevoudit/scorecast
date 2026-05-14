@@ -4,9 +4,7 @@
       "id": "550e8400-e29b-41d4-a716-446655440001",
       "username": "alice",
       "password": "secret",
-      "joinedGroups": [
-        "550e8400-e29b-41d4-a716-446655440002"
-      ],
+      "joinedGroups": ["550e8400-e29b-41d4-a716-446655440002"],
       "createdAt": "2026-05-09T00:00:00.000Z"
     },
     {
@@ -21,9 +19,7 @@
       "username": "vo123",
       "password": "password123",
       "role": "admin",
-      "joinedGroups": [
-        "be901144-0c4d-48af-834c-d8ddf23c65b5"
-      ],
+      "joinedGroups": ["be901144-0c4d-48af-834c-d8ddf23c65b5"],
       "createdAt": "2026-05-09T22:47:32.914Z"
     }
   ],
@@ -32,9 +28,7 @@
       "id": "550e8400-e29b-41d4-a716-446655440002",
       "name": "Premier Picks",
       "ownerId": "550e8400-e29b-41d4-a716-446655440001",
-      "members": [
-        "550e8400-e29b-41d4-a716-446655440001"
-      ],
+      "members": ["550e8400-e29b-41d4-a716-446655440001"],
       "invites": [],
       "createdAt": "2026-05-09T00:00:00.000Z"
     },
@@ -42,9 +36,7 @@
       "id": "be901144-0c4d-48af-834c-d8ddf23c65b5",
       "name": "lettuce",
       "ownerId": "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2",
-      "members": [
-        "26031cba-c3e2-45f1-bb9a-eb0592bc3aa2"
-      ],
+      "members": ["26031cba-c3e2-45f1-bb9a-eb0592bc3aa2"],
       "invites": [],
       "createdAt": "2026-05-09T22:51:06.190Z"
     }

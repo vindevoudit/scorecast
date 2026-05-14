@@ -70,7 +70,9 @@ function NotificationBell({ request, onError }) {
         aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
         className="relative inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-slate-800 text-cyan-300 transition duration-200 hover:bg-cyan-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
       >
-        <span aria-hidden="true" className="text-xl">🔔</span>
+        <span aria-hidden="true" className="text-xl">
+          🔔
+        </span>
         {unreadCount > 0 && (
           <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white">
             {unreadCount > 99 ? '99+' : unreadCount}
@@ -109,7 +111,9 @@ function NotificationBell({ request, onError }) {
                 >
                   <p className="font-semibold">{n.title}</p>
                   {n.body && <p className="mt-1 text-xs text-slate-400">{n.body}</p>}
-                  <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">{timeAgo(n.createdAt)}</p>
+                  <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-500">
+                    {timeAgo(n.createdAt)}
+                  </p>
                 </button>
               ))
             )}

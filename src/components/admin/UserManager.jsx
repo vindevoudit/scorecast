@@ -23,8 +23,12 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selectableUsers = useMemo(() => users.filter((u) => u.id !== currentUserId), [users, currentUserId]);
-  const allSelected = selectableUsers.length > 0 && selectableUsers.every((u) => selectedIds.has(u.id));
+  const selectableUsers = useMemo(
+    () => users.filter((u) => u.id !== currentUserId),
+    [users, currentUserId],
+  );
+  const allSelected =
+    selectableUsers.length > 0 && selectableUsers.every((u) => selectedIds.has(u.id));
 
   const toggleOne = (id) => {
     setSelectedIds((prev) => {
@@ -96,7 +100,9 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
       await load();
       const affected = result?.affected?.length || 0;
       const skipped = result?.skipped?.length || 0;
-      onSuccess?.(`${action}: ${affected} user${affected === 1 ? '' : 's'}${skipped ? ` (skipped ${skipped})` : ''}`);
+      onSuccess?.(
+        `${action}: ${affected} user${affected === 1 ? '' : 's'}${skipped ? ` (skipped ${skipped})` : ''}`,
+      );
     } catch (error) {
       onError?.(error.message);
     } finally {
@@ -123,9 +129,30 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
           {selectedIds.size > 0 && (
             <>
               <span className="ml-2 text-slate-500">{selectedIds.size} selected</span>
-              <button type="button" disabled={busy} onClick={() => runBulk('promote')} className="ml-auto rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Promote</button>
-              <button type="button" disabled={busy} onClick={() => runBulk('demote')} className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Demote</button>
-              <button type="button" disabled={busy} onClick={() => runBulk('delete')} className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50">Delete</button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('promote')}
+                className="ml-auto rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Promote
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('demote')}
+                className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Demote
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runBulk('delete')}
+                className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              >
+                Delete
+              </button>
             </>
           )}
         </div>
@@ -139,7 +166,10 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
             const isSelf = u.id === currentUserId;
             const checked = selectedIds.has(u.id);
             return (
-              <div key={u.id} className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div
+                key={u.id}
+                className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+              >
                 <div className="flex min-w-0 items-center gap-3">
                   <input
                     type="checkbox"
@@ -151,13 +181,20 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-white">
                       {u.username}
-                      {isSelf && <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">you</span>}
-                      <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${u.role === 'admin' ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-700/60 text-slate-300'}`}>
+                      {isSelf && (
+                        <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">
+                          you
+                        </span>
+                      )}
+                      <span
+                        className={`ml-2 rounded-full px-2 py-0.5 text-xs ${u.role === 'admin' ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-700/60 text-slate-300'}`}
+                      >
                         {u.role}
                       </span>
                     </p>
                     <p className="text-xs text-slate-400">
-                      Joined {new Date(u.createdAt).toLocaleDateString()} · {u.picksCount} picks · {u.groupsCount} groups
+                      Joined {new Date(u.createdAt).toLocaleDateString()} · {u.picksCount} picks ·{' '}
+                      {u.groupsCount} groups
                     </p>
                   </div>
                 </div>
@@ -188,7 +225,11 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
       <ConfirmModal
         open={Boolean(pendingDelete)}
         title="Delete user?"
-        description={pendingDelete ? `${pendingDelete.username} and all their picks, comments, groups they own, and friendships will be removed.` : ''}
+        description={
+          pendingDelete
+            ? `${pendingDelete.username} and all their picks, comments, groups they own, and friendships will be removed.`
+            : ''
+        }
         confirmLabel="Delete"
         cancelLabel="Cancel"
         onConfirm={handleDelete}
@@ -198,7 +239,11 @@ function UserManager({ request, currentUserId, onError, onSuccess }) {
       <ConfirmModal
         open={Boolean(pendingBulk)}
         title="Bulk delete users?"
-        description={pendingBulk ? `${pendingBulk.ids.length} user${pendingBulk.ids.length === 1 ? '' : 's'} (and all their data) will be removed. This cannot be undone.` : ''}
+        description={
+          pendingBulk
+            ? `${pendingBulk.ids.length} user${pendingBulk.ids.length === 1 ? '' : 's'} (and all their data) will be removed. This cannot be undone.`
+            : ''
+        }
         confirmLabel="Delete"
         cancelLabel="Cancel"
         onConfirm={() => pendingBulk && performBulk(pendingBulk.action, pendingBulk.ids)}

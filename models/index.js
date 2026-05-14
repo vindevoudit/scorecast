@@ -6,13 +6,15 @@ const path = require('path');
 const logger = require('../lib/logger');
 
 // Initialize Sequelize
-const sequelize = new Sequelize(process.env.DATABASE_URL || {
-  host: 'localhost',
-  database: 'scorecast_db',
-  username: 'postgres',
-  password: 'postgres',
-  dialect: 'postgres',
-});
+const sequelize = new Sequelize(
+  process.env.DATABASE_URL || {
+    host: 'localhost',
+    database: 'scorecast_db',
+    username: 'postgres',
+    password: 'postgres',
+    dialect: 'postgres',
+  },
+);
 
 // Import models
 const User = require('./User')(sequelize);
@@ -113,9 +115,12 @@ function buildUmzug() {
     context: sequelize.getQueryInterface(),
     storage: new SequelizeStorage({ sequelize }),
     logger: {
-      info: (params) => logger.info({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
-      warn: (params) => logger.warn({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
-      error: (params) => logger.error({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
+      info: (params) =>
+        logger.info({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
+      warn: (params) =>
+        logger.warn({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
+      error: (params) =>
+        logger.error({ migrate: params.event, name: params.name }, `migrate: ${params.event}`),
       debug: () => {},
     },
   });
@@ -124,7 +129,7 @@ function buildUmzug() {
 async function runMigrations() {
   if (process.env.NODE_ENV === 'production' && process.env.MIGRATE_ON_BOOT !== 'true') {
     logger.warn(
-      'Skipping auto-migrate in production. Run `npm run db:migrate` explicitly, or set MIGRATE_ON_BOOT=true to override.'
+      'Skipping auto-migrate in production. Run `npm run db:migrate` explicitly, or set MIGRATE_ON_BOOT=true to override.',
     );
     return;
   }
@@ -151,7 +156,7 @@ async function seedDatabase() {
     const seed = JSON.parse(fs.readFileSync(seedFilePath, 'utf8'));
 
     // Insert users
-    const usersData = seed.users.map(user => ({
+    const usersData = seed.users.map((user) => ({
       id: user.id,
       username: user.username,
       password: user.password,
@@ -166,7 +171,7 @@ async function seedDatabase() {
     logger.info('Games seeded.');
 
     // Insert groups
-    const groupsData = seed.groups.map(group => ({
+    const groupsData = seed.groups.map((group) => ({
       id: group.id,
       name: group.name,
       ownerId: group.ownerId,

@@ -61,13 +61,13 @@ The old checklist was written so each step was **safely re-runnable** ("if this 
 
 ### Five new commands
 
-| Command | What it does |
-| --- | --- |
-| `npm run db:migrate` | Apply every card that hasn't been done yet |
-| `npm run db:migrate:undo` | Undo the most recent card |
-| `npm run db:migrate:status` | List every card and whether it's been done |
-| `npm run db:seed` | Apply the data-tweak cards (currently just one: re-hash any leftover plain-text passwords from the demo seed file) |
-| `npm run db:seed:undo` | Reverse the data tweaks |
+| Command                     | What it does                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `npm run db:migrate`        | Apply every card that hasn't been done yet                                                                         |
+| `npm run db:migrate:undo`   | Undo the most recent card                                                                                          |
+| `npm run db:migrate:status` | List every card and whether it's been done                                                                         |
+| `npm run db:seed`           | Apply the data-tweak cards (currently just one: re-hash any leftover plain-text passwords from the demo seed file) |
+| `npm run db:seed:undo`      | Reverse the data tweaks                                                                                            |
 
 ### Two new pieces in `.env.example`
 

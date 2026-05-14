@@ -12,7 +12,9 @@ module.exports = {
         "createdAt" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await queryInterface.sequelize.query(`CREATE INDEX IF NOT EXISTS email_verification_tokens_user_idx ON email_verification_tokens ("userId")`);
+    await queryInterface.sequelize.query(
+      `CREATE INDEX IF NOT EXISTS email_verification_tokens_user_idx ON email_verification_tokens ("userId")`,
+    );
   },
 
   async down(queryInterface) {

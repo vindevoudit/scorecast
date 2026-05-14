@@ -62,7 +62,8 @@ function PicksHistory({ picks, games }) {
     if (filter === 'all') return rows;
     if (filter === 'wins') return rows.filter((r) => r.status === 'won');
     if (filter === 'losses') return rows.filter((r) => r.status === 'lost');
-    if (filter === 'pending') return rows.filter((r) => r.status === 'pending' || r.status === 'live');
+    if (filter === 'pending')
+      return rows.filter((r) => r.status === 'pending' || r.status === 'live');
     return rows;
   }, [rows, filter]);
 

@@ -5,9 +5,7 @@ export function scorePick(pick, game) {
     (pick.choice === 'away' && game.result === 'away');
   if (!isWinning) return 0;
   const probability =
-    pick.choice === 'home'
-      ? parseFloat(game.homeProbability)
-      : parseFloat(game.awayProbability);
+    pick.choice === 'home' ? parseFloat(game.homeProbability) : parseFloat(game.awayProbability);
   return Math.round((1 - probability) * 100);
 }
 

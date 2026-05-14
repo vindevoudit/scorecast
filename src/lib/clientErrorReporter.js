@@ -33,9 +33,11 @@ export function setLastRequestId(reqId) {
 function notifyUI(error) {
   if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
   try {
-    window.dispatchEvent(new CustomEvent('scorecast:client-error', {
-      detail: { message: error?.message || 'unknown' },
-    }));
+    window.dispatchEvent(
+      new CustomEvent('scorecast:client-error', {
+        detail: { message: error?.message || 'unknown' },
+      }),
+    );
   } catch (_) {
     // event dispatch is best-effort; ignore
   }
@@ -81,7 +83,8 @@ export function installClientErrorReporter() {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event?.reason;
     reportClientError({
-      message: reason?.message || (typeof reason === 'string' ? reason : 'Unhandled promise rejection'),
+      message:
+        reason?.message || (typeof reason === 'string' ? reason : 'Unhandled promise rejection'),
       stack: reason?.stack,
     });
   });

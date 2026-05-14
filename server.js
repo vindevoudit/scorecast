@@ -181,11 +181,17 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Rate-limit `skip` predicate — disables IP throttling when NODE_ENV=test so
+// the Playwright E2E suite (which does several logins per test from the same
+// 127.0.0.1 source) doesn't 429 itself. Stays active in dev and prod.
+const skipInTest = () => process.env.NODE_ENV === 'test';
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Too many login attempts, try again later' },
 });
 
@@ -194,6 +200,7 @@ const registerLimiter = rateLimit({
   max: 3,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Too many registrations from this IP, try again later' },
 });
 
@@ -202,6 +209,7 @@ const clientErrorLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Too many error reports' },
 });
 
@@ -210,6 +218,7 @@ const commentLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Slow down — too many comments' },
 });
 
@@ -218,6 +227,7 @@ const friendRequestLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Too many friend requests' },
 });
 
@@ -226,6 +236,7 @@ const pickLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Too many pick changes — slow down' },
 });
 
@@ -234,6 +245,7 @@ const forgotPasswordLimiter = rateLimit({
   max: 3,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTest,
   message: { error: 'Too many password reset requests' },
 });
 

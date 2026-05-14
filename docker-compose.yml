@@ -11,7 +11,11 @@ services:
       redis:
         condition: service_healthy
     environment:
-      NODE_ENV: development
+      # Run as production so the prod-deps image (no pino-pretty, no swagger UI)
+      # behaves correctly. This compose mirrors the Azure Container Apps prod
+      # stack; for full-app dev work (login flows, hot reload), keep using
+      # `node server.js` + `npm run dev` directly.
+      NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/scorecast_db
       REDIS_URL: redis://redis:6379

@@ -38,9 +38,10 @@ RUN apk add --no-cache wget tini
 RUN addgroup -g 1001 -S app && adduser -u 1001 -S app -G app
 
 # Install prod-only deps in a fresh node_modules; smaller than reusing the
-# build-stage node_modules and `npm prune`.
+# build-stage node_modules and `npm prune`. `--ignore-scripts` skips the
+# `prepare: husky` hook (husky is a devDep so the binary isn't here).
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built frontend + every backend file the server requires at runtime.
 COPY --from=build /app/dist ./dist

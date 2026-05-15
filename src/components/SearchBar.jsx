@@ -86,7 +86,7 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
         }}
         onFocus={() => setOpen(true)}
         placeholder="Search users, groups, games…"
-        className="h-12 w-48 rounded-3xl border border-slate-700 bg-slate-900/80 px-4 text-sm text-white outline-none transition duration-200 focus:w-64 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className="h-12 w-64 rounded-3xl border border-slate-700 bg-slate-900/80 px-4 text-sm text-white outline-none transition duration-200 focus:w-80 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
       />
 
       {open && q.trim().length >= 2 && (

@@ -16,6 +16,10 @@
 
 html {
   scroll-behavior: smooth;
+  /* Always reserve space for the vertical scrollbar so views with short
+     content (e.g. Rankings) don't shift the layout horizontally when
+     switching tabs. */
+  scrollbar-gutter: stable;
 }
 
 body {

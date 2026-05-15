@@ -67,8 +67,12 @@ test('register, pick a game, admin sets result, leaderboard reflects points', as
   await verifyPage.getByRole('tab', { name: /Rankings/ }).click();
 
   // LeaderboardRow renders as a button when onSelectUser is wired (which the
-  // app always does). Find the row by username, then assert the points cell.
-  const leaderboardRow = verifyPage.getByRole('button').filter({ hasText: newUser.username });
+  // app always does). Exclude `[aria-haspopup]` so we skip the UserMenu
+  // trigger in the top bar (also contains the username), then assert the
+  // points cell on the actual leaderboard row.
+  const leaderboardRow = verifyPage
+    .locator('button:not([aria-haspopup])')
+    .filter({ hasText: newUser.username });
   await expect(leaderboardRow).toBeVisible({ timeout: 15_000 });
   await expect(leaderboardRow).toContainText(String(expectedPoints));
 

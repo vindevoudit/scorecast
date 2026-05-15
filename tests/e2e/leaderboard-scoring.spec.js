@@ -110,8 +110,17 @@ test('probability-weighted scoring: underdog wins outscore favorite wins; cache 
     await loginViaUI(page, USERS.alice);
     await page.getByRole('tab', { name: /Rankings/ }).click();
 
-    const aliceRow = page.getByRole('button').filter({ hasText: USERS.alice.username }).first();
-    const bobRow = page.getByRole('button').filter({ hasText: USERS.bob.username }).first();
+    // Exclude `[aria-haspopup]` so we skip the UserMenu trigger in the top
+    // bar (also contains the logged-in username), and target the actual
+    // leaderboard rows.
+    const aliceRow = page
+      .locator('button:not([aria-haspopup])')
+      .filter({ hasText: USERS.alice.username })
+      .first();
+    const bobRow = page
+      .locator('button:not([aria-haspopup])')
+      .filter({ hasText: USERS.bob.username })
+      .first();
     await expect(aliceRow).toContainText(String(EXPECTED_ALICE_POINTS), { timeout: 15_000 });
     await expect(bobRow).toContainText(String(EXPECTED_BOB_POINTS), { timeout: 15_000 });
   } finally {

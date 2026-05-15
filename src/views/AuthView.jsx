@@ -92,7 +92,7 @@ function AuthView() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="mx-auto grid w-full max-w-5xl gap-6 py-6 lg:grid-cols-2">
       <LoginForm
         authData={authData}
         setAuthData={setAuthData}

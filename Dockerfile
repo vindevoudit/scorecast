@@ -54,6 +54,8 @@ COPY seeders ./seeders
 COPY validation ./validation
 COPY badges ./badges
 COPY config ./config
+COPY routes ./routes
+COPY services ./services
 COPY data.json ./data.json
 
 # Drop root.

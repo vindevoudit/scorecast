@@ -163,9 +163,14 @@ jobs:
               -o tsv)
             echo "  attempt $i: latest revision runningState=$STATE"
             if [ "$STATE" = "Running" ]; then exit 0; fi
-            if [ "$STATE" = "Failed" ] || [ "$STATE" = "Degraded" ]; then
-              echo "New revision is unhealthy."; exit 1
-            fi
+            # Container Apps reports ActivationFailed when the new revision's
+            # container exits non-zero during startup (e.g. require() throws).
+            # Treat it as terminal alongside Failed/Degraded so we surface the
+            # real cause in <1 min instead of polling out to the 5-min timeout.
+            case "$STATE" in
+              Failed|Degraded|ActivationFailed)
+                echo "New revision is unhealthy ($STATE)."; exit 1 ;;
+            esac
             sleep 10
           done
           echo "Timed out waiting for revision."

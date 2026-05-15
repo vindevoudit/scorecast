@@ -23,7 +23,12 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
   const [results, setResults] = useState({ users: [], groups: [], games: [] });
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Below `md:` the input renders as an icon-only button to save row space.
+  // Tapping the icon promotes it to a small inline input that doesn't push
+  // bell / UserMenu off the row.
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const containerRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     const term = q.trim();
@@ -47,14 +52,18 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
   }, [q]);
 
   useEffect(() => {
-    if (!open) return undefined;
+    if (!open && !mobileExpanded) return undefined;
     const handleClick = (event) => {
       if (containerRef.current && !containerRef.current.contains(event.target)) {
         setOpen(false);
+        setMobileExpanded(false);
       }
     };
     const handleKey = (event) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setMobileExpanded(false);
+      }
     };
     window.addEventListener('mousedown', handleClick);
     window.addEventListener('keydown', handleKey);
@@ -62,10 +71,11 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
       window.removeEventListener('mousedown', handleClick);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [open]);
+  }, [open, mobileExpanded]);
 
   const close = () => {
     setOpen(false);
+    setMobileExpanded(false);
     setQ('');
   };
 
@@ -73,10 +83,36 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
 
   return (
     <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        aria-label="Search"
+        onClick={() => {
+          setMobileExpanded(true);
+          // Defer focus to next tick so the input is visible by the time we
+          // call .focus() — otherwise mobile Safari ignores the focus call.
+          setTimeout(() => inputRef.current?.focus(), 0);
+        }}
+        className={`flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/80 text-slate-300 transition-colors duration-200 hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden ${mobileExpanded ? 'hidden' : ''}`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-5 w-5"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="M20 20l-3.5-3.5" />
+        </svg>
+      </button>
       <label htmlFor="search-input" className="sr-only">
         Search
       </label>
       <input
+        ref={inputRef}
         id="search-input"
         type="search"
         value={q}
@@ -86,11 +122,13 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
         }}
         onFocus={() => setOpen(true)}
         placeholder="Search users, groups, games…"
-        className="h-12 w-64 rounded-3xl border border-slate-700 bg-slate-900/80 px-4 text-sm text-white outline-none transition duration-200 focus:w-80 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className={`h-12 rounded-3xl border border-slate-700 bg-slate-900/80 px-4 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 md:inline-block md:w-64 md:focus:w-80 ${
+          mobileExpanded ? 'block w-44 focus:w-48' : 'hidden'
+        }`}
       />
 
       {open && q.trim().length >= 2 && (
-        <div className="absolute right-0 z-40 mt-2 w-80 rounded-3xl border border-slate-800 bg-slate-900/95 p-3 shadow-[0_30px_80px_rgba(15,23,42,0.65)]">
+        <div className="absolute left-0 z-40 mt-2 w-72 max-w-[calc(100vw-6rem)] rounded-3xl border border-slate-800 bg-slate-900/95 p-3 shadow-[0_30px_80px_rgba(15,23,42,0.65)] md:left-auto md:right-0 md:w-80 md:max-w-none">
           {loading ? (
             <p className="text-xs text-slate-500">Searching…</p>
           ) : !hasResults ? (

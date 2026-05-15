@@ -116,37 +116,51 @@ function DashboardView() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col gap-6">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open navigation"
-            className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-slate-300 transition-colors duration-200 hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              className="h-5 w-5"
-              aria-hidden="true"
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open navigation"
+              className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-slate-300 transition-colors duration-200 hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden"
             >
-              <path d="M4 7h16M4 12h16M4 17h16" />
-            </svg>
-          </button>
-          <SearchBar
-            onSelectGroup={async (g) => {
-              if (g.isMember) {
-                setView('groups');
-              } else if (g.visibility === 'public') {
-                await handleJoinPublicGroup(g.id);
-                setView('groups');
-              }
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            </button>
+            <SearchBar
+              onSelectGroup={async (g) => {
+                if (g.isMember) {
+                  setView('groups');
+                } else if (g.visibility === 'public') {
+                  await handleJoinPublicGroup(g.id);
+                  setView('groups');
+                }
+              }}
+              onSelectGame={() => setView('games')}
+            />
+          </div>
+
+          <h2
+            aria-hidden="true"
+            className="select-none text-sm font-normal uppercase tracking-[0.35em] text-cyan-400/80"
+            style={{
+              textShadow:
+                '0 0 12px rgba(56, 189, 248, 0.9), 0 0 24px rgba(56, 189, 248, 0.65), 0 0 48px rgba(56, 189, 248, 0.4)',
             }}
-            onSelectGame={() => setView('games')}
-          />
-          <div className="ml-auto flex items-center gap-3">
+          >
+            BANTRYX
+          </h2>
+
+          <div className="flex items-center justify-end gap-3">
             <NotificationBell />
             <UserMenu />
           </div>

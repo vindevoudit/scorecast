@@ -9,8 +9,23 @@ const { expect } = require('@playwright/test');
 // from the horizontal top bar (now relocated into the UserMenu dropdown).
 const DASHBOARD_SENTINEL = /Upcoming Matches/;
 
+// Unauthenticated visitors land on `<Landing />` first. Both "Get started"
+// and "Sign in" CTAs reveal the same login + register grid; we click
+// "Get started" here because it's the visually-primary CTA and renders
+// first in DOM order. The wait is bounded by the standard expect timeout
+// so deep-link flows (forgot/reset/2fa) that bypass the landing don't
+// stall here.
+async function dismissLanding(page) {
+  const cta = page.getByRole('button', { name: /Get started/i }).first();
+  await cta
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => cta.click())
+    .catch(() => {});
+}
+
 async function registerViaUI(page, { username, email, password }) {
   await page.goto('/');
+  await dismissLanding(page);
   await page.locator('#register-username').fill(username);
   await page.locator('#register-email').fill(email);
   await page.locator('#register-password').fill(password);
@@ -22,6 +37,7 @@ async function registerViaUI(page, { username, email, password }) {
 
 async function loginViaUI(page, { username, password }) {
   await page.goto('/');
+  await dismissLanding(page);
   await page.locator('#login-username').fill(username);
   await page.locator('#login-password').fill(password);
   await page.getByRole('button', { name: /^Sign in$/ }).click();

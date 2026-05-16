@@ -1,8 +1,15 @@
+// Tier 11 Chunk 2 — GameCard migrated to Card + Badge + tokens. The two
+// pick buttons stay as custom-styled <button>s (Button primitive doesn't
+// capture the selected/unselected tonal pair) but are tokenized + keep
+// their aria-label="Pick {team} to win" contracts that Playwright relies
+// on. The `gate('make a pick')` / `gate('undo a pick')` wiring is preserved.
+
 import { scorePick } from '../utils/scoring';
 import { useCountdown } from '../utils/time';
 import CommentThread from './CommentThread';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
+import { Badge } from './ui';
 
 function formatProbability(value) {
   return `${Math.round(value * 100)}%`;
@@ -29,15 +36,22 @@ function statusLabel(game, upcoming) {
 
 function teamCardClass(side, game) {
   const base = 'rounded-3xl p-4 transition duration-300';
-  if (!game.result) return `${base} bg-slate-950/70`;
-  if (game.result === side) return `${base} border border-emerald-500/40 bg-emerald-500/10`;
-  return `${base} bg-slate-950/70 opacity-60`;
+  if (!game.result) return `${base} bg-overlay/70`;
+  if (game.result === side) return `${base} border border-success/40 bg-success/10`;
+  return `${base} bg-overlay/70 opacity-60`;
+}
+
+function pickButtonClass(active, side) {
+  const base =
+    'rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50';
+  if (active) return `${base} border-accent-soft bg-accent/30 text-fg`;
+  if (side === 'home') {
+    return `${base} border-accent/20 bg-accent/10 text-accent-soft hover:border-accent-soft hover:bg-accent/20`;
+  }
+  return `${base} border-strong bg-overlay/90 text-fg hover:border-strong hover:bg-overlay`;
 }
 
 function GameCard({ game }) {
-  // Tier 13 Chunk 5 — `game` is the only data prop; everything else comes
-  // through usePicks (pickMap + submit/remove) and CommentThread now
-  // reads its own context.
   const { pickMap, submitPick, removePick } = usePicks();
   const { gate } = useAuthGate();
   const existingPick = pickMap.get(game.id) || null;
@@ -55,51 +69,39 @@ function GameCard({ game }) {
   let outcomeBadge = null;
   if (game.result) {
     if (!existingChoice) {
-      outcomeBadge = (
-        <span className="inline-flex rounded-full bg-slate-700/60 px-3 py-1 text-xs font-semibold text-slate-200">
-          No pick
-        </span>
-      );
+      outcomeBadge = <Badge tone="neutral">No pick</Badge>;
     } else if (existingChoice === game.result) {
-      outcomeBadge = (
-        <span className="inline-flex rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300">
-          ✓ Correct +{pointsIfWon} pts
-        </span>
-      );
+      outcomeBadge = <Badge tone="success">✓ Correct +{pointsIfWon} pts</Badge>;
     } else {
-      outcomeBadge = (
-        <span className="inline-flex rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-300">
-          ✗ Missed
-        </span>
-      );
+      outcomeBadge = <Badge tone="danger">✗ Missed</Badge>;
     }
   }
 
   return (
-    <div className="group rounded-3xl border border-slate-800 bg-slate-900/85 p-5 shadow-[0_24px_80px_rgba(15,23,42,0.32)] transition duration-300 hover:-translate-y-1 hover:border-cyan-500/40 hover:bg-slate-900">
+    <div className="group rounded-3xl border border-default bg-elevated/85 p-5 shadow-glow transition duration-300 hover:-translate-y-1 hover:border-accent/40 hover:bg-elevated">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.25em] text-cyan-400/80">
+          <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.25em] text-accent/80">
             <span>{formatDate(game.date)}</span>
             <span>{statusLabel(game, upcoming)}</span>
-            {upcoming && (
-              <span className="rounded-full bg-slate-800/60 px-3 py-1 normal-case tracking-normal text-slate-300">
+            {upcoming ? (
+              <span className="rounded-full bg-overlay/60 px-3 py-1 normal-case tracking-normal text-fg">
                 Picks lock in {countdown}
               </span>
-            )}
+            ) : null}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className={teamCardClass('home', game)}>
-              <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Home</p>
-              <p className="mt-3 truncate text-xl font-semibold text-white">{game.homeTeam}</p>
-              <p className="mt-2 text-sm text-slate-400">
+              <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Home</p>
+              <p className="mt-3 truncate text-xl font-semibold text-fg">{game.homeTeam}</p>
+              <p className="mt-2 text-sm text-fg-muted">
                 Win chance: {formatProbability(game.homeProbability)}
               </p>
             </div>
             <div className={teamCardClass('away', game)}>
-              <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Away</p>
-              <p className="mt-3 truncate text-xl font-semibold text-white">{game.awayTeam}</p>
-              <p className="mt-2 text-sm text-slate-400">
+              <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Away</p>
+              <p className="mt-3 truncate text-xl font-semibold text-fg">{game.awayTeam}</p>
+              <p className="mt-2 text-sm text-fg-muted">
                 Win chance: {formatProbability(game.awayProbability)}
               </p>
             </div>
@@ -108,19 +110,19 @@ function GameCard({ game }) {
         <div className="space-y-3 text-right">
           {game.result ? (
             <>
-              <p className="text-sm text-slate-400">Result</p>
-              <p className="text-lg font-semibold text-white">
+              <p className="text-sm text-fg-muted">Result</p>
+              <p className="text-lg font-semibold text-fg">
                 {game.result === 'home' ? game.homeTeam : game.awayTeam} won
               </p>
               <div className="flex justify-end">{outcomeBadge}</div>
             </>
           ) : (
             <>
-              <p className="text-sm text-slate-400">Potential reward</p>
-              <p className="text-lg font-semibold text-white">
+              <p className="text-sm text-fg-muted">Potential reward</p>
+              <p className="text-lg font-semibold text-fg">
                 {scoreEstimate(game.homeProbability)} / {scoreEstimate(game.awayProbability)}
               </p>
-              <p className="text-sm text-slate-500">Your pick: {pickedTeam || 'None'}</p>
+              <p className="text-sm text-fg-subtle">Your pick: {pickedTeam || 'None'}</p>
             </>
           )}
         </div>
@@ -128,7 +130,8 @@ function GameCard({ game }) {
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <button
-          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'home' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:bg-cyan-500/20'}`}
+          type="button"
+          className={pickButtonClass(existingChoice === 'home', 'home')}
           disabled={!upcoming}
           onClick={() => {
             if (!gate('make a pick')) return;
@@ -139,7 +142,8 @@ function GameCard({ game }) {
           Pick {game.homeTeam}
         </button>
         <button
-          className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'away' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-slate-700 bg-slate-950/90 text-slate-100 hover:border-slate-500 hover:bg-slate-900'}`}
+          type="button"
+          className={pickButtonClass(existingChoice === 'away', 'away')}
           disabled={!upcoming}
           onClick={() => {
             if (!gate('make a pick')) return;
@@ -151,7 +155,7 @@ function GameCard({ game }) {
         </button>
       </div>
 
-      {upcoming && existingPickId && (
+      {upcoming && existingPickId ? (
         <div className="mt-3 flex justify-end">
           <button
             type="button"
@@ -159,12 +163,12 @@ function GameCard({ game }) {
               if (!gate('undo a pick')) return;
               removePick(existingPickId);
             }}
-            className="text-xs text-slate-400 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            className="text-xs text-fg-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Undo pick
           </button>
         </div>
-      )}
+      ) : null}
 
       <CommentThread gameId={game.id} />
     </div>

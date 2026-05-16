@@ -1,20 +1,26 @@
+// Tier 11 Chunk 2 — ProfileView tokenized. ThemeToggle is mounted in the
+// "Account" footer for the editable (own-profile) view so users can pick
+// System / Light / Dark.
+
 import { useState } from 'react';
 import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
 import TwoFactorSetup from './TwoFactorSetup';
+import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
+import { Badge, Button, Input, Textarea } from './ui';
 
 function formatDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
 }
 
 function recentPickStatus(pick) {
-  if (!pick.result) return { label: 'Pending', cls: 'bg-slate-700/60 text-slate-200' };
+  if (!pick.result) return { label: 'Pending', tone: 'neutral' };
   if (pick.choice === pick.result) {
-    return { label: `Won +${pick.points}`, cls: 'bg-emerald-500/15 text-emerald-300' };
+    return { label: `Won +${pick.points}`, tone: 'success' };
   }
-  return { label: 'Missed', cls: 'bg-rose-500/15 text-rose-300' };
+  return { label: 'Missed', tone: 'danger' };
 }
 
 function friendButtonProps(friendStatus) {
@@ -33,9 +39,6 @@ function friendButtonProps(friendStatus) {
 }
 
 function ProfileView({ profile, onFriendAction, busy, editable }) {
-  // Tier 13 Chunk 5 — self/edit-only handlers come from hooks. The drawer
-  // path still passes onFriendAction + busy as props because that lifecycle
-  // (open profile → click action → close drawer) lives in DataContext.
   const { user, handle2faSetup, handle2faConfirm, handle2faDisable } = useAuth();
   const { handleSaveProfile: onSaveProfile } = useData();
   const twoFactorEnabled = Boolean(user?.twoFactorEnabled);
@@ -75,131 +78,113 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
         <div className="flex min-w-0 items-center gap-4">
           <Avatar username={profile.username} size={64} />
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.25em] text-cyan-400/80">Profile</p>
-            <h2 className="mt-2 truncate text-3xl font-semibold text-white">
+            <p className="text-xs uppercase tracking-[0.25em] text-accent/80">Profile</p>
+            <h2 className="mt-2 truncate text-3xl font-semibold text-fg">
               {profile.displayName || profile.username}
             </h2>
-            {profile.displayName && (
-              <p className="truncate text-sm text-slate-400">@{profile.username}</p>
-            )}
-            <p className="mt-1 text-sm text-slate-400">
-              {profile.role === 'admin' && (
-                <span className="mr-2 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-300">
+            {profile.displayName ? (
+              <p className="truncate text-sm text-fg-muted">@{profile.username}</p>
+            ) : null}
+            <p className="mt-1 text-sm text-fg-muted">
+              {profile.role === 'admin' ? (
+                <Badge tone="warning" className="mr-2">
                   Admin
-                </span>
-              )}
+                </Badge>
+              ) : null}
               Joined {formatDate(profile.joinedAt)}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {showEdit && !editing && (
-            <button
-              type="button"
-              onClick={startEdit}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+          {showEdit && !editing ? (
+            <Button variant="secondary" onClick={startEdit}>
               Edit profile
-            </button>
-          )}
-          {friendBtn && (
-            <button
-              type="button"
+            </Button>
+          ) : null}
+          {friendBtn ? (
+            <Button
+              variant="primary"
+              size="lg"
               disabled={busy}
               onClick={() => onFriendAction?.(friendBtn.action)}
-              className="shrink-0 rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="shrink-0"
             >
               {friendBtn.label}
-            </button>
-          )}
+            </Button>
+          ) : null}
         </div>
       </div>
 
       {editing ? (
-        <form onSubmit={submitEdit} className="space-y-3 rounded-3xl bg-slate-950/70 p-4">
-          <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
-            Display name
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              maxLength={60}
-              placeholder={profile.username}
-              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
-            Bio
-            <textarea
+        <form onSubmit={submitEdit} className="space-y-3 rounded-3xl bg-overlay/70 p-4">
+          <Input
+            label="Display name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            maxLength={60}
+            placeholder={profile.username}
+          />
+          <div>
+            <Textarea
+              label="Bio"
               value={bio}
               onChange={(e) => setBio(e.target.value)}
               maxLength={280}
               rows={3}
               placeholder="Tell people who you are…"
-              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
-            <span className="mt-1 block text-right text-xs tabular-nums text-slate-500">
+            <span className="mt-1 block text-right text-xs tabular-nums text-fg-subtle">
               {bio.length} / 280
             </span>
-          </label>
+          </div>
           <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
-            >
+            <Button type="submit" size="sm" disabled={busy}>
               Save
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
-      ) : (
-        profile.bio && (
-          <p className="whitespace-pre-wrap rounded-3xl bg-slate-950/70 p-4 text-sm text-slate-200">
-            {profile.bio}
-          </p>
-        )
-      )}
+      ) : profile.bio ? (
+        <p className="whitespace-pre-wrap rounded-3xl bg-overlay/70 p-4 text-sm text-fg">
+          {profile.bio}
+        </p>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <div className="rounded-3xl bg-slate-950/70 p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Total points</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">
-            {profile.totalPoints}
-          </p>
+        <div className="rounded-3xl bg-overlay/70 p-4">
+          <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Total points</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{profile.totalPoints}</p>
         </div>
-        <div className="rounded-3xl bg-slate-950/70 p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Picks made</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{profile.picksMade}</p>
+        <div className="rounded-3xl bg-overlay/70 p-4">
+          <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Picks made</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{profile.picksMade}</p>
         </div>
-        <div className="rounded-3xl bg-slate-950/70 p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Picks won</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{profile.picksWon}</p>
+        <div className="rounded-3xl bg-overlay/70 p-4">
+          <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Picks won</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{profile.picksWon}</p>
         </div>
-        <div className="rounded-3xl bg-slate-950/70 p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Win rate</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-white">{winRatePct}%</p>
+        <div className="rounded-3xl bg-overlay/70 p-4">
+          <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Win rate</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{winRatePct}%</p>
         </div>
       </div>
 
-      {profile.headToHead && (
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
-          <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Head-to-head</p>
-          <p className="mt-2 text-sm text-slate-200">
+      {profile.headToHead ? (
+        <div className="rounded-3xl border border-default bg-elevated/70 p-4">
+          <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Head-to-head</p>
+          <p className="mt-2 text-sm text-fg">
             You {profile.headToHead.viewerWins} — {profile.headToHead.targetWins}{' '}
             {profile.displayName || profile.username}
-            {profile.headToHead.ties > 0 &&
-              ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`}
+            {profile.headToHead.ties > 0
+              ? ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`
+              : ''}
           </p>
         </div>
-      )}
+      ) : null}
 
-      {showEdit && on2faSetup && (
+      {showEdit && on2faSetup ? (
         <TwoFactorSetup
           enabled={Boolean(twoFactorEnabled)}
           busy={busy}
@@ -207,22 +192,38 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
           onConfirm={on2faConfirm}
           onDisable={on2faDisable}
         />
-      )}
+      ) : null}
+
+      {showEdit ? (
+        <div className="rounded-3xl border border-default bg-elevated/70 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
+                Appearance
+              </h3>
+              <p className="mt-1 text-sm text-fg">
+                Pick the theme that suits your eyes. System follows your OS preference.
+              </p>
+            </div>
+            <ThemeToggle />
+          </div>
+        </div>
+      ) : null}
 
       <div>
-        <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">Badges</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">Badges</h3>
         <div className="mt-3">
           <BadgeWall catalog={profile.catalog} earned={profile.badges} />
         </div>
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
           Recent picks
         </h3>
         <div className="mt-3 space-y-2">
           {profile.recentPicks.length === 0 ? (
-            <p className="text-sm text-slate-500">No picks yet.</p>
+            <p className="text-sm text-fg-subtle">No picks yet.</p>
           ) : (
             profile.recentPicks.map((pick) => {
               const status = recentPickStatus(pick);
@@ -230,21 +231,17 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
               return (
                 <div
                   key={pick.gameId}
-                  className="flex items-center justify-between gap-3 rounded-2xl bg-slate-950/70 px-4 py-3"
+                  className="flex items-center justify-between gap-3 rounded-2xl bg-overlay/70 px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm text-slate-200">
-                      {pick.homeTeam} <span className="text-slate-500">vs</span> {pick.awayTeam}
+                    <p className="truncate text-sm text-fg">
+                      {pick.homeTeam} <span className="text-fg-subtle">vs</span> {pick.awayTeam}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-fg-subtle">
                       Picked {team} · {formatDate(pick.date)}
                     </p>
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${status.cls}`}
-                  >
-                    {status.label}
-                  </span>
+                  <Badge tone={status.tone}>{status.label}</Badge>
                 </div>
               );
             })

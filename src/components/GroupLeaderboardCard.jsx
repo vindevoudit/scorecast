@@ -1,5 +1,8 @@
+// Tier 11 Chunk 2 — GroupLeaderboardCard tokenized.
+
 import { LeaderboardRow } from './LeaderboardCard';
 import EmptyState from './EmptyState';
+import { Button } from './ui';
 
 const SORT_OPTIONS = [
   { value: 'points', label: 'Points' },
@@ -27,22 +30,21 @@ function GroupLeaderboardCard({
   const canPrev = offset > 0;
   const canNext = offset + leaderboardGroup.length < total;
 
+  const selectClass =
+    'w-full min-w-0 rounded-2xl border border-default bg-elevated/90 px-4 py-3 text-sm text-fg outline-none transition duration-200 focus:border-accent focus-visible:ring-2 focus-visible:ring-accent';
+
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
+      <div className="flex flex-col gap-3">
         <div>
-          <h2 className="text-2xl font-semibold text-white">Group Leaderboard</h2>
-          <p className="mt-2 text-slate-400">Choose a group to see the current ranking.</p>
+          <h2 className="text-2xl font-semibold text-fg">Group Leaderboard</h2>
+          <p className="mt-2 text-fg-muted">Choose a group to see the current ranking.</p>
         </div>
         {groups.length > 0 ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label className="sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="min-w-0 flex-1 basis-40">
               <span className="sr-only">Choose group</span>
-              <select
-                value={selectedGroupId}
-                onChange={onGroupSelection}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
-              >
+              <select value={selectedGroupId} onChange={onGroupSelection} className={selectClass}>
                 {groups.map((group) => (
                   <option key={group.id} value={group.id}>
                     {group.name}
@@ -50,13 +52,13 @@ function GroupLeaderboardCard({
                 ))}
               </select>
             </label>
-            {onChangeOrder && (
-              <label className="sm:w-auto">
+            {onChangeOrder ? (
+              <label className="min-w-0 flex-1 basis-40">
                 <span className="sr-only">Sort by</span>
                 <select
                   value={orderBy}
                   onChange={(e) => onChangeOrder(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
+                  className={selectClass}
                 >
                   {SORT_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -65,10 +67,10 @@ function GroupLeaderboardCard({
                   ))}
                 </select>
               </label>
-            )}
+            ) : null}
           </div>
         ) : (
-          <p className="text-sm text-slate-500">No group membership found.</p>
+          <p className="text-sm text-fg-subtle">No group membership found.</p>
         )}
       </div>
 
@@ -89,9 +91,9 @@ function GroupLeaderboardCard({
                 onSelectUser={onSelectUser}
               />
             ))}
-            {viewerRow && !viewerIsOnPage && (
-              <div className="border-t border-slate-800 pt-3">
-                <p className="mb-2 text-xs uppercase tracking-[0.25em] text-slate-500">
+            {viewerRow && !viewerIsOnPage ? (
+              <div className="border-t border-default pt-3">
+                <p className="mb-2 text-xs uppercase tracking-[0.25em] text-fg-subtle">
                   Your position
                 </p>
                 <LeaderboardRow
@@ -101,36 +103,36 @@ function GroupLeaderboardCard({
                   onSelectUser={onSelectUser}
                 />
               </div>
-            )}
+            ) : null}
           </>
         )}
       </div>
 
-      {(canPrev || canNext) && (
-        <div className="mt-4 flex items-center justify-between text-xs text-slate-400">
+      {canPrev || canNext ? (
+        <div className="mt-4 flex items-center justify-between text-xs text-fg-muted">
           <span>
             {offset + 1}–{Math.min(offset + leaderboardGroup.length, total)} of {total}
           </span>
           <div className="flex gap-2">
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => onChangeOffset?.(Math.max(0, offset - limit))}
               disabled={!canPrev}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-40"
             >
               Prev
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => onChangeOffset?.(offset + limit)}
               disabled={!canNext}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-40"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

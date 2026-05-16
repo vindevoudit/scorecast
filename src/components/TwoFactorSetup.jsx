@@ -1,4 +1,7 @@
+// Tier 11 Chunk 2 — TwoFactorSetup migrated onto Button + Input.
+
 import { useState } from 'react';
+import { Button, Input } from './ui';
 
 function downloadRecoveryCodes(codes) {
   const blob = new Blob([codes.join('\n') + '\n'], { type: 'text/plain' });
@@ -66,44 +69,38 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
   };
 
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5">
+    <div className="rounded-3xl border border-default bg-elevated/70 p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
             Two-factor authentication
           </h3>
-          <p className="mt-1 text-sm text-slate-300">
+          <p className="mt-1 text-sm text-fg">
             {enabled
               ? 'Enabled — codes from your authenticator are required at sign-in.'
               : 'Add an authenticator code on top of your password.'}
           </p>
         </div>
-        {mode === 'idle' && !enabled && (
-          <button
-            type="button"
-            onClick={startSetup}
-            disabled={busy}
-            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
-          >
+        {mode === 'idle' && !enabled ? (
+          <Button onClick={startSetup} disabled={busy}>
             Enable
-          </button>
-        )}
-        {mode === 'idle' && enabled && (
-          <button
-            type="button"
+          </Button>
+        ) : null}
+        {mode === 'idle' && enabled ? (
+          <Button
+            variant="destructive"
             onClick={() => {
               setMode('disable');
               setErr('');
             }}
             disabled={busy}
-            className="rounded-2xl border border-rose-700/50 bg-slate-900 px-4 py-2 text-sm font-semibold text-rose-200 hover:border-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
           >
             Disable
-          </button>
-        )}
+          </Button>
+        ) : null}
       </div>
 
-      {mode === 'setup' && setupData && (
+      {mode === 'setup' && setupData ? (
         <form onSubmit={submitSetup} className="mt-5 space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <img
@@ -111,116 +108,99 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
               alt="2FA QR code"
               className="h-40 w-40 shrink-0 rounded-2xl bg-white p-2"
             />
-            <div className="min-w-0 space-y-2 text-sm text-slate-300">
+            <div className="min-w-0 space-y-2 text-sm text-fg">
               <p>Scan with Google Authenticator, 1Password, Authy, or any TOTP app.</p>
-              <p className="break-all text-xs text-slate-400">
+              <p className="break-all text-xs text-fg-muted">
                 Or enter this secret manually:{' '}
-                <span className="font-mono text-slate-200">{setupData.secret}</span>
+                <span className="font-mono text-fg">{setupData.secret}</span>
               </p>
             </div>
           </div>
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-amber-300">
+          <div className="rounded-2xl border border-warning/30 bg-warning/5 p-4">
+            <p className="text-xs uppercase tracking-[0.25em] text-warning">
               Recovery codes — shown only once
             </p>
-            <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm text-amber-100">
+            <ul className="mt-2 grid grid-cols-2 gap-1 font-mono text-sm text-warning">
               {setupData.recoveryCodes.map((c) => (
                 <li key={c}>{c}</li>
               ))}
             </ul>
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => downloadRecoveryCodes(setupData.recoveryCodes)}
-              className="mt-3 rounded-xl border border-amber-500/40 px-3 py-1 text-xs font-semibold text-amber-200 hover:border-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="mt-3"
             >
               Download as .txt
-            </button>
+            </Button>
           </div>
-          <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
-            Enter the 6-digit code from your app to confirm
-            <input
+          <Input
+            label="Enter the 6-digit code from your app to confirm"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="123456"
+            className="font-mono text-lg"
+          />
+          {err ? <p className="text-sm text-danger">{err}</p> : null}
+          <div className="flex gap-2">
+            <Button type="submit" disabled={busy || code.length !== 6}>
+              Confirm and enable
+            </Button>
+            <Button variant="secondary" onClick={reset}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      {mode === 'disable' ? (
+        <form onSubmit={submitDisable} className="mt-5 space-y-4">
+          {useRecovery ? (
+            <Input
+              label="Recovery code"
+              value={recoveryCode}
+              onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+              placeholder="XXXXX-XXXXX"
+              className="font-mono text-lg"
+            />
+          ) : (
+            <Input
+              label="6-digit code from your authenticator"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               inputMode="numeric"
               maxLength={6}
               placeholder="123456"
-              className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-lg text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="font-mono text-lg"
             />
-          </label>
-          {err && <p className="text-sm text-rose-300">{err}</p>}
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={busy || code.length !== 6}
-              className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
-            >
-              Confirm and enable
-            </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
-
-      {mode === 'disable' && (
-        <form onSubmit={submitDisable} className="mt-5 space-y-4">
-          {useRecovery ? (
-            <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
-              Recovery code
-              <input
-                value={recoveryCode}
-                onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
-                placeholder="XXXXX-XXXXX"
-                className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-lg text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-              />
-            </label>
-          ) : (
-            <label className="block text-xs uppercase tracking-[0.25em] text-slate-400">
-              6-digit code from your authenticator
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="123456"
-                className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-lg text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-              />
-            </label>
           )}
-          <button
-            type="button"
+          <Button
+            variant="link"
             onClick={() => {
               setUseRecovery((v) => !v);
               setErr('');
             }}
-            className="text-sm text-cyan-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            className="text-sm"
           >
             {useRecovery ? 'Use authenticator code instead' : 'Use a recovery code instead'}
-          </button>
-          {err && <p className="text-sm text-rose-300">{err}</p>}
+          </Button>
+          {err ? <p className="text-sm text-danger">{err}</p> : null}
           <div className="flex gap-2">
-            <button
+            <Button
               type="submit"
+              variant="destructive"
               disabled={busy || (useRecovery ? recoveryCode.length < 8 : code.length !== 6)}
-              className="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-50"
             >
               Disable 2FA
-            </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button variant="secondary" onClick={reset}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
-      )}
+      ) : null}
     </div>
   );
 }

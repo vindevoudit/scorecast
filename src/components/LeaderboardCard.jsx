@@ -1,32 +1,32 @@
+// Tier 11 Chunk 2 — LeaderboardCard tokenized.
+
 import EmptyState from './EmptyState';
 import Avatar from './Avatar';
 
 export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
-  const baseClass = `flex w-full items-center justify-between gap-3 rounded-3xl px-4 py-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
-    isCurrentUser
-      ? 'border border-cyan-400/40 bg-cyan-500/10'
-      : 'bg-slate-950/70 hover:bg-slate-900/95'
+  const baseClass = `flex w-full items-center justify-between gap-3 rounded-3xl px-4 py-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+    isCurrentUser ? 'border border-accent/40 bg-accent/10' : 'bg-overlay/70 hover:bg-overlay'
   }`;
 
   const content = (
     <>
       <div className="flex min-w-0 items-center gap-3">
-        {rank != null && (
-          <span className="w-6 shrink-0 text-sm font-semibold tabular-nums text-slate-500">
+        {rank != null ? (
+          <span className="w-6 shrink-0 text-sm font-semibold tabular-nums text-fg-subtle">
             {rank}.
           </span>
-        )}
+        ) : null}
         <Avatar username={entry.username} displayName={entry.displayName} size={28} />
         <span
-          className={`min-w-0 truncate text-sm ${isCurrentUser ? 'font-semibold text-white' : 'text-slate-300'}`}
+          className={`min-w-0 truncate text-sm ${isCurrentUser ? 'font-semibold text-fg' : 'text-fg'}`}
         >
           {entry.displayName || entry.username}
-          {isCurrentUser && (
-            <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">you</span>
-          )}
+          {isCurrentUser ? (
+            <span className="ml-2 text-xs uppercase tracking-widest text-accent">you</span>
+          ) : null}
         </span>
       </div>
-      <div className="shrink-0 text-sm font-semibold tabular-nums text-white">{entry.points}</div>
+      <div className="shrink-0 text-sm font-semibold tabular-nums text-fg">{entry.points}</div>
     </>
   );
 
@@ -43,9 +43,9 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
 
 function LeaderboardCard({ title, entries, currentUserId, description, onSelectUser }) {
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-      <h2 className="text-2xl font-semibold text-white">{title}</h2>
-      <p className="mt-2 text-slate-400">
+    <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
+      <h2 className="text-2xl font-semibold text-fg">{title}</h2>
+      <p className="mt-2 text-fg-muted">
         {description || 'Top performers based on correct picks and probability scoring.'}
       </p>
       <div className="mt-6 max-h-96 space-y-3 overflow-y-auto pr-2">

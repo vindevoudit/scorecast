@@ -12,6 +12,7 @@ import SearchBar from '../components/SearchBar';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
+import { Badge, Button, Input } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
@@ -22,7 +23,7 @@ const ProfileView = lazy(() => import('../components/ProfileView'));
 const AdminPanel = lazy(() => import('../components/admin/AdminPanel'));
 
 function LazyFallback({ label = 'Loading…' }) {
-  return <p className="text-sm text-slate-400">{label}</p>;
+  return <p className="text-sm text-fg-muted">{label}</p>;
 }
 
 const BASE_TABS = [
@@ -34,9 +35,10 @@ const BASE_TABS = [
 ];
 const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 
-// Tier 13 Chunk 6 — the authenticated UI. Was inline in App.jsx; extracted
-// here so App.jsx is purely the layout chrome + the auth/skeleton/dashboard
-// switch. Everything else flows from the contexts the file sits inside.
+// Tier 11 Chunk 2 — DashboardView tokenized. BANTRYX wordmark moved to the
+// `text-shadow-brand-glow` utility; pill buttons in the top utility bar
+// now use the Button primitive; all surfaces use elevated/overlay/default
+// tokens.
 function DashboardView() {
   const {
     user,
@@ -80,8 +82,6 @@ function DashboardView() {
 
   const tabs = useMemo(() => {
     if (!user) {
-      // Anonymous visitors: hide private tabs (My Picks, Profile) and Admin.
-      // Only Games / Groups / Rankings make sense without an account.
       return BASE_TABS.filter(
         (t) => t.id === 'games' || t.id === 'groups' || t.id === 'leaderboard',
       );
@@ -99,8 +99,6 @@ function DashboardView() {
   }, [collapsed]);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Hoist the Create-Group form submit into a small adapter so the form
-  // keeps its event signature but routes the body through DataContext.
   const onCreateGroupSubmit = async (event) => {
     event.preventDefault();
     await handleCreateGroup({ name: authData.groupName, visibility: authData.groupVisibility });
@@ -109,9 +107,7 @@ function DashboardView() {
 
   const renderGameSection = (heading, list, emptyText) => (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
-        {heading}
-      </h3>
+      <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">{heading}</h3>
       {list.length === 0 ? (
         <EmptyState title={emptyText} />
       ) : (
@@ -139,7 +135,7 @@ function DashboardView() {
               type="button"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation"
-              className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-slate-300 transition-colors duration-200 hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden"
+              className="rounded-2xl border border-default bg-elevated/80 p-3 text-fg transition-colors duration-200 hover:bg-overlay hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:hidden"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -169,11 +165,7 @@ function DashboardView() {
 
           <h2
             aria-hidden="true"
-            className="select-none text-sm font-normal uppercase tracking-[0.35em] text-cyan-400/80"
-            style={{
-              textShadow:
-                '0 0 12px rgba(56, 189, 248, 0.9), 0 0 24px rgba(56, 189, 248, 0.65), 0 0 48px rgba(56, 189, 248, 0.4)',
-            }}
+            className="text-shadow-brand-glow select-none text-sm font-normal uppercase tracking-[0.35em] text-accent/80"
           >
             BANTRYX
           </h2>
@@ -193,7 +185,7 @@ function DashboardView() {
                     setShowAuth(false);
                   }}
                   aria-label="Back to landing page"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 transition duration-200 hover:border-slate-600 hover:bg-slate-900 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-default bg-elevated/40 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -209,44 +201,34 @@ function DashboardView() {
                   </svg>
                   Home
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAuth(true)}
-                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-2 text-sm font-semibold text-cyan-300 transition duration-200 hover:border-slate-500 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                >
+                <Button variant="secondary" onClick={() => setShowAuth(true)}>
                   Sign in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAuth(true)}
-                  className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                >
+                </Button>
+                <Button variant="primary" onClick={() => setShowAuth(true)}>
                   Sign up
-                </button>
+                </Button>
               </>
             )}
           </div>
         </div>
 
         <section className="space-y-6">
-          {view === 'games' && (
+          {view === 'games' ? (
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
               <div className="space-y-6">
-                <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
+                <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-2xl font-semibold text-white">Games</h2>
-                      <p className="mt-2 text-slate-400">
+                      <h2 className="text-2xl font-semibold text-fg">Games</h2>
+                      <p className="mt-2 text-fg-muted">
                         Pick winners, earn more points for underdog upsets.
                       </p>
                     </div>
-                    <span className="rounded-full bg-cyan-500/10 px-4 py-2 text-sm text-cyan-300">
-                      Future-proof picks only
-                    </span>
+                    <Badge tone="accent">Future-proof picks only</Badge>
                   </div>
                 </div>
 
-                {liveGames.length > 0 && renderGameSection('Live now', liveGames, '')}
+                {liveGames.length > 0 ? renderGameSection('Live now', liveGames, '') : null}
 
                 {renderGameSection(
                   'Upcoming',
@@ -254,29 +236,29 @@ function DashboardView() {
                   'No upcoming games yet. Check back soon.',
                 )}
 
-                {completedGames.length > 0 && (
+                {completedGames.length > 0 ? (
                   <CompletedSection
                     completedGames={completedGames}
                     showCompleted={showCompleted}
                     setShowCompleted={setShowCompleted}
                   />
-                )}
+                ) : null}
               </div>
 
               <div className="space-y-4">
-                <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_20px_45px_rgba(15,23,42,0.4)]">
-                  <h2 className="text-2xl font-semibold text-white">Live leaderboard</h2>
-                  <p className="mt-2 text-slate-400">
+                <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
+                  <h2 className="text-2xl font-semibold text-fg">Live leaderboard</h2>
+                  <p className="mt-2 text-fg-muted">
                     Track your progress and compare with friends.
                   </p>
                   <div className="mt-5 space-y-4">
-                    <div className="rounded-3xl bg-slate-950/70 p-4">
-                      <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">
+                    <div className="rounded-3xl bg-overlay/70 p-4">
+                      <h3 className="text-sm uppercase tracking-[0.24em] text-accent/80">
                         Overall
                       </h3>
                       <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
                         {leaderboard.overall.length === 0 ? (
-                          <p className="text-sm text-slate-400">No data yet.</p>
+                          <p className="text-sm text-fg-muted">No data yet.</p>
                         ) : (
                           leaderboard.overall.map((entry, index) => (
                             <LeaderboardRow
@@ -290,13 +272,13 @@ function DashboardView() {
                         )}
                       </div>
                     </div>
-                    <div className="rounded-3xl bg-slate-950/70 p-4">
+                    <div className="rounded-3xl bg-overlay/70 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                          <h3 className="text-sm uppercase tracking-[0.24em] text-cyan-400/80">
+                          <h3 className="text-sm uppercase tracking-[0.24em] text-accent/80">
                             Group leaderboard
                           </h3>
-                          <p className="mt-2 text-sm text-slate-400">
+                          <p className="mt-2 text-sm text-fg-muted">
                             Select one group to view its ranking.
                           </p>
                         </div>
@@ -306,7 +288,7 @@ function DashboardView() {
                             <select
                               value={selectedGroupId}
                               onChange={handleGroupSelection}
-                              className="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 sm:w-auto"
+                              className="w-full rounded-2xl border border-default bg-elevated/90 px-4 py-3 text-sm text-fg outline-none transition duration-200 focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:w-auto"
                             >
                               {groups.map((group) => (
                                 <option key={group.id} value={group.id}>
@@ -316,14 +298,14 @@ function DashboardView() {
                             </select>
                           </label>
                         ) : (
-                          <p className="text-sm text-slate-500">
+                          <p className="text-sm text-fg-subtle">
                             Join or create a group to see member rankings.
                           </p>
                         )}
                       </div>
                       <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
                         {leaderboard.group.length === 0 ? (
-                          <p className="text-sm text-slate-400">No group leaderboard data yet.</p>
+                          <p className="text-sm text-fg-muted">No group leaderboard data yet.</p>
                         ) : (
                           leaderboard.group.map((entry, index) => (
                             <LeaderboardRow
@@ -341,41 +323,38 @@ function DashboardView() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {view === 'mypicks' && (
+          {view === 'mypicks' ? (
             <Suspense fallback={<LazyFallback label="Loading your picks…" />}>
               <PicksHistory picks={picks} games={games} />
             </Suspense>
-          )}
+          ) : null}
 
-          {view === 'groups' && (
+          {view === 'groups' ? (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
-              <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
+              <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
                 {user ? (
                   <>
-                    <h2 className="text-2xl font-semibold text-white">Create a new group</h2>
-                    <p className="mt-2 text-slate-400">
+                    <h2 className="text-2xl font-semibold text-fg">Create a new group</h2>
+                    <p className="mt-2 text-fg-muted">
                       Invite friends and compare scores in your private pool.
                     </p>
                     <form onSubmit={onCreateGroupSubmit} className="mt-6 space-y-4">
-                      <label htmlFor="group-name" className="sr-only">
-                        Group name
-                      </label>
-                      <input
+                      <Input
                         id="group-name"
+                        aria-label="Group name"
                         value={authData.groupName}
                         onChange={(event) =>
                           setAuthData((prev) => ({ ...prev, groupName: event.target.value }))
                         }
                         placeholder="Group name"
-                        className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
                       />
-                      <fieldset className="rounded-3xl border border-slate-800 bg-slate-950/50 px-4 py-3">
-                        <legend className="px-2 text-xs uppercase tracking-[0.25em] text-slate-400">
+                      <fieldset className="rounded-3xl border border-default bg-overlay/50 px-4 py-3">
+                        <legend className="px-2 text-xs uppercase tracking-[0.25em] text-fg-muted">
                           Visibility
                         </legend>
-                        <div className="flex flex-wrap gap-3 pt-2 text-sm text-slate-200">
+                        <div className="flex flex-wrap gap-3 pt-2 text-sm text-fg">
                           <label className="inline-flex items-center gap-2">
                             <input
                               type="radio"
@@ -402,12 +381,9 @@ function DashboardView() {
                           </label>
                         </div>
                       </fieldset>
-                      <button
-                        type="submit"
-                        className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                      >
+                      <Button type="submit" variant="primary" size="lg">
                         Create group
-                      </button>
+                      </Button>
                     </form>
                   </>
                 ) : (
@@ -418,7 +394,7 @@ function DashboardView() {
                 )}
 
                 <div className="mt-6 space-y-3">
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
+                  <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
                     Discover public groups
                   </h3>
                   {discoverGroups.length === 0 ? (
@@ -430,24 +406,23 @@ function DashboardView() {
                     discoverGroups.map((group) => (
                       <div
                         key={group.id}
-                        className="flex flex-col gap-3 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                        className="flex flex-col gap-3 rounded-2xl bg-overlay/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-white">{group.name}</p>
-                          <p className="text-xs text-slate-400">
+                          <p className="truncate text-sm font-semibold text-fg">{group.name}</p>
+                          <p className="text-xs text-fg-muted">
                             {group.memberCount} member{group.memberCount === 1 ? '' : 's'}
                           </p>
                         </div>
-                        <button
-                          type="button"
+                        <Button
+                          size="sm"
                           onClick={() => {
                             if (!gate('join a group')) return;
                             handleJoinPublicGroup(group.id);
                           }}
-                          className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           Join
-                        </button>
+                        </Button>
                       </div>
                     ))
                   )}
@@ -459,10 +434,10 @@ function DashboardView() {
               </div>
 
               <div className="space-y-4">
-                {pendingInvites.length > 0 && (
-                  <div className="rounded-3xl border border-amber-800/50 bg-amber-950/30 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.32)]">
-                    <h2 className="text-2xl font-semibold text-white">Pending Invitations</h2>
-                    <p className="mt-2 text-sm text-amber-200/80">
+                {pendingInvites.length > 0 ? (
+                  <div className="rounded-3xl border border-warning/40 bg-warning/5 p-6 shadow-glow">
+                    <h2 className="text-2xl font-semibold text-fg">Pending Invitations</h2>
+                    <p className="mt-2 text-sm text-warning">
                       You have {pendingInvites.length} pending group invitation
                       {pendingInvites.length !== 1 ? 's' : ''}.
                     </p>
@@ -470,33 +445,30 @@ function DashboardView() {
                       {pendingInvites.map((invite) => (
                         <div
                           key={invite.id}
-                          className="flex flex-col gap-3 rounded-3xl bg-slate-950/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                          className="flex flex-col gap-3 rounded-3xl bg-overlay/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="min-w-0">
-                            <p className="text-sm text-slate-300">Invited to join</p>
-                            <p className="mt-1 truncate font-semibold text-white">
+                            <p className="text-sm text-fg">Invited to join</p>
+                            <p className="mt-1 truncate font-semibold text-fg">
                               {invite.groupName}
                             </p>
                           </div>
                           <div className="flex gap-2">
-                            <button
-                              onClick={() => handleAcceptInvite(invite.groupId, invite.id)}
-                              className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                            >
+                            <Button onClick={() => handleAcceptInvite(invite.groupId, invite.id)}>
                               Accept
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              variant="secondary"
                               onClick={() => handleDeclineInvite(invite.groupId, invite.id)}
-                              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-sm font-semibold text-slate-300 transition duration-300 hover:border-slate-500 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                             >
                               Decline
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {groups.length === 0 ? (
                   <EmptyState
@@ -518,21 +490,21 @@ function DashboardView() {
                 )}
               </div>
             </div>
-          )}
+          ) : null}
 
-          {view === 'profile' && (
-            <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+          {view === 'profile' ? (
+            <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
               {!ownProfile ? (
-                <p className="text-sm text-slate-400">Loading your profile…</p>
+                <p className="text-sm text-fg-muted">Loading your profile…</p>
               ) : (
                 <Suspense fallback={<LazyFallback label="Loading profile…" />}>
                   <ProfileView profile={ownProfile} editable />
                 </Suspense>
               )}
             </div>
-          )}
+          ) : null}
 
-          {view === 'leaderboard' && (
+          {view === 'leaderboard' ? (
             <div className="grid gap-6 lg:grid-cols-2">
               <LeaderboardCard
                 title="Overall Leaderboard"
@@ -555,13 +527,13 @@ function DashboardView() {
                 onChangeOffset={handleChangeGroupOffset}
               />
             </div>
-          )}
+          ) : null}
 
-          {view === 'admin' && user?.role === 'admin' && (
+          {view === 'admin' && user?.role === 'admin' ? (
             <Suspense fallback={<LazyFallback label="Loading admin panel…" />}>
               <AdminPanel />
             </Suspense>
-          )}
+          ) : null}
         </section>
       </main>
 
@@ -586,12 +558,12 @@ function CompletedSection({ completedGames, showCompleted, setShowCompleted }) {
       <button
         type="button"
         onClick={() => setShowCompleted((prev) => !prev)}
-        className="w-full rounded-3xl border border-slate-800 bg-slate-900/60 px-5 py-4 text-left text-sm font-semibold uppercase tracking-[0.24em] text-slate-300 transition duration-200 hover:border-slate-600 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className="w-full rounded-3xl border border-default bg-elevated/60 px-5 py-4 text-left text-sm font-semibold uppercase tracking-[0.24em] text-fg transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-expanded={showCompleted}
       >
         {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
       </button>
-      {showCompleted && completedGames.map((game) => <GameCard key={game.id} game={game} />)}
+      {showCompleted ? completedGames.map((game) => <GameCard key={game.id} game={game} />) : null}
     </div>
   );
 }

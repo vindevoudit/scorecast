@@ -10,7 +10,7 @@ function SkeletonView() {
         <SkeletonGameCard />
         <SkeletonGameCard />
       </div>
-      <div className="space-y-3 rounded-3xl border border-slate-800 bg-slate-900/85 p-6">
+      <div className="space-y-3 rounded-3xl border border-default bg-elevated/85 p-6">
         <SkeletonLeaderboardRow />
         <SkeletonLeaderboardRow />
         <SkeletonLeaderboardRow />

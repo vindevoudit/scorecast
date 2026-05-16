@@ -1,8 +1,10 @@
+// Tier 11 Chunk 2 — BadgeWall tokenized.
+
 function BadgeWall({ catalog = [], earned = [] }) {
   const earnedSet = new Set(earned.map((b) => b.slug));
 
   if (!catalog.length) {
-    return <p className="text-sm text-slate-500">No badges defined yet.</p>;
+    return <p className="text-sm text-fg-subtle">No badges defined yet.</p>;
   }
 
   return (
@@ -15,13 +17,13 @@ function BadgeWall({ catalog = [], earned = [] }) {
             title={badge.description}
             className={`rounded-3xl border p-4 text-center transition duration-200 ${
               isEarned
-                ? 'border-cyan-400/40 bg-cyan-500/10 text-white'
-                : 'border-slate-800 bg-slate-950/60 text-slate-500 grayscale'
+                ? 'border-accent/40 bg-accent/10 text-fg'
+                : 'border-default bg-overlay/60 text-fg-subtle grayscale'
             }`}
           >
             <div className="text-3xl">{badge.emoji}</div>
             <p className="mt-2 text-sm font-semibold">{badge.name}</p>
-            <p className="mt-1 text-xs text-slate-400">{badge.description}</p>
+            <p className="mt-1 text-xs text-fg-muted">{badge.description}</p>
           </div>
         );
       })}

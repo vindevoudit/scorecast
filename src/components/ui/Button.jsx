@@ -30,7 +30,7 @@ const buttonStyles = cva(
       variant: {
         primary: 'bg-accent text-accent-fg hover:bg-accent-strong',
         secondary:
-          'border border-strong bg-elevated/80 text-accent-soft hover:border-strong hover:bg-elevated hover:text-fg',
+          'border border-strong bg-elevated/80 text-fg hover:border-strong hover:bg-elevated hover:text-accent-soft',
         ghost: 'text-fg-muted hover:bg-elevated hover:text-fg',
         destructive: 'bg-danger text-accent-fg hover:opacity-90',
         link: 'rounded-none text-accent underline-offset-4 hover:underline',

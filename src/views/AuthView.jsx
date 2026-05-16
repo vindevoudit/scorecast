@@ -145,7 +145,7 @@ function AuthView() {
       <button
         type="button"
         onClick={() => setShowAuth(false)}
-        className="inline-flex items-center gap-2 rounded-2xl border border-slate-800 bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-300 transition duration-200 hover:border-slate-600 hover:bg-slate-900 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className="inline-flex items-center gap-2 rounded-2xl border border-default bg-elevated/60 px-4 py-2 text-sm font-semibold text-fg transition duration-200 hover:border-strong hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         <svg
           viewBox="0 0 24 24"

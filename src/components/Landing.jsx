@@ -1,3 +1,9 @@
+// Tier 11 Chunk 2 — Landing tokenized. The BANTRYX wordmark uses the
+// `text-shadow-brand-glow` utility from index.css (so light mode dials the
+// bloom down via tokens) rather than the inline three-layer style.
+
+import { Button } from './ui';
+
 const FEATURES = [
   {
     icon: '🎯',
@@ -39,77 +45,99 @@ const STEPS = [
   },
 ];
 
-const STRONG_GLOW = {
-  textShadow:
-    '0 0 30px rgba(56, 189, 248, 0.85), 0 0 70px rgba(56, 189, 248, 0.55), 0 0 120px rgba(56, 189, 248, 0.3)',
-};
-
-const SOFT_GLOW = { textShadow: '0 0 24px rgba(56, 189, 248, 0.4)' };
-
-const STEP_GLOW = { textShadow: '0 0 30px rgba(56, 189, 248, 0.25)' };
-
 function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
   return (
     <div className="space-y-20 pb-12 md:space-y-32">
-      <section className="relative pt-8 md:pt-16">
+      <section className="relative overflow-hidden pt-8 md:pt-16">
+        {/* Layered atmosphere: arena grid backdrop + two cyan blooms +
+            a horizon line that anchors the wordmark on a "field" */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute left-1/4 top-0 -z-10 h-72 w-72 rounded-full bg-cyan-500/10 blur-3xl"
+          className="bg-arena-grid pointer-events-none absolute inset-0 -z-20"
         />
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute right-1/4 top-24 -z-10 h-96 w-96 rounded-full bg-sky-600/10 blur-3xl"
+          className="pointer-events-none absolute left-1/4 top-0 -z-10 h-72 w-72 rounded-full bg-accent/10 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute right-1/4 top-24 -z-10 h-96 w-96 rounded-full bg-accent-strong/10 blur-3xl"
         />
 
         <div className="relative z-10 mx-auto max-w-4xl px-4 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.5em] text-cyan-400/80">
-            Predict · Compete · Climb
-          </p>
-          <h1
-            className="mt-6 select-none text-[clamp(3.25rem,12vw,8rem)] font-black uppercase leading-[0.95] tracking-[0.04em] text-cyan-50"
-            style={STRONG_GLOW}
+          {/* Kicker — thin spaced-out sans for a refined ticker-tape feel.
+              The diamond separators are dimmer than the words for rhythm. */}
+          <p
+            className="flex items-center justify-center gap-3 text-xs font-light tracking-[0.5em] text-accent sm:gap-4 sm:text-sm"
+            aria-label="Predict, Compete, Climb"
           >
+            <span>PREDICT</span>
+            <span aria-hidden="true" className="text-accent/40">
+              ◆
+            </span>
+            <span>COMPETE</span>
+            <span aria-hidden="true" className="text-accent/40">
+              ◆
+            </span>
+            <span>CLIMB</span>
+          </p>
+
+          <h1 className="text-shadow-brand-glow font-display mt-7 select-none text-[clamp(3.5rem,13vw,9rem)] leading-[0.85] tracking-[0.02em] text-accent-soft">
             BANTRYX
           </h1>
-          <p className="mt-5 text-sm italic tracking-[0.08em] text-cyan-200/80 sm:text-base">
-            no betting, just Bantryx
+
+          {/* Slogan: editorial italic serif, framed by short neon accent
+              lines. No glow on the text itself — the surrounding lines do
+              the brand work so the letters read crisply white. */}
+          <div className="mt-7 flex items-center justify-center gap-4">
+            <span
+              aria-hidden="true"
+              className="h-px w-10 bg-gradient-to-r from-transparent to-accent shadow-[0_0_8px_rgba(34,211,238,0.6)] sm:w-16"
+            />
+            <p className="text-shadow-soft-glow text-lg italic text-white sm:text-2xl">
+              no betting, just Bantryx
+            </p>
+            <span
+              aria-hidden="true"
+              className="h-px w-10 bg-gradient-to-l from-transparent to-accent shadow-[0_0_8px_rgba(34,211,238,0.6)] sm:w-16"
+            />
+          </div>
+
+          <p className="mx-auto mt-10 max-w-2xl text-lg text-fg sm:text-xl">
+            Football prediction made <span className="font-semibold text-fg">social</span>,{' '}
+            <span className="font-semibold text-fg">competitive</span>, and{' '}
+            <span className="font-semibold text-fg">fun</span>. Pick winners, earn points for risky
+            calls and underdog upsets, and climb the live leaderboards against your friends.
           </p>
-          <p className="mx-auto mt-8 max-w-2xl text-lg text-slate-300 sm:text-xl">
-            Football prediction made <span className="font-semibold text-white">social</span>,{' '}
-            <span className="font-semibold text-white">competitive</span>, and{' '}
-            <span className="font-semibold text-white">fun</span>. Pick winners, earn points for
-            risky calls and underdog upsets, and climb the live leaderboards against your friends.
-          </p>
+
           <div className="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="lg"
               onClick={onSignUp}
-              className="rounded-3xl bg-cyan-400 px-8 py-4 text-base font-semibold text-slate-950 shadow-[0_20px_50px_rgba(56,189,248,0.25)] transition duration-200 hover:bg-cyan-300 hover:shadow-[0_24px_60px_rgba(56,189,248,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              className="px-8 py-4 text-base shadow-[0_0_30px_-4px_rgba(34,211,238,0.6)]"
             >
               Get started — it's free
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
               onClick={onSignIn}
-              className="rounded-3xl border border-slate-700 bg-slate-900/80 px-8 py-4 text-base font-semibold text-cyan-300 transition duration-200 hover:border-slate-500 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="px-8 py-4 text-base"
             >
               Sign in
-            </button>
+            </Button>
           </div>
-          {onBrowseAsGuest && (
-            <button
-              type="button"
-              onClick={onBrowseAsGuest}
-              className="mt-6 text-sm font-medium text-slate-400 underline-offset-4 transition duration-200 hover:text-cyan-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+          {onBrowseAsGuest ? (
+            <Button variant="link" onClick={onBrowseAsGuest} className="mt-6 text-sm text-fg-muted">
               Or just browse as a guest →
-            </button>
-          )}
+            </Button>
+          ) : null}
         </div>
       </section>
 
       <section className="mx-auto max-w-5xl px-4">
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-3xl border border-slate-800 bg-slate-800 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-3xl border border-default bg-divider sm:grid-cols-3">
           <Stat number="+62" label="points for a 38% underdog upset" />
           <Stat number="∞" label="private groups you can build" />
           <Stat number="30s" label="from sign-up to first pick" />
@@ -138,36 +166,24 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
       </section>
 
       <section className="mx-auto max-w-3xl px-4">
-        <div className="rounded-3xl border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 via-slate-900/40 to-slate-950/40 p-10 text-center shadow-[0_30px_80px_rgba(6,182,212,0.18)] md:p-14">
-          <h2 className="text-3xl font-semibold text-white sm:text-4xl">
+        <div className="rounded-3xl border border-accent/30 bg-gradient-to-br from-accent/10 via-elevated/40 to-base/40 p-10 text-center shadow-glow md:p-14">
+          <h2 className="text-3xl font-semibold text-fg sm:text-4xl">
             Ready to outpick your group chat?
           </h2>
-          <p className="mt-4 text-slate-300">Sign up, pick a side, and let the math do the rest.</p>
+          <p className="mt-4 text-fg">Sign up, pick a side, and let the math do the rest.</p>
           <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <button
-              type="button"
-              onClick={onSignUp}
-              className="rounded-3xl bg-cyan-400 px-8 py-4 text-base font-semibold text-slate-950 transition duration-200 hover:bg-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            <Button variant="primary" size="lg" onClick={onSignUp} className="px-8 py-4 text-base">
               Create your account
-            </button>
-            <button
-              type="button"
-              onClick={onSignIn}
-              className="text-sm font-semibold text-cyan-300 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button variant="link" onClick={onSignIn} className="text-sm">
               Or sign in →
-            </button>
+            </Button>
           </div>
-          {onBrowseAsGuest && (
-            <button
-              type="button"
-              onClick={onBrowseAsGuest}
-              className="mt-6 text-xs font-medium text-slate-400 underline-offset-4 transition duration-200 hover:text-cyan-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+          {onBrowseAsGuest ? (
+            <Button variant="link" onClick={onBrowseAsGuest} className="mt-6 text-xs text-fg-muted">
               Just browsing? Continue as a guest →
-            </button>
-          )}
+            </Button>
+          ) : null}
         </div>
       </section>
     </div>
@@ -176,11 +192,11 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
 
 function Stat({ number, label }) {
   return (
-    <div className="bg-slate-900/85 p-8 text-center">
-      <p className="text-4xl font-black text-cyan-50 sm:text-5xl" style={SOFT_GLOW}>
+    <div className="bg-elevated/85 p-8 text-center">
+      <p className="text-shadow-brand-glow text-4xl font-black text-accent-soft sm:text-5xl">
         {number}
       </p>
-      <p className="mt-3 text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
+      <p className="mt-3 text-xs uppercase tracking-[0.2em] text-fg-muted">{label}</p>
     </div>
   );
 }
@@ -188,25 +204,25 @@ function Stat({ number, label }) {
 function SectionHeader({ eyebrow, title }) {
   return (
     <div className="mx-auto max-w-2xl text-center">
-      <p className="text-xs font-semibold uppercase tracking-[0.4em] text-cyan-400/80">{eyebrow}</p>
-      <h2 className="mt-4 text-3xl font-semibold leading-tight text-white sm:text-4xl">{title}</h2>
+      <p className="text-xs font-semibold uppercase tracking-[0.4em] text-accent/80">{eyebrow}</p>
+      <h2 className="mt-4 text-3xl font-semibold leading-tight text-fg sm:text-4xl">{title}</h2>
     </div>
   );
 }
 
 function FeatureCard({ icon, title, body }) {
   return (
-    <div className="group relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60 p-8 transition duration-300 hover:border-cyan-500/30 hover:bg-slate-900/85">
+    <div className="group relative overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 transition duration-300 hover:border-accent/30 hover:bg-elevated/85">
       <div className="flex items-center gap-3">
         <span className="text-3xl" aria-hidden="true">
           {icon}
         </span>
-        <h3 className="text-xl font-semibold text-white">{title}</h3>
+        <h3 className="text-xl font-semibold text-fg">{title}</h3>
       </div>
-      <p className="mt-4 text-slate-300">{body}</p>
+      <p className="mt-4 text-fg">{body}</p>
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -bottom-12 -right-12 h-32 w-32 rounded-full bg-cyan-500/5 blur-2xl transition duration-300 group-hover:bg-cyan-500/15"
+        className="pointer-events-none absolute -bottom-12 -right-12 h-32 w-32 rounded-full bg-accent/5 blur-2xl transition duration-300 group-hover:bg-accent/15"
       />
     </div>
   );
@@ -214,12 +230,10 @@ function FeatureCard({ icon, title, body }) {
 
 function Step({ number, title, body }) {
   return (
-    <li className="rounded-3xl border border-slate-800 bg-slate-900/50 p-8">
-      <p className="text-5xl font-black text-cyan-400/40" style={STEP_GLOW}>
-        {number}
-      </p>
-      <h3 className="mt-4 text-xl font-semibold text-white">{title}</h3>
-      <p className="mt-3 text-sm text-slate-300">{body}</p>
+    <li className="rounded-3xl border border-default bg-elevated/50 p-8">
+      <p className="text-5xl font-black text-accent/40">{number}</p>
+      <h3 className="mt-4 text-xl font-semibold text-fg">{title}</h3>
+      <p className="mt-3 text-sm text-fg">{body}</p>
     </li>
   );
 }

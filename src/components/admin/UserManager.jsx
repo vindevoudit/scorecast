@@ -1,11 +1,13 @@
+// Tier 11 Chunk 2 — UserManager tokenized.
+
 import { useEffect, useMemo, useState } from 'react';
 import ConfirmModal from '../ConfirmModal';
+import { Badge, Button } from '../ui';
 import { useRequest } from '../../hooks/useRequest';
 import { useAuth } from '../../hooks/useAuth';
 import { useNotifications } from '../../hooks/useNotifications';
 
 function UserManager() {
-  // Tier 13 Chunk 5 — context-driven.
   const request = useRequest();
   const { user } = useAuth();
   const { showStatus } = useNotifications();
@@ -59,16 +61,16 @@ function UserManager() {
     });
   };
 
-  const toggleRole = async (user) => {
+  const toggleRole = async (target) => {
     setBusy(true);
     try {
-      const nextRole = user.role === 'admin' ? 'user' : 'admin';
-      await request(`/api/admin/users/${user.id}/role`, {
+      const nextRole = target.role === 'admin' ? 'user' : 'admin';
+      await request(`/api/admin/users/${target.id}/role`, {
         method: 'POST',
         body: JSON.stringify({ role: nextRole }),
       });
       await load();
-      onSuccess?.(`${user.username} is now ${nextRole}`);
+      onSuccess?.(`${target.username} is now ${nextRole}`);
     } catch (error) {
       onError?.(error.message);
     } finally {
@@ -78,28 +80,18 @@ function UserManager() {
 
   const handleDelete = async () => {
     if (!pendingDelete) return;
-    const user = pendingDelete;
+    const target = pendingDelete;
     setPendingDelete(null);
     setBusy(true);
     try {
-      await request(`/api/admin/users/${user.id}`, { method: 'DELETE' });
+      await request(`/api/admin/users/${target.id}`, { method: 'DELETE' });
       await load();
-      onSuccess?.(`${user.username} deleted`);
+      onSuccess?.(`${target.username} deleted`);
     } catch (error) {
       onError?.(error.message);
     } finally {
       setBusy(false);
     }
-  };
-
-  const runBulk = async (action) => {
-    const ids = [...selectedIds];
-    if (ids.length === 0) return;
-    if (action === 'delete') {
-      setPendingBulk({ action, ids });
-      return;
-    }
-    await performBulk(action, ids);
   };
 
   const performBulk = async (action, ids) => {
@@ -123,13 +115,23 @@ function UserManager() {
     }
   };
 
-  return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_60px_rgba(15,23,42,0.32)]">
-      <h3 className="text-xl font-semibold text-white">Users</h3>
-      <p className="text-sm text-slate-400">Promote, demote, or delete users.</p>
+  const runBulk = async (action) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (action === 'delete') {
+      setPendingBulk({ action, ids });
+      return;
+    }
+    await performBulk(action, ids);
+  };
 
-      {selectableUsers.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-slate-950/70 px-3 py-2 text-xs text-slate-300">
+  return (
+    <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
+      <h3 className="text-xl font-semibold text-fg">Users</h3>
+      <p className="text-sm text-fg-muted">Promote, demote, or delete users.</p>
+
+      {selectableUsers.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-overlay/70 px-3 py-2 text-xs text-fg">
           <label className="inline-flex items-center gap-2">
             <input
               type="checkbox"
@@ -139,41 +141,42 @@ function UserManager() {
             />
             Select all
           </label>
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 ? (
             <>
-              <span className="ml-2 text-slate-500">{selectedIds.size} selected</span>
-              <button
-                type="button"
+              <span className="ml-2 text-fg-subtle">{selectedIds.size} selected</span>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => runBulk('promote')}
-                className="ml-auto rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+                className="ml-auto"
               >
                 Promote
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => runBulk('demote')}
-                className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
               >
                 Demote
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
                 disabled={busy}
                 onClick={() => runBulk('delete')}
-                className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
               >
                 Delete
-              </button>
+              </Button>
             </>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <div className="mt-5 space-y-2">
         {users.length === 0 ? (
-          <p className="text-sm text-slate-500">No users.</p>
+          <p className="text-sm text-fg-subtle">No users.</p>
         ) : (
           users.map((u) => {
             const isSelf = u.id === currentUserId;
@@ -181,7 +184,7 @@ function UserManager() {
             return (
               <div
                 key={u.id}
-                className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-2 rounded-2xl bg-overlay/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <input
@@ -192,42 +195,36 @@ function UserManager() {
                     aria-label={`Select ${u.username}`}
                   />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-white">
+                    <p className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold text-fg">
                       {u.username}
-                      {isSelf && (
-                        <span className="ml-2 text-xs uppercase tracking-widest text-cyan-300">
-                          you
-                        </span>
-                      )}
-                      <span
-                        className={`ml-2 rounded-full px-2 py-0.5 text-xs ${u.role === 'admin' ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-700/60 text-slate-300'}`}
-                      >
-                        {u.role}
-                      </span>
+                      {isSelf ? (
+                        <span className="text-xs uppercase tracking-widest text-accent">you</span>
+                      ) : null}
+                      <Badge tone={u.role === 'admin' ? 'warning' : 'neutral'}>{u.role}</Badge>
                     </p>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-fg-muted">
                       Joined {new Date(u.createdAt).toLocaleDateString()} · {u.picksCount} picks ·{' '}
                       {u.groupsCount} groups
                     </p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="secondary"
                     onClick={() => toggleRole(u)}
                     disabled={busy || isSelf}
-                    className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {u.role === 'admin' ? 'Demote' : 'Promote'}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
                     onClick={() => setPendingDelete(u)}
                     disabled={busy || isSelf}
-                    className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Delete
-                  </button>
+                  </Button>
                 </div>
               </div>
             );

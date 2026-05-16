@@ -45,8 +45,12 @@
    * style currently used in DashboardView/Landing. Light mode dials this
    * down so the bloom doesn't dominate a white background. */
   --shadow-brand-glow:
-    0 0 12px rgba(34, 211, 238, 0.9), 0 0 24px rgba(34, 211, 238, 0.65),
-    0 0 48px rgba(34, 211, 238, 0.4);
+    0 0 10px rgba(34, 211, 238, 0.55), 0 0 22px rgba(34, 211, 238, 0.35),
+    0 0 44px rgba(34, 211, 238, 0.2);
+
+  /* Subtler cyan halo for body-scale text that needs to read against the
+   * radial-glow area without competing with the BANTRYX wordmark. */
+  --shadow-soft-glow: 0 0 8px rgba(34, 211, 238, 0.55), 0 0 18px rgba(34, 211, 238, 0.3);
 
   /* Radii */
   --radius-sm: 0.5rem;
@@ -64,6 +68,25 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
+}
+
+/* Display + editorial type families — loaded via Google Fonts in index.html.
+ * Bebas Neue: condensed athletic display for the BANTRYX wordmark.
+ * Libre Baskerville Italic: classic Baskerville-family italic — restrained,
+ * editorial, the visual counterweight to the neon wordmark. */
+.font-display {
+  font-family:
+    'Bebas Neue',
+    Impact,
+    'Arial Narrow Bold',
+    sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.font-editorial-italic {
+  font-family: 'Libre Baskerville', 'Baskerville', 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 400;
 }
 
 :root[data-theme='light'] {
@@ -92,6 +115,7 @@
   --shadow-glow: 0 20px 60px rgba(8, 145, 178, 0.12);
   --shadow-brand-glow:
     0 0 8px rgba(8, 145, 178, 0.4), 0 0 16px rgba(8, 145, 178, 0.25);
+  --shadow-soft-glow: 0 0 6px rgba(8, 145, 178, 0.3);
 }
 
 /* When the user actively switches themes, briefly disable transitions on
@@ -147,5 +171,21 @@ input {
 
   .text-shadow-brand-glow {
     text-shadow: var(--shadow-brand-glow);
+  }
+
+  .text-shadow-soft-glow {
+    text-shadow: var(--shadow-soft-glow);
+  }
+
+  /* Stadium scoreboard grid — subtle 56px grid in foreground/4% opacity,
+   * masked by a radial fade so the edges dissolve. Used as a background
+   * layer on the Landing hero to evoke a sports broadcast screen. */
+  .bg-arena-grid {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
   }
 }

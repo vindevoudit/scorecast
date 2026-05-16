@@ -1,3 +1,6 @@
+// Tier 11 Chunk 2 — SearchBar tokenized. Responsive icon-only mobile state
+// preserved (Wave D contract from the pre-tier sidebar work).
+
 import { useEffect, useRef, useState } from 'react';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
@@ -7,10 +10,6 @@ function formatGameDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
 }
 
-// Tier 13 Chunk 5 — request + showStatus + openProfile come from contexts.
-// onSelectGroup + onSelectGame stay as callback props because they encode
-// App.jsx-specific view-routing decisions (which tab to open, whether to
-// auto-join a public group). Search itself doesn't know about that.
 function SearchBar({ onSelectGroup, onSelectGame }) {
   const request = useRequest();
   const { showStatus } = useNotifications();
@@ -23,9 +22,6 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
   const [results, setResults] = useState({ users: [], groups: [], games: [] });
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  // Below `md:` the input renders as an icon-only button to save row space.
-  // Tapping the icon promotes it to a small inline input that doesn't push
-  // bell / UserMenu off the row.
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const containerRef = useRef(null);
   const inputRef = useRef(null);
@@ -81,6 +77,9 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
 
   const hasResults = results.users.length || results.groups.length || results.games.length;
 
+  const itemBtn =
+    'block w-full truncate rounded-2xl px-2 py-1 text-left text-sm text-fg hover:bg-overlay/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+
   return (
     <div ref={containerRef} className="relative">
       <button
@@ -88,11 +87,9 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
         aria-label="Search"
         onClick={() => {
           setMobileExpanded(true);
-          // Defer focus to next tick so the input is visible by the time we
-          // call .focus() — otherwise mobile Safari ignores the focus call.
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
-        className={`flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/80 text-slate-300 transition-colors duration-200 hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 md:hidden ${mobileExpanded ? 'hidden' : ''}`}
+        className={`flex h-12 w-12 items-center justify-center rounded-2xl border border-default bg-elevated/80 text-fg transition-colors duration-200 hover:bg-overlay hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:hidden ${mobileExpanded ? 'hidden' : ''}`}
       >
         <svg
           viewBox="0 0 24 24"
@@ -122,22 +119,22 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
         }}
         onFocus={() => setOpen(true)}
         placeholder="Search users, groups, games…"
-        className={`h-12 rounded-3xl border border-slate-700 bg-slate-900/80 px-4 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400 md:inline-block md:w-64 md:focus:w-80 ${
+        className={`h-12 rounded-3xl border border-default bg-elevated/80 px-4 text-sm text-fg outline-none transition duration-200 focus:border-accent focus-visible:ring-2 focus-visible:ring-accent md:inline-block md:w-64 md:focus:w-80 ${
           mobileExpanded ? 'block w-44 focus:w-48' : 'hidden'
         }`}
       />
 
-      {open && q.trim().length >= 2 && (
-        <div className="absolute left-0 z-40 mt-2 w-72 max-w-[calc(100vw-6rem)] rounded-3xl border border-slate-800 bg-slate-900/95 p-3 shadow-[0_30px_80px_rgba(15,23,42,0.65)] md:left-auto md:right-0 md:w-80 md:max-w-none">
+      {open && q.trim().length >= 2 ? (
+        <div className="absolute left-0 z-40 mt-2 w-72 max-w-[calc(100vw-6rem)] rounded-3xl border border-default bg-elevated p-3 shadow-glow md:left-auto md:right-0 md:w-80 md:max-w-none">
           {loading ? (
-            <p className="text-xs text-slate-500">Searching…</p>
+            <p className="text-xs text-fg-subtle">Searching…</p>
           ) : !hasResults ? (
-            <p className="text-xs text-slate-500">No matches.</p>
+            <p className="text-xs text-fg-subtle">No matches.</p>
           ) : (
             <div className="space-y-3">
-              {results.users.length > 0 && (
+              {results.users.length > 0 ? (
                 <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Users</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Users</p>
                   <ul className="mt-1 space-y-1">
                     {results.users.map((u) => (
                       <li key={u.id}>
@@ -147,7 +144,7 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                             onSelectUser?.(u.username);
                             close();
                           }}
-                          className="block w-full truncate rounded-2xl px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          className={itemBtn}
                         >
                           {u.displayName ? `${u.displayName} (@${u.username})` : u.username}
                         </button>
@@ -155,10 +152,10 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                     ))}
                   </ul>
                 </div>
-              )}
-              {results.groups.length > 0 && (
+              ) : null}
+              {results.groups.length > 0 ? (
                 <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Groups</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Groups</p>
                   <ul className="mt-1 space-y-1">
                     {results.groups.map((g) => (
                       <li key={g.id}>
@@ -168,10 +165,10 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                             onSelectGroup?.(g);
                             close();
                           }}
-                          className="flex w-full items-center justify-between gap-2 rounded-2xl px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          className={`${itemBtn} flex items-center justify-between gap-2`}
                         >
                           <span className="truncate">{g.name}</span>
-                          <span className="shrink-0 text-xs text-slate-500">
+                          <span className="shrink-0 text-xs text-fg-subtle">
                             {g.visibility === 'public' ? 'public' : 'private'}
                             {g.isMember ? ' · joined' : ''}
                           </span>
@@ -180,10 +177,10 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                     ))}
                   </ul>
                 </div>
-              )}
-              {results.games.length > 0 && (
+              ) : null}
+              {results.games.length > 0 ? (
                 <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Games</p>
+                  <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Games</p>
                   <ul className="mt-1 space-y-1">
                     {results.games.map((g) => (
                       <li key={g.id}>
@@ -193,10 +190,10 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                             onSelectGame?.(g);
                             close();
                           }}
-                          className="block w-full truncate rounded-2xl px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                          className={itemBtn}
                         >
                           {g.homeTeam} vs {g.awayTeam}
-                          <span className="ml-2 text-xs text-slate-500">
+                          <span className="ml-2 text-xs text-fg-subtle">
                             · {formatGameDate(g.date)}
                           </span>
                         </button>
@@ -204,11 +201,11 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                     ))}
                   </ul>
                 </div>
-              )}
+              ) : null}
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

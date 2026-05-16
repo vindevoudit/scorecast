@@ -1,11 +1,18 @@
+// Tier 11 Chunk 2 — CommentThread migrated. Reaction toggle preserves its
+// gate('react') wiring; the post composer (authed) becomes a tokenized
+// Textarea + Button; anon visitors still get the InlineGatePanel fallback.
+
 import { useEffect, useState } from 'react';
 import { timeAgo } from '../utils/time';
 import Avatar from './Avatar';
+import EmptyState from './EmptyState';
 import InlineGatePanel from './InlineGatePanel';
+import { SkeletonCommentRow } from './Skeleton';
 import { useRequest } from '../hooks/useRequest';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useNotifications } from '../hooks/useNotifications';
+import { Button, Textarea } from './ui';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
 
@@ -25,48 +32,44 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
   };
 
   return (
-    <li className="rounded-2xl bg-slate-950/70 px-4 py-3">
-      <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
-        <span className="flex items-center gap-2 font-semibold text-slate-200">
+    <li className="rounded-2xl bg-overlay/70 px-4 py-3">
+      <div className="flex items-center justify-between gap-2 text-xs text-fg-muted">
+        <span className="flex items-center gap-2 font-semibold text-fg">
           <Avatar username={comment.username} size={20} />
           {comment.username}
         </span>
         <span>
           {timeAgo(comment.createdAt)}
-          {comment.editedAt && <span className="ml-1 text-slate-500">(edited)</span>}
+          {comment.editedAt ? <span className="ml-1 text-fg-subtle">(edited)</span> : null}
         </span>
       </div>
 
       {editing ? (
         <form onSubmit={submitEdit} className="mt-2 space-y-2">
-          <textarea
+          <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             maxLength={500}
             rows={2}
-            className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
           />
           <div className="flex justify-end gap-2">
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => {
                 setDraft(comment.body);
                 setEditing(false);
               }}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               Cancel
-            </button>
-            <button
-              type="submit"
-              className="rounded-2xl bg-cyan-500 px-3 py-1 text-xs font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button type="submit" size="sm">
               Save
-            </button>
+            </Button>
           </div>
         </form>
       ) : (
-        <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">{comment.body}</p>
+        <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{comment.body}</p>
       )}
 
       <div className="mt-2 flex flex-wrap items-center gap-1">
@@ -78,12 +81,12 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
               key={emoji}
               type="button"
               onClick={() => onToggleReaction(comment.id, emoji, mine)}
-              className={`rounded-full px-2 py-1 text-xs transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+              className={`rounded-full px-2 py-1 text-xs transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                 mine
-                  ? 'bg-cyan-500/20 text-cyan-100'
+                  ? 'bg-accent/20 text-accent'
                   : count > 0
-                    ? 'bg-slate-900/80 text-slate-200 hover:bg-slate-900'
-                    : 'text-slate-500 hover:text-slate-300'
+                    ? 'bg-elevated/80 text-fg hover:bg-elevated'
+                    : 'text-fg-subtle hover:text-fg'
               }`}
             >
               {emoji}
@@ -91,32 +94,30 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
             </button>
           );
         })}
-        {isAuthor && !editing && (
+        {isAuthor && !editing ? (
           <div className="ml-auto flex gap-2">
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="text-xs text-slate-500 hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="text-xs text-fg-subtle hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               Edit
             </button>
             <button
               type="button"
               onClick={() => onDelete(comment.id)}
-              className="text-xs text-slate-500 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="text-xs text-fg-subtle hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               Delete
             </button>
           </div>
-        )}
+        ) : null}
       </div>
     </li>
   );
 }
 
 function CommentThread({ gameId }) {
-  // Tier 13 Chunk 5 — was driven by props; now reads request + currentUserId
-  // + showStatus from the surrounding contexts directly.
   const request = useRequest();
   const { user } = useAuth();
   const { gate } = useAuthGate();
@@ -237,40 +238,33 @@ function CommentThread({ gameId }) {
   };
 
   return (
-    <div className="mt-4 border-t border-slate-800 pt-4">
+    <div className="mt-4 border-t border-default pt-4">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300 transition duration-200 hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className="text-xs font-semibold uppercase tracking-[0.25em] text-accent transition duration-200 hover:text-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-expanded={open}
       >
-        {open ? 'Hide' : 'Show'} comments {comments.length > 0 && `(${comments.length})`}
+        {open ? 'Hide' : 'Show'} comments {comments.length > 0 ? `(${comments.length})` : ''}
       </button>
 
-      {open && (
+      {open ? (
         <div className="mt-3 space-y-3">
           {user ? (
             <form onSubmit={submit} className="space-y-2">
-              <label htmlFor={`comment-${gameId}`} className="sr-only">
-                Comment
-              </label>
-              <textarea
+              <Textarea
                 id={`comment-${gameId}`}
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 maxLength={500}
                 rows={2}
                 placeholder="Add some banter…"
-                className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+                aria-label="Comment"
               />
               <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={submitting || !body.trim()}
-                  className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                <Button type="submit" size="sm" disabled={submitting || !body.trim()}>
                   Post
-                </button>
+                </Button>
               </div>
             </form>
           ) : (
@@ -281,9 +275,15 @@ function CommentThread({ gameId }) {
           )}
 
           {loading ? (
-            <p className="text-xs text-slate-500">Loading…</p>
+            <div className="space-y-2">
+              <SkeletonCommentRow />
+              <SkeletonCommentRow />
+            </div>
           ) : comments.length === 0 ? (
-            <p className="text-xs text-slate-500">No comments yet — be the first.</p>
+            <EmptyState
+              title="No comments yet"
+              description={user ? 'Be the first to say something.' : 'Sign in to start the chat.'}
+            />
           ) : (
             <ul className="space-y-2">
               {comments.map((c) => (
@@ -299,7 +299,7 @@ function CommentThread({ gameId }) {
             </ul>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

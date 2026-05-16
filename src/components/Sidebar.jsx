@@ -1,3 +1,7 @@
+// Tier 11 Chunk 2 — Sidebar tokenized. Preserves the Playwright role="tab"
+// + accessible-name contract (kicker + label) so the existing E2E selectors
+// keep resolving.
+
 import { useEffect, useRef } from 'react';
 
 const ICONS = {
@@ -86,21 +90,19 @@ function NavItem({ tab, active, collapsed, onSelect }) {
       aria-current={active ? 'page' : undefined}
       onClick={() => onSelect(tab.id)}
       title={collapsed ? accessibleName : undefined}
-      className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
-        active
-          ? 'bg-cyan-500/10 text-white'
-          : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+      className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+        active ? 'bg-accent/10 text-fg' : 'text-fg hover:bg-overlay/60 hover:text-fg'
       } ${collapsed ? 'justify-center' : ''}`}
     >
-      {active && (
+      {active ? (
         <span
           aria-hidden="true"
-          className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r bg-cyan-400"
+          className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r bg-accent"
         />
-      )}
+      ) : null}
       <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
       <span className={`min-w-0 flex-1 ${collapsed ? 'sr-only' : ''}`}>
-        <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+        <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-fg-muted">
           {tab.kicker}
         </span>
         <span className="mt-0.5 block truncate text-sm font-semibold">{tab.label}</span>
@@ -125,17 +127,17 @@ function SidebarBody({
           collapsed && !isMobile ? 'justify-center' : 'justify-between'
         }`}
       >
-        {(!collapsed || isMobile) && (
-          <span className="text-xs font-semibold uppercase tracking-[0.32em] text-cyan-400/80">
+        {!collapsed || isMobile ? (
+          <span className="text-xs font-semibold uppercase tracking-[0.32em] text-accent/80">
             Navigate
           </span>
-        )}
+        ) : null}
         {isMobile ? (
           <button
             type="button"
             onClick={onMobileClose}
             aria-label="Close navigation"
-            className="rounded-full p-2 text-slate-400 transition-colors duration-200 hover:bg-slate-800/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            className="rounded-full p-2 text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <CloseIcon className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -144,7 +146,7 @@ function SidebarBody({
             type="button"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-            className="rounded-full p-2 text-slate-400 transition-colors duration-200 hover:bg-slate-800/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            className="rounded-full p-2 text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <ChevronIcon direction={collapsed ? 'right' : 'left'} className="h-4 w-4" />
           </button>
@@ -198,7 +200,7 @@ function Sidebar({
   return (
     <>
       <aside
-        className={`hidden shrink-0 self-stretch border-r border-slate-800 bg-slate-900/85 motion-safe:transition-[width] motion-safe:duration-200 md:flex md:rounded-r-3xl ${
+        className={`hidden shrink-0 self-stretch border-r border-default bg-elevated/85 motion-safe:transition-[width] motion-safe:duration-200 md:flex md:rounded-r-3xl ${
           collapsed ? 'md:w-16' : 'md:w-60'
         }`}
       >
@@ -212,11 +214,11 @@ function Sidebar({
         />
       </aside>
 
-      {mobileOpen && (
+      {mobileOpen ? (
         <div className="fixed inset-0 z-40 md:hidden" role="presentation">
           <div
             onClick={onMobileClose}
-            className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm"
+            className="absolute inset-0 bg-base/70 backdrop-blur-sm"
             aria-hidden="true"
           />
           <aside
@@ -224,7 +226,7 @@ function Sidebar({
             role="dialog"
             aria-modal="true"
             aria-label="Dashboard navigation"
-            className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-slate-800 bg-slate-900/95 shadow-[0_20px_60px_rgba(15,23,42,0.6)]"
+            className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-default bg-elevated shadow-glow"
           >
             <SidebarBody
               tabs={tabs}
@@ -236,7 +238,7 @@ function Sidebar({
             />
           </aside>
         </div>
-      )}
+      ) : null}
     </>
   );
 }

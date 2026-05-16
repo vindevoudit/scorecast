@@ -1,5 +1,8 @@
+// Tier 11 Chunk 2 — PicksHistory tokenized.
+
 import { useMemo, useState } from 'react';
 import EmptyState from './EmptyState';
+import { Badge } from './ui';
 import { pickStatus, scorePick } from '../utils/scoring';
 
 const FILTERS = [
@@ -14,32 +17,10 @@ function formatDate(value) {
 }
 
 function statusBadge(status, points) {
-  if (status === 'won') {
-    return (
-      <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300">
-        Won +{points} pts
-      </span>
-    );
-  }
-  if (status === 'lost') {
-    return (
-      <span className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-300">
-        Missed
-      </span>
-    );
-  }
-  if (status === 'live') {
-    return (
-      <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300">
-        Live
-      </span>
-    );
-  }
-  return (
-    <span className="rounded-full bg-slate-700/60 px-3 py-1 text-xs font-semibold text-slate-200">
-      Pending
-    </span>
-  );
+  if (status === 'won') return <Badge tone="success">Won +{points} pts</Badge>;
+  if (status === 'lost') return <Badge tone="danger">Missed</Badge>;
+  if (status === 'live') return <Badge tone="warning">Live</Badge>;
+  return <Badge tone="neutral">Pending</Badge>;
 }
 
 function PicksHistory({ picks, games }) {
@@ -68,11 +49,11 @@ function PicksHistory({ picks, games }) {
   }, [rows, filter]);
 
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+    <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold text-white">My Picks</h2>
-          <p className="mt-2 text-slate-400">Every pick you've made, with outcomes and points.</p>
+          <h2 className="text-2xl font-semibold text-fg">My Picks</h2>
+          <p className="mt-2 text-fg-muted">Every pick you've made, with outcomes and points.</p>
         </div>
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filter picks">
           {FILTERS.map((f) => (
@@ -81,10 +62,10 @@ function PicksHistory({ picks, games }) {
               role="tab"
               aria-selected={filter === f.id}
               onClick={() => setFilter(f.id)}
-              className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+              className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                 filter === f.id
-                  ? 'bg-cyan-500 text-slate-950'
-                  : 'border border-slate-700 bg-slate-900/80 text-slate-300 hover:border-slate-500'
+                  ? 'bg-accent text-accent-fg'
+                  : 'border border-default bg-elevated/80 text-fg hover:border-strong'
               }`}
             >
               {f.label}
@@ -110,18 +91,18 @@ function PicksHistory({ picks, games }) {
             return (
               <div
                 key={pick.id || `${pick.userId}-${pick.gameId}`}
-                className="rounded-3xl bg-slate-950/70 p-4"
+                className="rounded-3xl bg-overlay/70 p-4"
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-[0.25em] text-cyan-400/80">
+                    <p className="text-xs uppercase tracking-[0.25em] text-accent/80">
                       {formatDate(game.date)}
                     </p>
-                    <p className="mt-2 truncate text-base font-semibold text-white">
-                      {game.homeTeam} <span className="text-slate-500">vs</span> {game.awayTeam}
+                    <p className="mt-2 truncate text-base font-semibold text-fg">
+                      {game.homeTeam} <span className="text-fg-subtle">vs</span> {game.awayTeam}
                     </p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Your pick: <span className="text-slate-200">{chosenTeam}</span>
+                    <p className="mt-1 text-sm text-fg-muted">
+                      Your pick: <span className="text-fg">{chosenTeam}</span>
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">

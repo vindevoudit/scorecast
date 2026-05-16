@@ -40,6 +40,14 @@ module.exports = {
           fg: withAlpha('accent-fg'),
         },
 
+        // Divider — same RGB values as the border tokens, but exposed as
+        // a color so `bg-divider` / `bg-divider-strong` resolve. Useful for
+        // 1px-strip dividers (gap-px on a parent + colored bg).
+        divider: {
+          DEFAULT: withAlpha('border-default'),
+          strong: withAlpha('border-strong'),
+        },
+
         // Status
         success: withAlpha('success'),
         warning: withAlpha('warning'),

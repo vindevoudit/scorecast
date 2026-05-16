@@ -1,5 +1,10 @@
+// Tier 11 Chunk 2 — GameManager tokenized. Preserves all admin button
+// labels (New game, Home won, Away won, Clear, Edit, Delete, Result → …)
+// so Playwright selectors continue to resolve.
+
 import { useEffect, useState } from 'react';
 import ConfirmModal from '../ConfirmModal';
+import { Button, Input } from '../ui';
 import { useRequest } from '../../hooks/useRequest';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useData } from '../../hooks/useData';
@@ -47,131 +52,104 @@ function GameRow({ game, onSave, onSetResult, onDelete, busy }) {
   };
 
   return (
-    <div className="rounded-2xl bg-slate-950/70 p-4">
+    <div className="rounded-2xl bg-overlay/70 p-4">
       {editing ? (
         <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
-          <label className="text-xs text-slate-400">
-            Home team
-            <input
-              value={form.homeTeam}
-              onChange={(e) => setForm({ ...form, homeTeam: e.target.value })}
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="text-xs text-slate-400">
-            Away team
-            <input
-              value={form.awayTeam}
-              onChange={(e) => setForm({ ...form, awayTeam: e.target.value })}
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="text-xs text-slate-400 sm:col-span-2">
-            Date / time
-            <input
+          <Input
+            label="Home team"
+            value={form.homeTeam}
+            onChange={(e) => setForm({ ...form, homeTeam: e.target.value })}
+          />
+          <Input
+            label="Away team"
+            value={form.awayTeam}
+            onChange={(e) => setForm({ ...form, awayTeam: e.target.value })}
+          />
+          <div className="sm:col-span-2">
+            <Input
               type="datetime-local"
+              label="Date / time"
               value={form.date}
               onChange={(e) => setForm({ ...form, date: e.target.value })}
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
-          </label>
-          <label className="text-xs text-slate-400">
-            Home probability (0–1)
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="1"
-              value={form.homeProbability}
-              onChange={(e) => setForm({ ...form, homeProbability: e.target.value })}
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="text-xs text-slate-400">
-            Away probability (0–1)
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="1"
-              value={form.awayProbability}
-              onChange={(e) => setForm({ ...form, awayProbability: e.target.value })}
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
+          </div>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            label="Home probability (0–1)"
+            value={form.homeProbability}
+            onChange={(e) => setForm({ ...form, homeProbability: e.target.value })}
+          />
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            label="Away probability (0–1)"
+            value={form.awayProbability}
+            onChange={(e) => setForm({ ...form, awayProbability: e.target.value })}
+          />
           <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
-            >
+            <Button type="submit" size="sm" disabled={busy}>
               Save
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </form>
       ) : (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">
-              {game.homeTeam} <span className="text-slate-500">vs</span> {game.awayTeam}
+            <p className="truncate text-sm font-semibold text-fg">
+              {game.homeTeam} <span className="text-fg-subtle">vs</span> {game.awayTeam}
             </p>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-fg-muted">
               {new Date(game.date).toLocaleString()} ·{' '}
               <span className="tabular-nums">{Math.round(game.homeProbability * 100)}%</span> /{' '}
               <span className="tabular-nums">{Math.round(game.awayProbability * 100)}%</span>
-              {game.result && (
-                <span className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300">
+              {game.result ? (
+                <span className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-success">
                   Result: {game.result === 'home' ? game.homeTeam : game.awayTeam}
                 </span>
-              )}
+              ) : null}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => onSetResult(game.id, 'home')}
               disabled={busy}
-              className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              className="border-success/30 bg-success/10 text-success"
             >
               Home won
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => onSetResult(game.id, 'away')}
               disabled={busy}
-              className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+              className="border-success/30 bg-success/10 text-success"
             >
               Away won
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => onSetResult(game.id, null)}
               disabled={busy}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
             >
               Clear
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
               Edit
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(game)}
-              className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-            >
+            </Button>
+            <Button size="sm" variant="destructive" onClick={() => onDelete(game)}>
               Delete
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -180,9 +158,6 @@ function GameRow({ game, onSave, onSetResult, onDelete, busy }) {
 }
 
 function GameManager() {
-  // Tier 13 Chunk 5 — context-driven. After any admin mutation, refresh
-  // the DataContext caches (games/picks/leaderboard) so the surrounding
-  // UI reflects the change.
   const request = useRequest();
   const { showStatus } = useNotifications();
   const { refreshGames, refreshPicks, refreshLeaderboard } = useData();
@@ -337,94 +312,73 @@ function GameManager() {
   };
 
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_60px_rgba(15,23,42,0.32)]">
+    <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-xl font-semibold text-white">Games</h3>
-          <p className="text-sm text-slate-400">Create, edit, set results, and delete fixtures.</p>
+          <h3 className="text-xl font-semibold text-fg">Games</h3>
+          <p className="text-sm text-fg-muted">Create, edit, set results, and delete fixtures.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setCreating((prev) => !prev)}
-          className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-        >
+        <Button onClick={() => setCreating((prev) => !prev)}>
           {creating ? 'Cancel' : 'New game'}
-        </button>
+        </Button>
       </div>
 
-      {creating && (
+      {creating ? (
         <form
           onSubmit={handleCreate}
-          className="mt-4 grid gap-3 rounded-2xl bg-slate-950/70 p-4 sm:grid-cols-2"
+          className="mt-4 grid gap-3 rounded-2xl bg-overlay/70 p-4 sm:grid-cols-2"
         >
-          <label className="text-xs text-slate-400">
-            Home team
-            <input
-              value={form.homeTeam}
-              onChange={(e) => setForm({ ...form, homeTeam: e.target.value })}
-              required
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="text-xs text-slate-400">
-            Away team
-            <input
-              value={form.awayTeam}
-              onChange={(e) => setForm({ ...form, awayTeam: e.target.value })}
-              required
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="text-xs text-slate-400 sm:col-span-2">
-            Date / time
-            <input
+          <Input
+            label="Home team"
+            value={form.homeTeam}
+            onChange={(e) => setForm({ ...form, homeTeam: e.target.value })}
+            required
+          />
+          <Input
+            label="Away team"
+            value={form.awayTeam}
+            onChange={(e) => setForm({ ...form, awayTeam: e.target.value })}
+            required
+          />
+          <div className="sm:col-span-2">
+            <Input
               type="datetime-local"
+              label="Date / time"
               value={form.date}
               onChange={(e) => setForm({ ...form, date: e.target.value })}
               required
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
-          </label>
-          <label className="text-xs text-slate-400">
-            Home probability (0–1)
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="1"
-              value={form.homeProbability}
-              onChange={(e) => setForm({ ...form, homeProbability: e.target.value })}
-              required
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
-          <label className="text-xs text-slate-400">
-            Away probability (0–1)
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="1"
-              value={form.awayProbability}
-              onChange={(e) => setForm({ ...form, awayProbability: e.target.value })}
-              required
-              className="mt-1 w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
-            />
-          </label>
+          </div>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            label="Home probability (0–1)"
+            value={form.homeProbability}
+            onChange={(e) => setForm({ ...form, homeProbability: e.target.value })}
+            required
+          />
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            label="Away probability (0–1)"
+            value={form.awayProbability}
+            onChange={(e) => setForm({ ...form, awayProbability: e.target.value })}
+            required
+          />
           <div className="sm:col-span-2">
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={busy}>
               Create game
-            </button>
+            </Button>
           </div>
         </form>
-      )}
+      ) : null}
 
-      {games.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-slate-950/70 px-3 py-2 text-xs text-slate-300">
+      {games.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-overlay/70 px-3 py-2 text-xs text-fg">
           <label className="inline-flex items-center gap-2">
             <input
               type="checkbox"
@@ -434,49 +388,51 @@ function GameManager() {
             />
             Select all
           </label>
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 ? (
             <>
-              <span className="ml-2 text-slate-500">{selectedIds.size} selected</span>
-              <button
-                type="button"
+              <span className="ml-2 text-fg-subtle">{selectedIds.size} selected</span>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => runBulk('setResult', 'home')}
-                className="ml-auto rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+                className="ml-auto border-success/30 bg-success/10 text-success"
               >
                 Result → Home
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => runBulk('setResult', 'away')}
-                className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-200 hover:border-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+                className="border-success/30 bg-success/10 text-success"
               >
                 Result → Away
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={busy}
                 onClick={() => runBulk('setResult', null)}
-                className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
               >
                 Clear result
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
                 disabled={busy}
                 onClick={() => runBulk('delete')}
-                className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
               >
                 Delete
-              </button>
+              </Button>
             </>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <div className="mt-5 space-y-3">
         {games.length === 0 ? (
-          <p className="text-sm text-slate-500">No games yet.</p>
+          <p className="text-sm text-fg-subtle">No games yet.</p>
         ) : (
           games.map((game) => (
             <div key={game.id} className="flex items-start gap-3">

@@ -1,11 +1,14 @@
+// Tier 11 Chunk 2 — ProfileDrawer tokenized. Stays as a manual right-anchored
+// drawer (rather than wrapping the Dialog primitive) because the layout is
+// inherently a side panel; the close button is mapped to the Button primitive.
+
 import { lazy, Suspense, useEffect } from 'react';
 import { useData } from '../hooks/useData';
+import { Button } from './ui';
 
 const ProfileView = lazy(() => import('./ProfileView'));
 
 function ProfileDrawer() {
-  // Tier 13 Chunk 5 — fully self-contained. Open/close + drawer profile +
-  // friend-action busy state all flow from DataContext.
   const {
     profileUsername,
     profile,
@@ -36,27 +39,23 @@ function ProfileDrawer() {
       role="dialog"
       aria-modal="true"
       aria-label="User profile"
-      className="fixed inset-0 z-50 flex justify-end bg-slate-950/80"
+      className="fixed inset-0 z-50 flex justify-end bg-base/80"
       onClick={onClose}
     >
       <div
         onClick={(event) => event.stopPropagation()}
-        className="h-full w-full max-w-lg overflow-y-auto border-l border-slate-800 bg-slate-900/95 p-6 shadow-[0_30px_80px_rgba(15,23,42,0.65)]"
+        className="h-full w-full max-w-lg overflow-y-auto border-l border-default bg-elevated p-6 shadow-glow"
       >
         <div className="mb-4 flex items-center justify-between">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Profile</p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full bg-slate-800/70 px-3 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-          >
+          <p className="text-xs uppercase tracking-[0.3em] text-fg-subtle">Profile</p>
+          <Button size="sm" variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </div>
         {loading || !profile ? (
-          <p className="text-sm text-slate-400">Loading…</p>
+          <p className="text-sm text-fg-muted">Loading…</p>
         ) : (
-          <Suspense fallback={<p className="text-sm text-slate-400">Loading…</p>}>
+          <Suspense fallback={<p className="text-sm text-fg-muted">Loading…</p>}>
             <ProfileView profile={profile} onFriendAction={onFriendAction} busy={busy} />
           </Suspense>
         )}

@@ -1,4 +1,7 @@
+// Tier 11 Chunk 2 — InviteRow migrated.
+
 import { useId, useState } from 'react';
+import { Button } from './ui';
 
 function InviteRow({ groupId, onInvite }) {
   const [inviteName, setInviteName] = useState('');
@@ -13,9 +16,9 @@ function InviteRow({ groupId, onInvite }) {
           setInviteName('');
         }
       }}
-      className="rounded-3xl bg-slate-950/70 p-4"
+      className="rounded-3xl bg-overlay/70 p-4"
     >
-      <label htmlFor={inputId} className="text-sm uppercase tracking-[0.24em] text-slate-400">
+      <label htmlFor={inputId} className="text-sm uppercase tracking-[0.24em] text-fg-muted">
         Invite a friend
       </label>
       <div className="mt-3 flex flex-col gap-3 sm:flex-row">
@@ -25,14 +28,11 @@ function InviteRow({ groupId, onInvite }) {
           onChange={(event) => setInviteName(event.target.value)}
           placeholder="Username"
           autoComplete="off"
-          className="flex-1 rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+          className="flex-1 rounded-2xl border border-default bg-elevated/90 px-4 py-3 text-sm text-fg outline-none transition duration-200 focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
         />
-        <button
-          type="submit"
-          className="rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-        >
+        <Button type="submit" size="lg">
           Invite
-        </button>
+        </Button>
       </div>
     </form>
   );

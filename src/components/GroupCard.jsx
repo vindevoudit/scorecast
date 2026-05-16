@@ -1,7 +1,10 @@
+// Tier 11 Chunk 2 — GroupCard migrated to tokens + Button + Badge.
+
 import { useState } from 'react';
 import InviteRow from './InviteRow';
 import Avatar from './Avatar';
 import ConfirmModal from './ConfirmModal';
+import { Badge, Button } from './ui';
 
 function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDelete }) {
   const isOwner = group.ownerId === currentUserId;
@@ -33,36 +36,26 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
   };
 
   return (
-    <div className="rounded-3xl border border-slate-800 bg-slate-900/85 p-6 shadow-[0_24px_60px_rgba(15,23,42,0.32)]">
+    <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="truncate text-xl font-semibold text-white">{group.name}</h2>
-          <p className="text-sm text-slate-400">
+          <h2 className="truncate text-xl font-semibold text-fg">{group.name}</h2>
+          <p className="text-sm text-fg-muted">
             {group.members.length} member{group.members.length === 1 ? '' : 's'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-widest ${
-              group.visibility === 'public'
-                ? 'bg-emerald-500/15 text-emerald-300'
-                : 'bg-slate-700/60 text-slate-300'
-            }`}
-          >
+          <Badge tone={group.visibility === 'public' ? 'success' : 'neutral'}>
             {group.visibility === 'public' ? 'Public' : 'Private'}
-          </span>
-          {isOwner && (
-            <span className="rounded-full bg-cyan-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-cyan-300">
-              Owner
-            </span>
-          )}
+          </Badge>
+          {isOwner ? <Badge tone="accent">Owner</Badge> : null}
         </div>
       </div>
 
       <div className="mt-5 space-y-3">
-        <div className="rounded-3xl bg-slate-950/70 p-4">
-          <p className="text-sm uppercase tracking-[0.24em] text-slate-400">Members</p>
-          <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+        <div className="rounded-3xl bg-overlay/70 p-4">
+          <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Members</p>
+          <div className="mt-3 grid gap-2 text-sm text-fg sm:grid-cols-2">
             {group.members.map((member) => {
               const userId =
                 (member && typeof member === 'object' ? member.userId : member) || member;
@@ -71,15 +64,15 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
               return (
                 <span
                   key={userId}
-                  className="flex min-w-0 items-center gap-2 rounded-2xl bg-slate-900/80 px-3 py-2"
+                  className="flex min-w-0 items-center gap-2 rounded-2xl bg-elevated/80 px-3 py-2"
                 >
                   <Avatar username={username} size={22} />
                   <span className="min-w-0 truncate">{username}</span>
-                  {userId === group.ownerId && (
-                    <span className="ml-auto text-[10px] uppercase tracking-widest text-cyan-300">
+                  {userId === group.ownerId ? (
+                    <span className="ml-auto text-[10px] uppercase tracking-widest text-accent">
                       owner
                     </span>
-                  )}
+                  ) : null}
                 </span>
               );
             })}
@@ -88,46 +81,38 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
 
         <InviteRow groupId={group.id} onInvite={onInvite} />
 
-        {(isMember || isOwner) && (onLeave || onTransfer || onDelete) && (
+        {(isMember || isOwner) && (onLeave || onTransfer || onDelete) ? (
           <div className="flex flex-wrap gap-2 pt-1">
-            {isOwner && onTransfer && transferCandidates.length > 0 && (
-              <button
-                type="button"
+            {isOwner && onTransfer && transferCandidates.length > 0 ? (
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={() => setTransferring((prev) => !prev)}
-                className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               >
                 {transferring ? 'Cancel' : 'Transfer ownership'}
-              </button>
-            )}
-            {isMember && !isOwner && onLeave && (
-              <button
-                type="button"
-                onClick={() => setConfirmingLeave(true)}
-                className="rounded-2xl border border-slate-600 bg-slate-900/90 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-              >
+              </Button>
+            ) : null}
+            {isMember && !isOwner && onLeave ? (
+              <Button size="sm" variant="secondary" onClick={() => setConfirmingLeave(true)}>
                 Leave group
-              </button>
-            )}
-            {isOwner && onDelete && (
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(true)}
-                className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-              >
+              </Button>
+            ) : null}
+            {isOwner && onDelete ? (
+              <Button size="sm" variant="destructive" onClick={() => setConfirmingDelete(true)}>
                 Delete group
-              </button>
-            )}
+              </Button>
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        {transferring && (
+        {transferring ? (
           <form
             onSubmit={handleSubmitTransfer}
-            className="flex flex-col gap-2 rounded-2xl bg-slate-950/70 p-3 sm:flex-row sm:items-center"
+            className="flex flex-col gap-2 rounded-2xl bg-overlay/70 p-3 sm:flex-row sm:items-center"
           >
             <label
               htmlFor={`transfer-${group.id}`}
-              className="text-xs uppercase tracking-[0.25em] text-slate-400"
+              className="text-xs uppercase tracking-[0.25em] text-fg-muted"
             >
               Transfer to
             </label>
@@ -136,7 +121,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
               value={transferTarget}
               onChange={(e) => setTransferTarget(e.target.value)}
               required
-              className="flex-1 rounded-2xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="flex-1 rounded-2xl border border-default bg-overlay/60 px-3 py-2 text-sm text-fg outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
             >
               <option value="">Choose a member…</option>
               {transferCandidates.map((m) => {
@@ -149,15 +134,11 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
                 );
               })}
             </select>
-            <button
-              type="submit"
-              disabled={!transferTarget}
-              className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
-            >
+            <Button type="submit" size="sm" disabled={!transferTarget}>
               Transfer
-            </button>
+            </Button>
           </form>
-        )}
+        ) : null}
       </div>
 
       <ConfirmModal

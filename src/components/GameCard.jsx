@@ -42,8 +42,11 @@ function teamCardClass(side, game) {
 }
 
 function pickButtonClass(active, side) {
+  // Tier 11 Chunk 3 — `py-3.5` (≈48px tap height with text-sm) clears the
+  // 44px touch-target floor on mobile. Was `py-3` (≈44px), which was right
+  // at the boundary.
   const base =
-    'rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50';
+    'rounded-3xl border px-4 py-3.5 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50';
   if (active) return `${base} border-accent-soft bg-accent/30 text-fg`;
   if (side === 'home') {
     return `${base} border-accent/20 bg-accent/10 text-accent-soft hover:border-accent-soft hover:bg-accent/20`;
@@ -156,14 +159,14 @@ function GameCard({ game }) {
       </div>
 
       {upcoming && existingPickId ? (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-2 flex justify-end">
           <button
             type="button"
             onClick={() => {
               if (!gate('undo a pick')) return;
               removePick(existingPickId);
             }}
-            className="text-xs text-fg-muted hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-2xl px-3 py-2 text-xs text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Undo pick
           </button>

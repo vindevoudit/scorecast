@@ -137,7 +137,7 @@ function SidebarBody({
             type="button"
             onClick={onMobileClose}
             aria-label="Close navigation"
-            className="rounded-full p-2 text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <CloseIcon className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -146,7 +146,7 @@ function SidebarBody({
             type="button"
             onClick={onToggleCollapsed}
             aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-            className="rounded-full p-2 text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <ChevronIcon direction={collapsed ? 'right' : 'left'} className="h-4 w-4" />
           </button>
@@ -189,7 +189,15 @@ function Sidebar({
   useEffect(() => {
     if (!mobileOpen) return undefined;
     const handleKey = (event) => {
-      if (event.key === 'Escape') onMobileClose?.();
+      if (event.key !== 'Escape') return;
+      // Tier 11 Chunk 3 — if a modal (ConfirmModal, SignInModal, etc.)
+      // opened on top of the drawer, focus is captured inside that modal.
+      // Let Escape close the modal first; the drawer stays open until a
+      // subsequent Escape after focus returns into the drawer.
+      if (drawerRef.current && !drawerRef.current.contains(document.activeElement)) {
+        return;
+      }
+      onMobileClose?.();
     };
     window.addEventListener('keydown', handleKey);
     const focusTarget = drawerRef.current?.querySelector('button');

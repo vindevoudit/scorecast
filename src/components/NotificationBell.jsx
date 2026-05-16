@@ -90,7 +90,7 @@ function NotificationBell() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-40 mt-2 w-80 rounded-3xl border border-default bg-elevated p-4 shadow-glow">
+        <div className="absolute right-0 z-40 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-3xl border border-default bg-elevated p-4 shadow-glow">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-fg">Notifications</p>
             {unreadCount > 0 ? (

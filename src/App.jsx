@@ -37,7 +37,7 @@ function App() {
   }
 
   return (
-    <div className="bg-radial-glow min-h-screen bg-base px-4 py-6 text-fg sm:px-6 lg:px-8">
+    <div className="bg-radial-glow px-safe py-safe min-h-[100dvh] bg-base text-fg">
       <div className="mx-auto max-w-7xl space-y-4">{body}</div>
       <SignInModal />
     </div>

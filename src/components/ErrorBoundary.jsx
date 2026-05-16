@@ -36,7 +36,7 @@ class ErrorBoundary extends Component {
   render() {
     if (!this.state.hasError) return this.props.children;
     return (
-      <div className="bg-radial-glow min-h-screen bg-base px-4 py-10 text-fg sm:px-6 lg:px-10">
+      <div className="bg-radial-glow px-safe py-safe min-h-[100dvh] bg-base text-fg">
         <div className="mx-auto max-w-2xl">
           <div className="rounded-3xl border border-danger/40 bg-elevated/85 p-8 shadow-glow">
             <p className="text-sm uppercase tracking-[0.35em] text-danger">Something broke</p>

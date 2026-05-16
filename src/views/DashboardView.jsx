@@ -117,7 +117,7 @@ function DashboardView() {
   );
 
   return (
-    <div className="flex min-h-[calc(100vh-3rem)] gap-4 lg:gap-6" aria-busy={loading}>
+    <div className="flex min-h-[calc(100dvh-3rem)] gap-4 lg:gap-6" aria-busy={loading}>
       <Sidebar
         tabs={tabs}
         activeView={view}

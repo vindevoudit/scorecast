@@ -148,7 +148,10 @@ html {
 }
 
 body {
-  min-height: 100vh;
+  /* 100dvh accounts for iOS Safari's collapsing address bar — 100vh refers
+   * to the *largest* viewport and causes the page to be too tall when the
+   * address bar is showing. */
+  min-height: 100dvh;
   background-color: rgb(var(--c-bg-base));
   color: rgb(var(--c-fg));
 }
@@ -163,6 +166,33 @@ input {
 }
 
 @layer utilities {
+  /* Tier 11 Chunk 3 — safe-area-aware page padding. Replaces the
+   * `px-4 sm:px-6 lg:px-8 py-6` on the App shell so the content respects
+   * iOS notches + home indicator without losing the responsive minimum
+   * padding on non-notched devices. `max()` keeps the existing visual
+   * rhythm when env(*) returns 0 (most browsers). */
+  .px-safe {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+  }
+  @media (min-width: 640px) {
+    .px-safe {
+      padding-left: max(1.5rem, env(safe-area-inset-left));
+      padding-right: max(1.5rem, env(safe-area-inset-right));
+    }
+  }
+  @media (min-width: 1024px) {
+    .px-safe {
+      padding-left: max(2rem, env(safe-area-inset-left));
+      padding-right: max(2rem, env(safe-area-inset-right));
+    }
+  }
+
+  .py-safe {
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+
   .bg-radial-glow {
     background-image:
       radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 45%),

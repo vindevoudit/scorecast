@@ -18,7 +18,34 @@ module.exports = defineConfig({
     video: 'retain-on-failure',
   },
   globalSetup: require.resolve('./tests/e2e/fixtures/global-setup.js'),
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    // Default project: the regression suite. Excludes the mobile screenshot
+    // specs under `tests/e2e/screenshots/` so `npm run test:e2e` stays fast.
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+      testIgnore: '**/screenshots/**',
+    },
+    // Mobile screenshot projects — only match `tests/e2e/screenshots/**`.
+    // Invoke via `npm run test:screenshots`. Three real device profiles
+    // (iPhone SE = small WebKit, iPhone 13 = modern WebKit, Pixel 5 =
+    // modern Chromium) so we catch layout bugs on both engines.
+    {
+      name: 'mobile-iphone-se',
+      use: { ...devices['iPhone SE'] },
+      testMatch: '**/screenshots/**/*.spec.js',
+    },
+    {
+      name: 'mobile-iphone-13',
+      use: { ...devices['iPhone 13'] },
+      testMatch: '**/screenshots/**/*.spec.js',
+    },
+    {
+      name: 'mobile-pixel-5',
+      use: { ...devices['Pixel 5'] },
+      testMatch: '**/screenshots/**/*.spec.js',
+    },
+  ],
   webServer: {
     // The prod build is what we ship; test it. Re-using existing local server
     // is enabled in non-CI so iterating is fast (`node server.js` already

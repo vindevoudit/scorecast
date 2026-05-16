@@ -1,13 +1,48 @@
-// Tier 11 Chunk 1 — Theme toggle. Segmented-control style: System | Light |
-// Dark. Lives in ProfileView Settings post-Chunk 2; until then it can be
-// dropped anywhere for ad-hoc verification.
+// Tier 11 Chunk 1 — Theme toggle.
+// Tier 11 Chunk 3 — Reduced to a Light/Dark binary (System removed) and
+// added sun/moon icons next to each label. Lives in the ProfileView
+// Appearance section.
 
 import { useTheme } from '../lib/theme';
 
+function SunIcon(props) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+    </svg>
+  );
+}
+
+function MoonIcon(props) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
 const OPTIONS = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light', Icon: SunIcon },
+  { value: 'dark', label: 'Dark', Icon: MoonIcon },
 ];
 
 function ThemeToggle() {
@@ -19,21 +54,22 @@ function ThemeToggle() {
       aria-label="Theme"
       className="inline-flex items-center gap-1 rounded-2xl border border-default bg-elevated/60 p-1"
     >
-      {OPTIONS.map((opt) => {
-        const active = theme === opt.value;
+      {OPTIONS.map(({ value, label, Icon }) => {
+        const active = theme === value;
         return (
           <button
-            key={opt.value}
+            key={value}
             type="button"
             role="radio"
             aria-checked={active}
-            onClick={() => setTheme(opt.value)}
+            onClick={() => setTheme(value)}
             className={[
-              'rounded-xl px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg',
             ].join(' ')}
           >
-            {opt.label}
+            <Icon className="h-3.5 w-3.5" />
+            {label}
           </button>
         );
       })}

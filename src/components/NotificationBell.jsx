@@ -72,13 +72,16 @@ function NotificationBell() {
   };
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative w-full md:w-auto">
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-        className="relative inline-flex h-12 w-12 items-center justify-center rounded-3xl bg-overlay text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="relative flex h-12 w-full items-center justify-between gap-2 rounded-3xl bg-overlay px-4 text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:w-12 md:justify-center md:px-0"
       >
+        {/* Mobile: full-width pill with "Notifications" label on the left
+            and the bell emoji on the right. Desktop: icon-only square. */}
+        <span className="text-sm font-semibold md:hidden">Notifications</span>
         <span aria-hidden="true" className="text-xl">
           🔔
         </span>

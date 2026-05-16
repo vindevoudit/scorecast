@@ -69,20 +69,32 @@ const cspConnectSrc = ["'self'", 'https://*.sentry.io', 'https://*.ingest.sentry
 if (process.env.NODE_ENV !== 'production') {
   cspConnectSrc.push('ws://localhost:5173', 'http://localhost:5173');
 }
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'"],
+  // Google Fonts CSS comes from fonts.googleapis.com (referenced in
+  // index.html). Without this entry helmet's default styleSrc would block
+  // the stylesheet and the Bebas Neue / Libre Baskerville fonts fall back
+  // to system defaults.
+  styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+  imgSrc: ["'self'", 'data:'],
+  connectSrc: cspConnectSrc,
+  // fonts.gstatic.com hosts the actual .woff2 binaries for the Google Fonts.
+  fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+  frameAncestors: ["'none'"],
+  objectSrc: ["'none'"],
+};
+// `upgrade-insecure-requests` is helmet's default. In production it's
+// correct (we terminate TLS at Cloudflare/Azure). In dev + test we serve
+// over plain HTTP on localhost, and WebKit follows this directive even
+// for 127.0.0.1, upgrading every asset request to https:// and failing
+// with SSL errors — which broke `npm run test:screenshots`.
+if (process.env.NODE_ENV !== 'production') {
+  cspDirectives.upgradeInsecureRequests = null;
+}
 app.use(
   helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        connectSrc: cspConnectSrc,
-        fontSrc: ["'self'", 'data:'],
-        frameAncestors: ["'none'"],
-        objectSrc: ["'none'"],
-      },
-    },
+    contentSecurityPolicy: { directives: cspDirectives },
     frameguard: { action: 'deny' },
     crossOriginEmbedderPolicy: false,
     crossOriginOpenerPolicy: false,

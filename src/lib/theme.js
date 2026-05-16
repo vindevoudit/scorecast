@@ -1,27 +1,33 @@
 // Tier 11 Chunk 1 — Theming infrastructure.
+// Tier 11 Chunk 3 — System mode removed; the toggle is now an explicit
+// Light/Dark binary. Dark stays the default (matches the brand). Legacy
+// 'system' values stored in localStorage normalize to 'dark' on read.
 //
-// Three theme modes — 'system' (default, follows OS), 'light', 'dark' —
-// persisted to localStorage.sc_theme. `applyTheme()` writes
-// `data-theme="dark"` or `data-theme="light"` on <html>; the actual color
-// tokens live as CSS variables in [src/index.css](src/index.css).
+// Theme modes — 'light', 'dark' — persisted to localStorage.sc_theme.
+// `applyTheme()` writes `data-theme="dark"` or `data-theme="light"` on
+// <html>; the actual color tokens live as CSS variables in
+// [src/index.css](src/index.css).
 //
 // To prevent a flash of wrong theme on boot, call `applyTheme(getStoredTheme())`
 // SYNCHRONOUSLY in [src/main.jsx](src/main.jsx) before ReactDOM.render(). Do
 // not move it inside a useEffect.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 const STORAGE_KEY = 'sc_theme';
-const VALID_THEMES = ['system', 'light', 'dark'];
+const VALID_THEMES = ['light', 'dark'];
+const DEFAULT_THEME = 'dark';
 
-// What was the user's last explicit choice? Returns 'system' if unset or invalid.
+// What was the user's last explicit choice? Returns the default ('dark') if
+// unset or invalid. Legacy 'system' values (from before the system mode was
+// removed) also fall through to the default.
 export function getStoredTheme() {
-  if (typeof window === 'undefined') return 'system';
+  if (typeof window === 'undefined') return DEFAULT_THEME;
   try {
     const v = window.localStorage.getItem(STORAGE_KEY);
-    return VALID_THEMES.includes(v) ? v : 'system';
+    return VALID_THEMES.includes(v) ? v : DEFAULT_THEME;
   } catch {
-    return 'system';
+    return DEFAULT_THEME;
   }
 }
 
@@ -29,18 +35,15 @@ export function setStoredTheme(theme) {
   if (typeof window === 'undefined') return;
   if (!VALID_THEMES.includes(theme)) return;
   try {
-    if (theme === 'system') window.localStorage.removeItem(STORAGE_KEY);
-    else window.localStorage.setItem(STORAGE_KEY, theme);
+    window.localStorage.setItem(STORAGE_KEY, theme);
   } catch {
     // private-mode browsers can throw; ignore
   }
 }
 
-// Resolve 'system' to the OS preference. Always returns 'light' or 'dark'.
+// Coerce to a valid theme. Always returns 'light' or 'dark'.
 export function resolveTheme(theme) {
-  if (theme === 'light' || theme === 'dark') return theme;
-  if (typeof window === 'undefined' || !window.matchMedia) return 'dark';
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  return theme === 'light' ? 'light' : 'dark';
 }
 
 // Apply the resolved theme to <html>. Briefly suppresses transitions to
@@ -65,33 +68,19 @@ export function applyTheme(theme) {
 }
 
 // React hook. Returns { theme, setTheme, resolvedTheme }.
-// `theme` is the user's stored preference ('system' | 'light' | 'dark').
-// `resolvedTheme` is the OS-aware effective theme ('light' | 'dark').
+// `theme` is the user's stored preference ('light' | 'dark').
+// `resolvedTheme` matches `theme` — kept as a separate value for API stability
+// (callers that read `resolvedTheme` from the previous system-aware version
+// keep working without changes).
 export function useTheme() {
   const [theme, setThemeState] = useState(getStoredTheme);
-  const [resolvedTheme, setResolvedTheme] = useState(() => resolveTheme(getStoredTheme()));
-
-  // Listen for OS theme changes when we're in 'system' mode.
-  useEffect(() => {
-    if (theme !== 'system') return undefined;
-    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
-    const mql = window.matchMedia('(prefers-color-scheme: light)');
-    const onChange = () => {
-      const next = resolveTheme('system');
-      setResolvedTheme(next);
-      applyTheme('system');
-    };
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, [theme]);
 
   const setTheme = (next) => {
     if (!VALID_THEMES.includes(next)) return;
     setStoredTheme(next);
     setThemeState(next);
-    setResolvedTheme(resolveTheme(next));
     applyTheme(next);
   };
 
-  return { theme, setTheme, resolvedTheme };
+  return { theme, setTheme, resolvedTheme: theme };
 }

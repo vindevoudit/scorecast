@@ -196,14 +196,14 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
 
       {showEdit ? (
         <div className="rounded-3xl border border-default bg-elevated/70 p-5">
-          <div className="flex items-center justify-between gap-3">
+          {/* Stack on narrow viewports — the segmented toggle is ~190px wide
+              and forced the row to overflow on iPhone SE. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
                 Appearance
               </h3>
-              <p className="mt-1 text-sm text-fg">
-                Pick the theme that suits your eyes. System follows your OS preference.
-              </p>
+              <p className="mt-1 text-sm text-fg">Pick the theme that suits your eyes.</p>
             </div>
             <ThemeToggle />
           </div>

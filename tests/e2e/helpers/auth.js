@@ -47,8 +47,11 @@ async function loginViaUI(page, { username, password }) {
 }
 
 async function logoutViaUI(page) {
-  // UserMenu trigger uses aria-haspopup="menu"; only one such element exists.
-  await page.locator('[aria-haspopup="menu"]').click();
+  // UserMenu trigger uses aria-haspopup="menu". The Tier 11 Chunk 3 top-bar
+  // split renders it twice (mobile + desktop layouts, one CSS-hidden via
+  // md:hidden), so the bare selector matches 2 elements. `:visible` picks
+  // the one actually visible at the current viewport.
+  await page.locator('[aria-haspopup="menu"]:visible').click();
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   // Confirm modal still uses "Log out" (two words); scope to the dialog.
   await page.getByRole('dialog').getByRole('button', { name: 'Log out', exact: true }).click();

@@ -40,6 +40,8 @@ coverage/
 playwright-report/
 test-results/
 playwright/.cache/
+# Mobile screenshot output (Tier 11 Chunk 3 — `npm run test:screenshots`)
+tests/e2e/screenshots/output/
 
 # nyc test coverage
 .nyc_output/

@@ -12,7 +12,7 @@ import SearchBar from '../components/SearchBar';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
-import { Badge, Button, Input } from '../components/ui';
+import { Button, Input } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
@@ -129,13 +129,22 @@ function DashboardView() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col gap-6">
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-          <div className="flex min-w-0 items-center gap-3">
+        {(() => {
+          // Tier 11 Chunk 3 — Mobile top bar splits into 3 stacked rows
+          // so the BANTRYX wordmark stops colliding with the icons on
+          // narrow viewports. Desktop keeps the original 1-row grid.
+          //   Row 1: hamburger | BANTRYX | primary right action
+          //   Row 2: secondary actions (right-aligned)
+          //   Row 3: SearchBar (full-width)
+          // Components are mounted twice (once per layout) and CSS-hidden
+          // via md:hidden / hidden md:flex; cost is negligible (Bell polls
+          // both copies but the API is idempotent).
+          const hamburger = (
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
               aria-label="Open navigation"
-              className="rounded-2xl border border-default bg-elevated/80 p-3 text-fg transition-colors duration-200 hover:bg-overlay hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:hidden"
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-default bg-elevated/80 text-fg transition-colors duration-200 hover:bg-overlay hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -149,6 +158,63 @@ function DashboardView() {
                 <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
+          );
+          const brand = (
+            <h2
+              aria-hidden="true"
+              className="text-shadow-brand-glow select-none text-sm font-normal uppercase tracking-[0.35em] text-accent/80"
+            >
+              BANTRYX
+            </h2>
+          );
+          const homePill = (
+            <button
+              type="button"
+              onClick={() => {
+                setBrowseAsGuest(false);
+                setShowAuth(false);
+              }}
+              aria-label="Back to landing page"
+              className="inline-flex items-center gap-1.5 rounded-full border border-default bg-elevated/40 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3.5 w-3.5"
+                aria-hidden="true"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              Home
+            </button>
+          );
+          // `flex-1 md:flex-none` lets the buttons stretch to fill row 2 on
+          // mobile (Sign in pinned left, Sign up pinned right, with the gap
+          // as the white space between them). On desktop they stay at
+          // natural content width inside the right-column flex group.
+          const signInBtn = (
+            <Button
+              variant="secondary"
+              onClick={() => setShowAuth(true)}
+              className="flex-1 md:flex-none"
+            >
+              Sign in
+            </Button>
+          );
+          const signUpBtn = (
+            <Button
+              variant="primary"
+              onClick={() => setShowAuth(true)}
+              className="flex-1 md:flex-none"
+            >
+              Sign up
+            </Button>
+          );
+          const search = (
             <SearchBar
               onSelectGroup={async (g) => {
                 if (g.isMember) {
@@ -161,71 +227,66 @@ function DashboardView() {
               }}
               onSelectGame={() => setView('games')}
             />
-          </div>
+          );
 
-          <h2
-            aria-hidden="true"
-            className="text-shadow-brand-glow select-none text-sm font-normal uppercase tracking-[0.35em] text-accent/80"
-          >
-            BANTRYX
-          </h2>
+          return (
+            <>
+              {/* Mobile (< md:): 3 stacked rows */}
+              <div className="flex flex-col gap-3 md:hidden">
+                <div className="flex items-center justify-between gap-3">
+                  {hamburger}
+                  {brand}
+                  {user ? <UserMenu /> : homePill}
+                </div>
+                <div className="flex items-center justify-end gap-3">
+                  {user ? (
+                    <NotificationBell />
+                  ) : (
+                    <>
+                      {signInBtn}
+                      {signUpBtn}
+                    </>
+                  )}
+                </div>
+                <div>{search}</div>
+              </div>
 
-          <div className="flex items-center justify-end gap-3">
-            {user ? (
-              <>
-                <NotificationBell />
-                <UserMenu />
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBrowseAsGuest(false);
-                    setShowAuth(false);
-                  }}
-                  aria-label="Back to landing page"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-default bg-elevated/40 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-3.5 w-3.5"
-                    aria-hidden="true"
-                  >
-                    <path d="M15 18l-6-6 6-6" />
-                  </svg>
-                  Home
-                </button>
-                <Button variant="secondary" onClick={() => setShowAuth(true)}>
-                  Sign in
-                </Button>
-                <Button variant="primary" onClick={() => setShowAuth(true)}>
-                  Sign up
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
+              {/* Desktop (md+): original 1-row grid */}
+              <div className="hidden grid-cols-[1fr_auto_1fr] items-center gap-3 md:grid">
+                <div className="flex min-w-0 items-center gap-3">{search}</div>
+                {brand}
+                <div className="flex items-center justify-end gap-3">
+                  {user ? (
+                    <>
+                      <NotificationBell />
+                      <UserMenu />
+                    </>
+                  ) : (
+                    <>
+                      {homePill}
+                      {signInBtn}
+                      {signUpBtn}
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         <section className="space-y-6">
           {view === 'games' ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+            // grid-cols-1 forces a `minmax(0, 1fr)` track on mobile so the
+            // GameCards + leaderboard side-panel collapse to viewport width
+            // instead of sizing to their min-content (which overflows at
+            // 320px / iPhone SE).
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
               <div className="space-y-6">
                 <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-2xl font-semibold text-fg">Games</h2>
-                      <p className="mt-2 text-fg-muted">
-                        Pick winners, earn more points for underdog upsets.
-                      </p>
-                    </div>
-                    <Badge tone="accent">Future-proof picks only</Badge>
-                  </div>
+                  <h2 className="text-2xl font-semibold text-fg">Games</h2>
+                  <p className="mt-2 text-fg-muted">
+                    Pick winners, earn more points for underdog upsets.
+                  </p>
                 </div>
 
                 {liveGames.length > 0 ? renderGameSection('Live now', liveGames, '') : null}
@@ -332,7 +393,7 @@ function DashboardView() {
           ) : null}
 
           {view === 'groups' ? (
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
               <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
                 {user ? (
                   <>
@@ -505,7 +566,7 @@ function DashboardView() {
           ) : null}
 
           {view === 'leaderboard' ? (
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <LeaderboardCard
                 title="Overall Leaderboard"
                 entries={leaderboard.overall}

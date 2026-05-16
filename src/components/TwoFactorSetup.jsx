@@ -70,7 +70,7 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
 
   return (
     <div className="rounded-3xl border border-default bg-elevated/70 p-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
             Two-factor authentication

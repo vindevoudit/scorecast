@@ -46,6 +46,9 @@ param keyVaultName string
 @description('Custom domain to bind. Empty until Chunk 4.')
 param customDomain string
 
+@description('Resource id of the Azure-managed cert bound to customDomain. Empty when customDomain is empty. Discover via `az containerapp env certificate list`.')
+param customDomainCertId string = ''
+
 var environmentName = '${appName}-env-${nameSuffix}'
 var containerAppName = '${appName}-app'
 
@@ -114,6 +117,13 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           {
             weight: 100
             latestRevision: true
+          }
+        ]
+        customDomains: empty(customDomain) ? [] : [
+          {
+            name: customDomain
+            bindingType: 'SniEnabled'
+            certificateId: customDomainCertId
           }
         ]
       }

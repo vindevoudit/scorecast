@@ -186,9 +186,23 @@ Cloud target is Azure. CD auto-runs on push to `main`.
 
 ~$30–40/mo Azure (Postgres B1ms dominates) + ~$13/yr domain. TLS, OIDC, CD pipeline all free. Detailed breakdown in `C:\Users\vinde\.claude\plans\can-you-confirm-that-reflective-kay.md`.
 
-### Caveat: Bicep ↔ custom domain
+### Full IaC reapply
 
-The `bantryx.com` hostname binding and managed cert were attached via `az containerapp hostname add` + `bind` — they live outside Bicep. The `CORS_ORIGINS` + `PUBLIC_APP_URL` env vars were updated via `az containerapp update --set-env-vars`. **Day-to-day CD via `deploy.yml` is safe** (it only does `--image` updates). But a fresh `az deployment group create -f infra/main.bicep` would un-bind the cert and revert the env vars. To reconcile cleanly, re-run the hostname-add/bind sequence and re-set the env vars after any Bicep redeploy. See [CLAUDE.md](CLAUDE.md) "Critical considerations" for the exact commands.
+`deploy.yml` (CD) only runs `az containerapp update --image`, which preserves the custom domain binding + env vars regardless. For a full IaC reapply via `az deployment group create -f infra/main.bicep`, pass three params so the deployment stays idempotent:
+
+```powershell
+$certId = az containerapp env certificate list `
+  --name scorecast-env-p3aaelev7xp52 `
+  --resource-group scorecast-prod `
+  --query "[?properties.subjectName=='bantryx.com'].id" -o tsv
+
+az deployment group create -g scorecast-prod -f infra/main.bicep `
+  -p customDomain=bantryx.com `
+     customDomainCertId=$certId `
+     pgAdminPassword=<the-live-pw>
+```
+
+The cert binding lives in `infra/modules/app.bicep` via the `customDomains` array; `CORS_ORIGINS` + `PUBLIC_APP_URL` env vars pivot on `customDomain`. DNS is on Cloudflare — the `dns.bicep` module is gated behind a `useAzureDns=false` default.
 
 ---
 

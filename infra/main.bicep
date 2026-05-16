@@ -37,6 +37,12 @@ param pgAdminPassword string
 @description('Custom domain to bind to the Container App. Leave empty until Chunk 4 (domain + TLS).')
 param customDomain string = ''
 
+@description('Resource id of the Azure-managed certificate to bind to customDomain. Discover with `az containerapp env certificate list`. Leave empty when customDomain is empty.')
+param customDomainCertId string = ''
+
+@description('Provision an Azure DNS zone for customDomain. Default false because DNS is managed in Cloudflare today. Flip to true only if migrating DNS to Azure.')
+param useAzureDns bool = false
+
 // Stable suffix derived from the resource group id so naming is idempotent
 // across deployments but globally unique across Azure.
 var nameSuffix = toLower(uniqueString(resourceGroup().id))
@@ -93,7 +99,7 @@ module db 'modules/db.bicep' = {
   }
 }
 
-module dns 'modules/dns.bicep' = if (!empty(customDomain)) {
+module dns 'modules/dns.bicep' = if (useAzureDns && !empty(customDomain)) {
   name: 'dns'
   params: {
     customDomain: customDomain
@@ -116,6 +122,7 @@ module app 'modules/app.bicep' = {
     acrName: registry.outputs.name
     keyVaultName: secrets.outputs.keyVaultName
     customDomain: customDomain
+    customDomainCertId: customDomainCertId
   }
 }
 

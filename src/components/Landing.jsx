@@ -94,8 +94,8 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
               aria-hidden="true"
               className="h-px w-10 bg-gradient-to-r from-transparent to-accent shadow-[0_0_8px_rgba(34,211,238,0.6)] sm:w-16"
             />
-            <p className="text-shadow-soft-glow text-lg italic text-accent sm:text-2xl">
-              no betting, just Bantryx
+            <p className="flex items-center justify-center gap-3 text-xs font-light tracking-[0.5em] text-accent sm:gap-4 sm:text-sm">
+              NO BETTING, JUST BANTRYX
             </p>
             <span
               aria-hidden="true"

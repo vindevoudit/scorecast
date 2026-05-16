@@ -20,6 +20,7 @@ const { getUserById } = require('../lib/users');
 const { getJoinedGroupIds, getPendingInvites } = require('../lib/groups');
 const { sendVerificationEmail } = require('../lib/emailHelpers');
 const { User, sequelize } = require('../models');
+const LeaderboardService = require('../services/LeaderboardService');
 
 const router = express.Router();
 
@@ -42,6 +43,8 @@ router.get('/me', authMiddleware, async (req, res) => {
     // or skips the onboarding tour. Frontend reads this to decide whether
     // to mount <OnboardingTour />.
     onboardingCompletedAt: user.onboardingCompletedAt || null,
+    // Tier 8.6 — Settings tab renders a radio bound to this value.
+    profileVisibility: user.profileVisibility,
     joinedGroups,
     pendingInvites,
   });
@@ -69,19 +72,33 @@ router.put('/me', authMiddleware, validate(editProfileSchema), async (req, res) 
   try {
     const user = await getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Track whether a cached leaderboard field changed so we can invalidate
+    // the 30-s cache. Tier 8.6 — profileVisibility joins displayName as a
+    // cached field; without invalidation, the masking layer would project
+    // off the stale visibility value for up to 30 s after a settings change.
+    let cachedFieldChanged = false;
     if (req.body.displayName !== undefined) {
-      user.displayName = req.body.displayName === '' ? null : req.body.displayName;
+      const next = req.body.displayName === '' ? null : req.body.displayName;
+      if (next !== user.displayName) cachedFieldChanged = true;
+      user.displayName = next;
     }
     if (req.body.bio !== undefined) {
       user.bio = req.body.bio === '' ? null : req.body.bio;
     }
+    if (req.body.profileVisibility !== undefined) {
+      if (req.body.profileVisibility !== user.profileVisibility) cachedFieldChanged = true;
+      user.profileVisibility = req.body.profileVisibility;
+    }
     await user.save({ hooks: false });
+    if (cachedFieldChanged) LeaderboardService.invalidate('all');
     res.json({
       id: user.id,
       username: user.username,
       role: user.role,
       displayName: user.displayName,
       bio: user.bio,
+      profileVisibility: user.profileVisibility,
     });
   } catch (error) {
     req.log.error({ err: error }, 'handler error');

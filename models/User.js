@@ -78,6 +78,15 @@ module.exports = (sequelize) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      profileVisibility: {
+        // Tier 8.6 — 'public' (default; existing behavior), 'friends'
+        // (only accepted friends see the full profile), 'private' (only
+        // self + admins). Leaderboard rows are masked for non-public users
+        // when the viewer isn't a friend/admin/group-mate.
+        type: DataTypes.ENUM('public', 'friends', 'private'),
+        allowNull: false,
+        defaultValue: 'public',
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,

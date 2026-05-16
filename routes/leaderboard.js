@@ -15,7 +15,7 @@ router.get(
   publicReadLimiter,
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const overall = await LeaderboardService.getOverall();
+    const overall = await LeaderboardService.getOverallForViewer(req.user ?? null);
     let groupBlock = {
       rows: [],
       total: 0,
@@ -25,12 +25,15 @@ router.get(
       limit: 20,
     };
     if (req.query.groupId) {
-      groupBlock = await LeaderboardService.getForGroup(req.query.groupId, {
-        orderBy: req.query.orderBy,
-        offset: req.query.offset,
-        limit: req.query.limit,
-        viewerId: req.user?.id ?? null,
-      });
+      groupBlock = await LeaderboardService.getForGroupForViewer(
+        req.query.groupId,
+        {
+          orderBy: req.query.orderBy,
+          offset: req.query.offset,
+          limit: req.query.limit,
+        },
+        req.user ?? null,
+      );
     }
     res.json({ overall, group: groupBlock.rows, groupMeta: groupBlock });
   }),

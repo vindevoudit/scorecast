@@ -1,4 +1,6 @@
 // Tier 11 Chunk 2 — LeaderboardCard tokenized.
+// Tier 8.6 — masked rows (entry.isMasked) suppress click-to-open-drawer and
+// dim the row visually so the privacy state is legible without hiding rank.
 
 import EmptyState from './EmptyState';
 import Avatar from './Avatar';
@@ -6,7 +8,7 @@ import Avatar from './Avatar';
 export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
   const baseClass = `flex w-full items-center justify-between gap-3 rounded-3xl px-4 py-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
     isCurrentUser ? 'border border-accent/40 bg-accent/10' : 'bg-overlay/70 hover:bg-overlay'
-  }`;
+  } ${entry.isMasked ? 'italic text-fg-muted' : ''}`;
 
   const content = (
     <>
@@ -24,13 +26,16 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
           {isCurrentUser ? (
             <span className="ml-2 text-xs uppercase tracking-widest text-accent">you</span>
           ) : null}
+          {entry.isMasked ? (
+            <span className="ml-2 text-xs uppercase tracking-widest text-fg-subtle">private</span>
+          ) : null}
         </span>
       </div>
       <div className="shrink-0 text-sm font-semibold tabular-nums text-fg">{entry.points}</div>
     </>
   );
 
-  if (onSelectUser) {
+  if (onSelectUser && !entry.isMasked) {
     return (
       <button type="button" onClick={() => onSelectUser(entry.username)} className={baseClass}>
         {content}

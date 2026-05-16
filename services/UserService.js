@@ -3,11 +3,15 @@
 // Tier 13 Chunk 2 — UserService. Owns the cascade delete for users (with
 // the Tier 5.3 transaction wrap) plus admin user list / role flip / bulk
 // ops. Auth-cookie lifecycle stays in lib/auth.js + AuthService.
+//
+// Tier 8.6 — also owns getProfileByUsername, which gates the profile
+// payload behind users.profileVisibility (public / friends / private).
 const { Op } = require('sequelize');
 const {
   User,
   Group,
   Pick,
+  Game,
   Comment,
   CommentReaction,
   Friendship,
@@ -21,7 +25,122 @@ const {
   sequelize,
 } = require('../models');
 const errors = require('../lib/errors');
+const { scorePick } = require('../lib/scoring');
+const { getUserByUsername } = require('../lib/users');
+const { getFriendshipBetween, friendStatusFrom } = require('../lib/friends');
+const { BADGE_CATALOG } = require('../badges/catalog');
 const LeaderboardService = require('./LeaderboardService');
+
+// Returns true when `viewer` (may be null for anonymous) is allowed to see
+// the target's full profile. Same-shape 404 for friends-gated-out and
+// private so the friend graph isn't inferable from the response code.
+async function canViewProfile(target, viewer) {
+  if (viewer?.role === 'admin') return true;
+  if (viewer?.id === target.id) return true;
+  if (target.profileVisibility === 'public') return true;
+  if (target.profileVisibility === 'friends' && viewer?.id) {
+    const friendship = await getFriendshipBetween(viewer.id, target.id);
+    return friendStatusFrom(friendship, viewer.id, target.id) === 'friends';
+  }
+  return false;
+}
+
+async function getProfileByUsername({ username, viewer }) {
+  const target = await getUserByUsername(username);
+  if (!target) throw errors.notFound('User not found');
+
+  if (!(await canViewProfile(target, viewer))) {
+    // Same shape as "not found" so the existence of a non-public user can't
+    // be probed via response codes.
+    throw errors.notFound('User not found');
+  }
+
+  const [userPicks, allGames, badges] = await Promise.all([
+    Pick.findAll({ where: { userId: target.id } }),
+    Game.findAll(),
+    Badge.findAll({ where: { userId: target.id } }),
+  ]);
+
+  const gameById = new Map(allGames.map((g) => [g.id, g]));
+  let totalPoints = 0;
+  let picksWon = 0;
+  let picksScored = 0;
+  for (const pick of userPicks) {
+    const game = gameById.get(pick.gameId);
+    if (!game) continue;
+    if (game.result) {
+      picksScored += 1;
+      totalPoints += scorePick(pick, game);
+      if (pick.choice === game.result) picksWon += 1;
+    }
+  }
+  const picksMade = userPicks.length;
+  const winRate = picksScored > 0 ? picksWon / picksScored : 0;
+
+  const recentPicks = [...userPicks]
+    .map((pick) => ({ pick, game: gameById.get(pick.gameId) }))
+    .filter((row) => row.game)
+    .sort((a, b) => new Date(b.game.date) - new Date(a.game.date))
+    .slice(0, 10)
+    .map(({ pick, game }) => ({
+      gameId: game.id,
+      homeTeam: game.homeTeam,
+      awayTeam: game.awayTeam,
+      date: game.date,
+      result: game.result,
+      choice: pick.choice,
+      points: scorePick(pick, game),
+    }));
+
+  // Anonymous viewers don't have friendship or head-to-head data.
+  let friendship = null;
+  let friendStatus = null;
+  let headToHead = null;
+  if (viewer?.id) {
+    friendship = await getFriendshipBetween(viewer.id, target.id);
+    friendStatus = friendStatusFrom(friendship, viewer.id, target.id);
+    if (friendStatus === 'friends') {
+      const viewerPicks = await Pick.findAll({ where: { userId: viewer.id } });
+      const viewerByGame = new Map(viewerPicks.map((p) => [p.gameId, p]));
+      let viewerWins = 0;
+      let targetWins = 0;
+      let ties = 0;
+      for (const pick of userPicks) {
+        const game = gameById.get(pick.gameId);
+        if (!game || !game.result) continue;
+        const viewerPick = viewerByGame.get(pick.gameId);
+        if (!viewerPick) continue;
+        const viewerPts = scorePick(viewerPick, game);
+        const targetPts = scorePick(pick, game);
+        if (viewerPts > targetPts) viewerWins += 1;
+        else if (targetPts > viewerPts) targetWins += 1;
+        else ties += 1;
+      }
+      headToHead = { viewerWins, targetWins, ties };
+    }
+  }
+
+  return {
+    id: target.id,
+    username: target.username,
+    role: target.role,
+    displayName: target.displayName || null,
+    bio: target.bio || null,
+    profileVisibility: target.profileVisibility,
+    joinedAt: target.createdAt,
+    totalPoints,
+    picksMade,
+    picksWon,
+    picksScored,
+    winRate,
+    badges: badges.map((b) => ({ slug: b.slug, awardedAt: b.awardedAt })),
+    catalog: BADGE_CATALOG,
+    recentPicks,
+    friendship: friendship ? { id: friendship.id, status: friendship.status } : null,
+    friendStatus,
+    headToHead,
+  };
+}
 
 async function cascadeDelete(target, { transaction } = {}) {
   const opts = transaction ? { transaction } : {};
@@ -154,4 +273,6 @@ module.exports = {
   setRole,
   deleteUserById,
   bulkAction,
+  canViewProfile,
+  getProfileByUsername,
 };

@@ -1,17 +1,20 @@
 'use strict';
 
 // Tier 13 Chunk 1 — user-facing read routes extracted from server.js. Covers
-// /search and /users/:username/profile (with friend-aware head-to-head).
+// /search and /users/:username/profile.
+//
+// Tier 8.6 — /users/:username/profile delegates to UserService which gates
+// the payload on users.profileVisibility. Search keeps returning every match
+// + a `profileVisibility` flag so the client can mask display; friend
+// requests still need the username so the field stays in the response.
 const express = require('express');
 const { Op } = require('sequelize');
 const { optionalAuth } = require('../middleware/optionalAuth');
 const { publicReadLimiter } = require('../middleware/rateLimit');
-const { scorePick } = require('../lib/scoring');
-const { getUserByUsername } = require('../lib/users');
 const { getJoinedGroupIds } = require('../lib/groups');
-const { getFriendshipBetween, friendStatusFrom } = require('../lib/friends');
-const { BADGE_CATALOG } = require('../badges/catalog');
-const { User, Group, Game, Pick, Badge } = require('../models');
+const { User, Group, Game } = require('../models');
+const UserService = require('../services/UserService');
+const errors = require('../lib/errors');
 
 const router = express.Router();
 
@@ -36,6 +39,7 @@ router.get('/search', publicReadLimiter, optionalAuth, async (req, res) => {
         id: u.id,
         username: u.username,
         displayName: u.displayName || null,
+        profileVisibility: u.profileVisibility,
       }));
     }
 
@@ -90,98 +94,15 @@ router.get('/search', publicReadLimiter, optionalAuth, async (req, res) => {
 
 router.get('/users/:username/profile', publicReadLimiter, optionalAuth, async (req, res) => {
   try {
-    const targetUser = await getUserByUsername(req.params.username);
-    if (!targetUser) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    const viewerId = req.user?.id ?? null;
-
-    const [userPicks, allGames, badges] = await Promise.all([
-      Pick.findAll({ where: { userId: targetUser.id } }),
-      Game.findAll(),
-      Badge.findAll({ where: { userId: targetUser.id } }),
-    ]);
-
-    const gameById = new Map(allGames.map((g) => [g.id, g]));
-    let totalPoints = 0;
-    let picksWon = 0;
-    let picksScored = 0;
-    for (const pick of userPicks) {
-      const game = gameById.get(pick.gameId);
-      if (!game) continue;
-      if (game.result) {
-        picksScored += 1;
-        const pts = scorePick(pick, game);
-        totalPoints += pts;
-        if (pick.choice === game.result) picksWon += 1;
-      }
-    }
-    const picksMade = userPicks.length;
-    const winRate = picksScored > 0 ? picksWon / picksScored : 0;
-
-    const recentPicks = [...userPicks]
-      .map((pick) => ({ pick, game: gameById.get(pick.gameId) }))
-      .filter((row) => row.game)
-      .sort((a, b) => new Date(b.game.date) - new Date(a.game.date))
-      .slice(0, 10)
-      .map(({ pick, game }) => ({
-        gameId: game.id,
-        homeTeam: game.homeTeam,
-        awayTeam: game.awayTeam,
-        date: game.date,
-        result: game.result,
-        choice: pick.choice,
-        points: scorePick(pick, game),
-      }));
-
-    // Anonymous viewers don't have friendship or head-to-head data.
-    let friendship = null;
-    let friendStatus = null;
-    let headToHead = null;
-    if (viewerId) {
-      friendship = await getFriendshipBetween(viewerId, targetUser.id);
-      friendStatus = friendStatusFrom(friendship, viewerId, targetUser.id);
-      if (friendStatus === 'friends') {
-        const viewerPicks = await Pick.findAll({ where: { userId: viewerId } });
-        const viewerByGame = new Map(viewerPicks.map((p) => [p.gameId, p]));
-        let viewerWins = 0;
-        let targetWins = 0;
-        let ties = 0;
-        for (const pick of userPicks) {
-          const game = gameById.get(pick.gameId);
-          if (!game || !game.result) continue;
-          const viewerPick = viewerByGame.get(pick.gameId);
-          if (!viewerPick) continue;
-          const viewerPts = scorePick(viewerPick, game);
-          const targetPts = scorePick(pick, game);
-          if (viewerPts > targetPts) viewerWins += 1;
-          else if (targetPts > viewerPts) targetWins += 1;
-          else ties += 1;
-        }
-        headToHead = { viewerWins, targetWins, ties };
-      }
-    }
-
-    res.json({
-      id: targetUser.id,
-      username: targetUser.username,
-      role: targetUser.role,
-      displayName: targetUser.displayName || null,
-      bio: targetUser.bio || null,
-      joinedAt: targetUser.createdAt,
-      totalPoints,
-      picksMade,
-      picksWon,
-      picksScored,
-      winRate,
-      badges: badges.map((b) => ({ slug: b.slug, awardedAt: b.awardedAt })),
-      catalog: BADGE_CATALOG,
-      recentPicks,
-      friendship: friendship ? { id: friendship.id, status: friendship.status } : null,
-      friendStatus,
-      headToHead,
+    const profile = await UserService.getProfileByUsername({
+      username: req.params.username,
+      viewer: req.user ?? null,
     });
+    res.json(profile);
   } catch (error) {
+    if (error instanceof errors.AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to fetch profile' });
   }

@@ -151,6 +151,36 @@ async function getUserId(username) {
   return user?.id || null;
 }
 
+// Tier 8.6 — flip a user's profileVisibility. Routed through PUT /api/me
+// so the cache-invalidation side effect (LeaderboardService.invalidate)
+// fires the same way the UI path does — otherwise tests that hit the
+// leaderboard immediately after would observe stale cached rows for up to
+// the 30 s TTL. Caller passes the USER fixture (with password) because
+// PUT /api/me requires auth as the target user.
+async function setProfileVisibility(user, visibility) {
+  const authed = await apiLogin(user);
+  try {
+    const res = await authed.put('/api/me', { data: { profileVisibility: visibility } });
+    if (!res.ok()) {
+      throw new Error(`setProfileVisibility ${user.username}: ${res.status()} ${await res.text()}`);
+    }
+  } finally {
+    await authed.dispose();
+  }
+}
+
+// Tier 8.6 — bypass the friend-request → accept flow for tests that need
+// two users to already be accepted friends. Mirrors what
+// services/FriendService.acceptInvite would produce.
+async function createAcceptedFriendship(userAId, userBId) {
+  const { Friendship } = getModels();
+  await Friendship.create({
+    requesterId: userAId,
+    addresseeId: userBId,
+    status: 'accepted',
+  });
+}
+
 async function closeDb() {
   if (_models) {
     await _models.sequelize.close();
@@ -174,5 +204,7 @@ module.exports = {
   clearGameResults,
   clearNotifications,
   getUserId,
+  setProfileVisibility,
+  createAcceptedFriendship,
   closeDb,
 };

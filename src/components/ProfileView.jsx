@@ -9,7 +9,25 @@ import TwoFactorSetup from './TwoFactorSetup';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
-import { Badge, Button, Input, Textarea } from './ui';
+import { Badge, Button, Input, Radio, Textarea } from './ui';
+
+const VISIBILITY_OPTIONS = [
+  {
+    value: 'public',
+    label: 'Public',
+    description: 'Anyone can view your profile, picks, and badges.',
+  },
+  {
+    value: 'friends',
+    label: 'Friends only',
+    description: 'Only accepted friends see your profile. Leaderboard rank stays visible.',
+  },
+  {
+    value: 'private',
+    label: 'Private',
+    description: 'Only you (and admins) see your profile. Leaderboard rank stays visible.',
+  },
+];
 
 function formatDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
@@ -207,6 +225,40 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
             </div>
             <ThemeToggle />
           </div>
+        </div>
+      ) : null}
+
+      {/* Tier 8.6 — Privacy panel. Edits flush immediately via PUT /api/me
+          (handleSaveProfile); the radio reflects the current value. */}
+      {showEdit ? (
+        <div className="rounded-3xl border border-default bg-elevated/70 p-5">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
+            Privacy
+          </h3>
+          <p className="mt-1 text-sm text-fg">Who can see your profile?</p>
+          <fieldset className="mt-3 space-y-2">
+            <legend className="sr-only">Profile visibility</legend>
+            {VISIBILITY_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                htmlFor={`profile-visibility-${opt.value}`}
+                className="flex cursor-pointer items-start gap-3 rounded-2xl bg-overlay/70 p-3 hover:bg-overlay"
+              >
+                <Radio
+                  id={`profile-visibility-${opt.value}`}
+                  name="profileVisibility"
+                  value={opt.value}
+                  checked={(profile.profileVisibility || 'public') === opt.value}
+                  disabled={busy}
+                  onChange={() => onSaveProfile?.({ profileVisibility: opt.value }).catch(() => {})}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-sm font-medium text-fg">{opt.label}</span>
+                  <span className="text-xs text-fg-muted">{opt.description}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
         </div>
       ) : null}
 

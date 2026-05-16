@@ -43,6 +43,10 @@ export function DataProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  // Tier 8.6 — distinguishes "fetch in flight" from "fetch resolved but the
+  // viewer doesn't have visibility access" so ProfileDrawer can render a
+  // private sheet instead of a perpetual loading state.
+  const [profileError, setProfileError] = useState(null);
 
   // --- Refreshers --------------------------------------------------------
 
@@ -428,23 +432,32 @@ export function DataProvider({ children }) {
     async (username) => {
       if (!username) return;
       setProfileLoading(true);
+      setProfileError(null);
       try {
         const data = await request(`/api/users/${encodeURIComponent(username)}/profile`);
         setProfile(data);
       } catch (error) {
-        if (error.message !== 'Session expired') showStatus(error.message);
-        setProfile(null);
+        if (error.message === 'Session expired') {
+          setProfile(null);
+        } else {
+          // Tier 8.6 — surface the 404 (private profile / not-friend) inline
+          // in the drawer instead of toasting. Toasts feel like a network
+          // error; the private-sheet is a deliberate UX state.
+          setProfile(null);
+          setProfileError(error.message || 'This profile is unavailable.');
+        }
       } finally {
         setProfileLoading(false);
       }
     },
-    [request, showStatus],
+    [request],
   );
 
   const openProfile = useCallback(
     (username) => {
       setProfileUsername(username);
       setProfile(null);
+      setProfileError(null);
       fetchProfile(username);
     },
     [fetchProfile],
@@ -453,6 +466,7 @@ export function DataProvider({ children }) {
   const closeProfile = useCallback(() => {
     setProfileUsername('');
     setProfile(null);
+    setProfileError(null);
   }, []);
 
   const handleFriendAction = useCallback(
@@ -494,10 +508,24 @@ export function DataProvider({ children }) {
           body: JSON.stringify(payload),
         });
         setUser((prev) =>
-          prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev,
+          prev
+            ? {
+                ...prev,
+                displayName: updated.displayName,
+                bio: updated.bio,
+                profileVisibility: updated.profileVisibility,
+              }
+            : prev,
         );
         setOwnProfile((prev) =>
-          prev ? { ...prev, displayName: updated.displayName, bio: updated.bio } : prev,
+          prev
+            ? {
+                ...prev,
+                displayName: updated.displayName,
+                bio: updated.bio,
+                profileVisibility: updated.profileVisibility,
+              }
+            : prev,
         );
         showStatus('Profile updated');
       } catch (error) {
@@ -536,6 +564,7 @@ export function DataProvider({ children }) {
     profile,
     profileLoading,
     profileBusy,
+    profileError,
 
     // Pick mutations
     submitPick,

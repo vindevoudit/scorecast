@@ -67,19 +67,30 @@ async function getVisible(groupId, viewerId) {
   if (!group) throw errors.notFound('Group not found or access denied');
 
   // Anonymous browse mode: only public groups are visible. Return 404 (not
-  // 403) so the existence of private groups isn't leaked.
+  // 403) so the existence of private groups isn't leaked. Tier 8.6 —
+  // member list is masked for any non-public member because anon viewers
+  // are neither friends nor group-mates.
   if (!viewerId) {
     const raw = await Group.findByPk(groupId);
     if (!raw || raw.visibility !== 'public') {
       throw errors.notFound('Group not found or access denied');
     }
-    return group;
+    return { ...group, members: maskMembersForAnon(group.members) };
   }
 
   if (!group.members.some((m) => m.userId === viewerId)) {
     throw errors.notFound('Group not found or access denied');
   }
+  // Authed group members: no masking (Tier 8.6 same-group contract).
   return group;
+}
+
+function maskMembersForAnon(members) {
+  return members.map((m) => {
+    if (m.profileVisibility === 'public') return m;
+    const short = String(m.userId).replace(/-/g, '').slice(0, 4);
+    return { userId: m.userId, username: `Player #${short}`, isMasked: true };
+  });
 }
 
 async function invite({ groupId, inviterId, username }) {

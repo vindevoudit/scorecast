@@ -104,6 +104,7 @@ const editProfileSchema = z
   .object({
     displayName: z.union([z.string().trim().max(60), z.literal('')]).optional(),
     bio: z.union([z.string().trim().max(280), z.literal('')]).optional(),
+    profileVisibility: z.enum(['public', 'friends', 'private']).optional(),
   })
   .openapi('EditProfileRequest');
 

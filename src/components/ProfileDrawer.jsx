@@ -17,6 +17,7 @@ function ProfileDrawer() {
     profile,
     profileLoading,
     profileBusy,
+    profileError,
     closeProfile,
     handleFriendAction,
   } = useData();
@@ -56,7 +57,20 @@ function ProfileDrawer() {
             Close
           </Button>
         </div>
-        {loading || !profile ? (
+        {loading ? (
+          <p className="text-sm text-fg-muted">Loading…</p>
+        ) : profileError ? (
+          // Tier 8.6 — same shape for "private" and "friends-only-not-friend"
+          // so the friend graph isn't probeable through the UI.
+          <div className="space-y-2 rounded-3xl border border-default bg-overlay/70 p-5">
+            <h2 className="text-lg font-semibold text-fg">This profile is unavailable</h2>
+            <p className="text-sm text-fg-muted">
+              {profileUsername
+                ? `@${profileUsername} keeps their profile private or restricted to friends.`
+                : 'This profile is private or restricted to friends.'}
+            </p>
+          </div>
+        ) : !profile ? (
           <p className="text-sm text-fg-muted">Loading…</p>
         ) : (
           <Suspense fallback={<p className="text-sm text-fg-muted">Loading…</p>}>

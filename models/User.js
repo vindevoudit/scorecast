@@ -72,6 +72,12 @@ module.exports = (sequelize) => {
         type: DataTypes.JSONB,
         allowNull: true,
       },
+      onboardingCompletedAt: {
+        // Tier 11 Chunk 4 — null until the user finishes or skips the
+        // first-run tour rendered by <OnboardingTour />.
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,

@@ -38,9 +38,31 @@ router.get('/me', authMiddleware, async (req, res) => {
     email: user.email || null,
     emailVerifiedAt: user.emailVerifiedAt || null,
     twoFactorEnabled: Boolean(user.totpEnabledAt),
+    // Tier 11 Chunk 4 — null on first sign-in, set when the user finishes
+    // or skips the onboarding tour. Frontend reads this to decide whether
+    // to mount <OnboardingTour />.
+    onboardingCompletedAt: user.onboardingCompletedAt || null,
     joinedGroups,
     pendingInvites,
   });
+});
+
+// Tier 11 Chunk 4 — Marks the onboarding tour as completed (either finished
+// or skipped). Idempotent: if already set, the existing timestamp is
+// preserved. No body — the timestamp is server-generated.
+router.post('/me/onboarding-completed', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user.onboardingCompletedAt) {
+      user.onboardingCompletedAt = new Date();
+      await user.save({ hooks: false });
+    }
+    res.json({ onboardingCompletedAt: user.onboardingCompletedAt });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'onboarding-completed failed');
+    res.status(500).json({ error: 'Failed to update onboarding state' });
+  }
 });
 
 router.put('/me', authMiddleware, validate(editProfileSchema), async (req, res) => {

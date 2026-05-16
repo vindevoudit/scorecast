@@ -143,7 +143,11 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
             placeholder="123456"
             className="font-mono text-lg"
           />
-          {err ? <p className="text-sm text-danger">{err}</p> : null}
+          {err ? (
+            <p role="alert" className="text-sm text-danger">
+              {err}
+            </p>
+          ) : null}
           <div className="flex gap-2">
             <Button type="submit" disabled={busy || code.length !== 6}>
               Confirm and enable
@@ -186,7 +190,11 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
           >
             {useRecovery ? 'Use authenticator code instead' : 'Use a recovery code instead'}
           </Button>
-          {err ? <p className="text-sm text-danger">{err}</p> : null}
+          {err ? (
+            <p role="alert" className="text-sm text-danger">
+              {err}
+            </p>
+          ) : null}
           <div className="flex gap-2">
             <Button
               type="submit"

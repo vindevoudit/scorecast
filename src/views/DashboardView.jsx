@@ -128,7 +128,7 @@ function DashboardView() {
         onMobileClose={() => setMobileOpen(false)}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col gap-6">
+      <main id="main" className="flex min-w-0 flex-1 flex-col gap-6">
         {(() => {
           // Tier 11 Chunk 3 — Mobile top bar splits into 3 stacked rows
           // so the BANTRYX wordmark stops colliding with the icons on

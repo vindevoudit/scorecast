@@ -153,24 +153,25 @@ function SidebarBody({
         )}
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Dashboard sections"
-        className="flex-1 space-y-1 overflow-y-auto px-2 pb-4"
-      >
-        {tabs.map((tab) => (
-          <NavItem
-            key={tab.id}
-            tab={tab}
-            active={activeView === tab.id}
-            collapsed={collapsed && !isMobile}
-            onSelect={(id) => {
-              onSelectView(id);
-              if (isMobile) onMobileClose?.();
-            }}
-          />
-        ))}
-      </div>
+      {/* Tier 11 Chunk 4 — `<nav>` landmark for screen readers. The inner
+          `role="tablist"` keeps the existing Playwright contracts
+          (`getByRole('tab', { name: /Upcoming Matches/ })`). */}
+      <nav aria-label="Primary navigation" className="flex-1 space-y-1 overflow-y-auto px-2 pb-4">
+        <div role="tablist" aria-label="Dashboard sections" className="space-y-1">
+          {tabs.map((tab) => (
+            <NavItem
+              key={tab.id}
+              tab={tab}
+              active={activeView === tab.id}
+              collapsed={collapsed && !isMobile}
+              onSelect={(id) => {
+                onSelectView(id);
+                if (isMobile) onMobileClose?.();
+              }}
+            />
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

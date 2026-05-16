@@ -51,7 +51,11 @@ function TwoFactorChallenge({ onSubmit, onCancel, busy }) {
             className="font-mono text-2xl tracking-widest"
           />
         )}
-        {err ? <p className="text-sm text-danger">{err}</p> : null}
+        {err ? (
+          <p role="alert" className="text-sm text-danger">
+            {err}
+          </p>
+        ) : null}
         <Button
           type="submit"
           variant="primary"

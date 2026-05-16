@@ -4,7 +4,11 @@ import { SkeletonGameCard, SkeletonLeaderboardRow } from '../components/Skeleton
 // is in flight (bootDone === false, or a refresh that wipes games).
 function SkeletonView() {
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]" aria-busy="true">
+    <main
+      id="main"
+      className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]"
+      aria-busy="true"
+    >
       <div className="space-y-4">
         <SkeletonGameCard />
         <SkeletonGameCard />
@@ -16,7 +20,7 @@ function SkeletonView() {
         <SkeletonLeaderboardRow />
         <SkeletonLeaderboardRow />
       </div>
-    </div>
+    </main>
   );
 }
 

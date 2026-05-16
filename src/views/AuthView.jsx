@@ -84,8 +84,11 @@ function AuthView() {
     }
   };
 
+  // Tier 11 Chunk 4 — every AuthView branch returns inside a `<main id="main">`
+  // so the skip-to-content link in App.jsx has a valid target on every view.
+  let body;
   if (authView === 'twofa') {
-    return (
+    body = (
       <TwoFactorChallenge
         onSubmit={handle2faVerify}
         onCancel={() => {
@@ -94,10 +97,8 @@ function AuthView() {
         }}
       />
     );
-  }
-
-  if (authView === 'reset') {
-    return (
+  } else if (authView === 'reset') {
+    body = (
       <div className="mx-auto max-w-lg">
         <ResetPasswordForm
           authData={authData}
@@ -110,10 +111,8 @@ function AuthView() {
         />
       </div>
     );
-  }
-
-  if (authView === 'forgot') {
-    return (
+  } else if (authView === 'forgot') {
+    body = (
       <div className="mx-auto max-w-lg">
         <ForgotPasswordForm
           authData={authData}
@@ -128,53 +127,53 @@ function AuthView() {
         />
       </div>
     );
-  }
-
-  if (!showAuth) {
-    return (
+  } else if (!showAuth) {
+    body = (
       <Landing
         onSignIn={() => setShowAuth(true)}
         onSignUp={() => setShowAuth(true)}
         onBrowseAsGuest={() => setBrowseAsGuest(true)}
       />
     );
+  } else {
+    body = (
+      <div className="mx-auto w-full max-w-5xl py-6">
+        <button
+          type="button"
+          onClick={() => setShowAuth(false)}
+          className="inline-flex items-center gap-2 rounded-2xl border border-default bg-elevated/60 px-4 py-2 text-sm font-semibold text-fg transition duration-200 hover:border-strong hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+            aria-hidden="true"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          {browseAsGuest ? 'Back to browsing' : 'Back to home'}
+        </button>
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <LoginForm
+            authData={authData}
+            setAuthData={setAuthData}
+            onSubmit={handleLogin}
+            onForgotPassword={() => {
+              setForgotSent(false);
+              setAuthView('forgot');
+            }}
+          />
+          <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div className="mx-auto w-full max-w-5xl py-6">
-      <button
-        type="button"
-        onClick={() => setShowAuth(false)}
-        className="inline-flex items-center gap-2 rounded-2xl border border-default bg-elevated/60 px-4 py-2 text-sm font-semibold text-fg transition duration-200 hover:border-strong hover:bg-elevated hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-4 w-4"
-          aria-hidden="true"
-        >
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-        {browseAsGuest ? 'Back to browsing' : 'Back to home'}
-      </button>
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <LoginForm
-          authData={authData}
-          setAuthData={setAuthData}
-          onSubmit={handleLogin}
-          onForgotPassword={() => {
-            setForgotSent(false);
-            setAuthView('forgot');
-          }}
-        />
-        <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
-      </div>
-    </div>
-  );
+  return <main id="main">{body}</main>;
 }
 
 export default AuthView;

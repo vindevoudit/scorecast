@@ -43,6 +43,12 @@ async function seedFixtures() {
       password: await bcrypt.hash(u.password, 10),
       role: u.role,
       loginAttempts: 0,
+      // Tier 11 Chunk 4 — pre-complete onboarding for seed users so the
+      // first-run tour modal doesn't block the existing E2E flows (only
+      // the dedicated onboarding spec cares about the tour). UI-registered
+      // users in tests (e.g. pick-and-result.spec.js) still hit the tour
+      // because they're created at runtime without this flag.
+      onboardingCompletedAt: now,
       createdAt: now,
     })),
   );

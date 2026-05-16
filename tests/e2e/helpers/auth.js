@@ -23,6 +23,19 @@ async function dismissLanding(page) {
     .catch(() => {});
 }
 
+// Tier 11 Chunk 4 — newly-registered users land with `onboardingCompletedAt:
+// null`, so the first-run tour modal pops up immediately. Helper dismisses
+// it via the "Skip tour" button so the test can reach the sidebar. Seed
+// users (e2e_admin/alice/bob) ship with the tour pre-completed via
+// fixtures/seed.js so this no-ops for them.
+async function dismissOnboardingTour(page) {
+  const skip = page.getByRole('button', { name: 'Skip tour' });
+  await skip.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
+  if (await skip.isVisible().catch(() => false)) {
+    await skip.click();
+  }
+}
+
 async function registerViaUI(page, { username, email, password }) {
   await page.goto('/');
   await dismissLanding(page);
@@ -30,6 +43,7 @@ async function registerViaUI(page, { username, email, password }) {
   await page.locator('#register-email').fill(email);
   await page.locator('#register-password').fill(password);
   await page.getByRole('button', { name: /^Register$/ }).click();
+  await dismissOnboardingTour(page);
   await expect(page.getByRole('tab', { name: DASHBOARD_SENTINEL }).first()).toBeVisible({
     timeout: 15_000,
   });
@@ -63,4 +77,4 @@ async function logoutViaUI(page) {
   });
 }
 
-module.exports = { registerViaUI, loginViaUI, logoutViaUI };
+module.exports = { registerViaUI, loginViaUI, logoutViaUI, dismissOnboardingTour };

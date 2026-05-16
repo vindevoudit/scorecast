@@ -12,6 +12,8 @@ const {
   visibilitySchema,
 } = require('../validation/schemas');
 const { authMiddleware } = require('../middleware/auth');
+const { optionalAuth } = require('../middleware/optionalAuth');
+const { publicReadLimiter } = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
 const GroupService = require('../services/GroupService');
 const { getGroupsForUser } = require('../lib/groups');
@@ -29,17 +31,19 @@ router.get(
 // MUST come before /groups/:groupId — CLAUDE.md invariant.
 router.get(
   '/groups/discover',
-  authMiddleware,
+  publicReadLimiter,
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    res.json(await GroupService.discoverPublic(req.user.id));
+    res.json(await GroupService.discoverPublic(req.user?.id ?? null));
   }),
 );
 
 router.get(
   '/groups/:groupId',
-  authMiddleware,
+  publicReadLimiter,
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    res.json(await GroupService.getVisible(req.params.groupId, req.user.id));
+    res.json(await GroupService.getVisible(req.params.groupId, req.user?.id ?? null));
   }),
 );
 

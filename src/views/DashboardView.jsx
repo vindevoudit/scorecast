@@ -11,7 +11,9 @@ import NotificationBell from '../components/NotificationBell';
 import SearchBar from '../components/SearchBar';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
+import InlineGatePanel from '../components/InlineGatePanel';
 import { useAuth } from '../hooks/useAuth';
+import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
 import { useGames } from '../hooks/useGames';
 
@@ -36,8 +38,17 @@ const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 // here so App.jsx is purely the layout chrome + the auth/skeleton/dashboard
 // switch. Everything else flows from the contexts the file sits inside.
 function DashboardView() {
-  const { user, authData, setAuthData, setConfirmingLogout, confirmingLogout, performLogout } =
-    useAuth();
+  const {
+    user,
+    authData,
+    setAuthData,
+    setConfirmingLogout,
+    confirmingLogout,
+    performLogout,
+    setBrowseAsGuest,
+    setShowAuth,
+  } = useAuth();
+  const { gate } = useAuthGate();
   const {
     loading,
     view,
@@ -67,10 +78,16 @@ function DashboardView() {
   } = useData();
   const { games, upcomingGames, liveGames, completedGames } = useGames();
 
-  const tabs = useMemo(
-    () => (user?.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS),
-    [user?.role],
-  );
+  const tabs = useMemo(() => {
+    if (!user) {
+      // Anonymous visitors: hide private tabs (My Picks, Profile) and Admin.
+      // Only Games / Groups / Rankings make sense without an account.
+      return BASE_TABS.filter(
+        (t) => t.id === 'games' || t.id === 'groups' || t.id === 'leaderboard',
+      );
+    }
+    return user.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS;
+  }, [user]);
   const [showCompleted, setShowCompleted] = useState(false);
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -141,6 +158,7 @@ function DashboardView() {
                 if (g.isMember) {
                   setView('groups');
                 } else if (g.visibility === 'public') {
+                  if (!gate('join a group')) return;
                   await handleJoinPublicGroup(g.id);
                   setView('groups');
                 }
@@ -161,8 +179,52 @@ function DashboardView() {
           </h2>
 
           <div className="flex items-center justify-end gap-3">
-            <NotificationBell />
-            <UserMenu />
+            {user ? (
+              <>
+                <NotificationBell />
+                <UserMenu />
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBrowseAsGuest(false);
+                    setShowAuth(false);
+                  }}
+                  aria-label="Back to landing page"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 transition duration-200 hover:border-slate-600 hover:bg-slate-900 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                  Home
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAuth(true)}
+                  className="rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-2 text-sm font-semibold text-cyan-300 transition duration-200 hover:border-slate-500 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAuth(true)}
+                  className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                >
+                  Sign up
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -290,61 +352,70 @@ function DashboardView() {
           {view === 'groups' && (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
               <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.45)]">
-                <h2 className="text-2xl font-semibold text-white">Create a new group</h2>
-                <p className="mt-2 text-slate-400">
-                  Invite friends and compare scores in your private pool.
-                </p>
-                <form onSubmit={onCreateGroupSubmit} className="mt-6 space-y-4">
-                  <label htmlFor="group-name" className="sr-only">
-                    Group name
-                  </label>
-                  <input
-                    id="group-name"
-                    value={authData.groupName}
-                    onChange={(event) =>
-                      setAuthData((prev) => ({ ...prev, groupName: event.target.value }))
-                    }
-                    placeholder="Group name"
-                    className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+                {user ? (
+                  <>
+                    <h2 className="text-2xl font-semibold text-white">Create a new group</h2>
+                    <p className="mt-2 text-slate-400">
+                      Invite friends and compare scores in your private pool.
+                    </p>
+                    <form onSubmit={onCreateGroupSubmit} className="mt-6 space-y-4">
+                      <label htmlFor="group-name" className="sr-only">
+                        Group name
+                      </label>
+                      <input
+                        id="group-name"
+                        value={authData.groupName}
+                        onChange={(event) =>
+                          setAuthData((prev) => ({ ...prev, groupName: event.target.value }))
+                        }
+                        placeholder="Group name"
+                        className="w-full rounded-3xl border border-slate-700 bg-slate-950/80 px-5 py-4 text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+                      />
+                      <fieldset className="rounded-3xl border border-slate-800 bg-slate-950/50 px-4 py-3">
+                        <legend className="px-2 text-xs uppercase tracking-[0.25em] text-slate-400">
+                          Visibility
+                        </legend>
+                        <div className="flex flex-wrap gap-3 pt-2 text-sm text-slate-200">
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="group-visibility"
+                              value="private"
+                              checked={authData.groupVisibility === 'private'}
+                              onChange={() =>
+                                setAuthData((prev) => ({ ...prev, groupVisibility: 'private' }))
+                              }
+                            />
+                            Private (invite-only)
+                          </label>
+                          <label className="inline-flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="group-visibility"
+                              value="public"
+                              checked={authData.groupVisibility === 'public'}
+                              onChange={() =>
+                                setAuthData((prev) => ({ ...prev, groupVisibility: 'public' }))
+                              }
+                            />
+                            Public (discoverable)
+                          </label>
+                        </div>
+                      </fieldset>
+                      <button
+                        type="submit"
+                        className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                      >
+                        Create group
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <InlineGatePanel
+                    label="create a group"
+                    description="Build a private league and invite your friends — sign up free or sign in."
                   />
-                  <fieldset className="rounded-3xl border border-slate-800 bg-slate-950/50 px-4 py-3">
-                    <legend className="px-2 text-xs uppercase tracking-[0.25em] text-slate-400">
-                      Visibility
-                    </legend>
-                    <div className="flex flex-wrap gap-3 pt-2 text-sm text-slate-200">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="group-visibility"
-                          value="private"
-                          checked={authData.groupVisibility === 'private'}
-                          onChange={() =>
-                            setAuthData((prev) => ({ ...prev, groupVisibility: 'private' }))
-                          }
-                        />
-                        Private (invite-only)
-                      </label>
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name="group-visibility"
-                          value="public"
-                          checked={authData.groupVisibility === 'public'}
-                          onChange={() =>
-                            setAuthData((prev) => ({ ...prev, groupVisibility: 'public' }))
-                          }
-                        />
-                        Public (discoverable)
-                      </label>
-                    </div>
-                  </fieldset>
-                  <button
-                    type="submit"
-                    className="inline-flex rounded-3xl bg-cyan-500 px-6 py-4 text-sm font-semibold text-slate-950 transition duration-300 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-                  >
-                    Create group
-                  </button>
-                </form>
+                )}
 
                 <div className="mt-6 space-y-3">
                   <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-slate-400">
@@ -369,7 +440,10 @@ function DashboardView() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => handleJoinPublicGroup(group.id)}
+                          onClick={() => {
+                            if (!gate('join a group')) return;
+                            handleJoinPublicGroup(group.id);
+                          }}
                           className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           Join

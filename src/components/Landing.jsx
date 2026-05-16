@@ -48,7 +48,7 @@ const SOFT_GLOW = { textShadow: '0 0 24px rgba(56, 189, 248, 0.4)' };
 
 const STEP_GLOW = { textShadow: '0 0 30px rgba(56, 189, 248, 0.25)' };
 
-function Landing({ onSignIn, onSignUp }) {
+function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
   return (
     <div className="space-y-20 pb-12 md:space-y-32">
       <section className="relative pt-8 md:pt-16">
@@ -96,6 +96,15 @@ function Landing({ onSignIn, onSignUp }) {
               Sign in
             </button>
           </div>
+          {onBrowseAsGuest && (
+            <button
+              type="button"
+              onClick={onBrowseAsGuest}
+              className="mt-6 text-sm font-medium text-slate-400 underline-offset-4 transition duration-200 hover:text-cyan-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              Or just browse as a guest →
+            </button>
+          )}
         </div>
       </section>
 
@@ -150,6 +159,15 @@ function Landing({ onSignIn, onSignUp }) {
               Or sign in →
             </button>
           </div>
+          {onBrowseAsGuest && (
+            <button
+              type="button"
+              onClick={onBrowseAsGuest}
+              className="mt-6 text-xs font-medium text-slate-400 underline-offset-4 transition duration-200 hover:text-cyan-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              Just browsing? Continue as a guest →
+            </button>
+          )}
         </div>
       </section>
     </div>

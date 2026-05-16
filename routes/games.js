@@ -6,7 +6,8 @@ const express = require('express');
 const { validate } = require('../validation/middleware');
 const { resultSchema, commentSchema } = require('../validation/schemas');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
-const { commentLimiter } = require('../middleware/rateLimit');
+const { optionalAuth } = require('../middleware/optionalAuth');
+const { commentLimiter, publicReadLimiter } = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
 const GameService = require('../services/GameService');
 const CommentService = require('../services/CommentService');
@@ -15,8 +16,9 @@ const router = express.Router();
 
 router.get(
   '/games',
-  authMiddleware,
-  asyncHandler(async (req, res) => {
+  publicReadLimiter,
+  optionalAuth,
+  asyncHandler(async (_req, res) => {
     const games = await GameService.listGames();
     res.json(games);
   }),
@@ -35,9 +37,10 @@ router.post(
 
 router.get(
   '/games/:gameId/comments',
-  authMiddleware,
+  publicReadLimiter,
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    const comments = await CommentService.listForGame(req.params.gameId, req.user.id);
+    const comments = await CommentService.listForGame(req.params.gameId, req.user?.id ?? null);
     res.json(comments);
   }),
 );

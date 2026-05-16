@@ -2,6 +2,7 @@ import { scorePick } from '../utils/scoring';
 import { useCountdown } from '../utils/time';
 import CommentThread from './CommentThread';
 import { usePicks } from '../hooks/usePicks';
+import { useAuthGate } from '../hooks/useAuthGate';
 
 function formatProbability(value) {
   return `${Math.round(value * 100)}%`;
@@ -38,6 +39,7 @@ function GameCard({ game }) {
   // through usePicks (pickMap + submit/remove) and CommentThread now
   // reads its own context.
   const { pickMap, submitPick, removePick } = usePicks();
+  const { gate } = useAuthGate();
   const existingPick = pickMap.get(game.id) || null;
   const upcoming = isUpcomingGame(game);
   const countdown = useCountdown(game.date);
@@ -128,7 +130,10 @@ function GameCard({ game }) {
         <button
           className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'home' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100 hover:border-cyan-300 hover:bg-cyan-500/20'}`}
           disabled={!upcoming}
-          onClick={() => submitPick(game.id, 'home')}
+          onClick={() => {
+            if (!gate('make a pick')) return;
+            submitPick(game.id, 'home');
+          }}
           aria-label={`Pick ${game.homeTeam} to win`}
         >
           Pick {game.homeTeam}
@@ -136,7 +141,10 @@ function GameCard({ game }) {
         <button
           className={`rounded-3xl border px-4 py-3 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50 ${existingChoice === 'away' ? 'border-cyan-300 bg-cyan-500/30 text-white' : 'border-slate-700 bg-slate-950/90 text-slate-100 hover:border-slate-500 hover:bg-slate-900'}`}
           disabled={!upcoming}
-          onClick={() => submitPick(game.id, 'away')}
+          onClick={() => {
+            if (!gate('make a pick')) return;
+            submitPick(game.id, 'away');
+          }}
           aria-label={`Pick ${game.awayTeam} to win`}
         >
           Pick {game.awayTeam}
@@ -147,7 +155,10 @@ function GameCard({ game }) {
         <div className="mt-3 flex justify-end">
           <button
             type="button"
-            onClick={() => removePick(existingPickId)}
+            onClick={() => {
+              if (!gate('undo a pick')) return;
+              removePick(existingPickId);
+            }}
             className="text-xs text-slate-400 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             Undo pick

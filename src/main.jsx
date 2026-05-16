@@ -6,6 +6,7 @@ import { installClientErrorReporter } from './lib/clientErrorReporter';
 import { initSentry } from './lib/sentry';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { AuthGateProvider } from './contexts/AuthGateContext';
 import { DataProvider } from './contexts/DataContext';
 import './index.css';
 
@@ -20,9 +21,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <ErrorBoundary>
       <NotificationProvider>
         <AuthProvider>
-          <DataProvider>
-            <App />
-          </DataProvider>
+          <AuthGateProvider>
+            <DataProvider>
+              <App />
+            </DataProvider>
+          </AuthGateProvider>
         </AuthProvider>
       </NotificationProvider>
     </ErrorBoundary>

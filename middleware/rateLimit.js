@@ -72,6 +72,19 @@ const forgotPasswordLimiter = rateLimit({
   message: { error: 'Too many password reset requests' },
 });
 
+// publicReadLimiter — applied to the optional-auth GETs (games / leaderboard
+// / public groups / search / public profiles) so anonymous browse traffic is
+// capped. Generous limit since legitimate browsing makes a handful of reads
+// per page. Per IP since these requests may be cookie-less.
+const publicReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 240,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  message: { error: 'Too many requests — slow down' },
+});
+
 module.exports = {
   skipInTest,
   loginLimiter,
@@ -81,4 +94,5 @@ module.exports = {
   friendRequestLimiter,
   pickLimiter,
   forgotPasswordLimiter,
+  publicReadLimiter,
 };

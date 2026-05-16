@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { timeAgo } from '../utils/time';
 import Avatar from './Avatar';
+import InlineGatePanel from './InlineGatePanel';
 import { useRequest } from '../hooks/useRequest';
 import { useAuth } from '../hooks/useAuth';
+import { useAuthGate } from '../hooks/useAuthGate';
 import { useNotifications } from '../hooks/useNotifications';
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
@@ -117,6 +119,7 @@ function CommentThread({ gameId }) {
   // + showStatus from the surrounding contexts directly.
   const request = useRequest();
   const { user } = useAuth();
+  const { gate } = useAuthGate();
   const { showStatus } = useNotifications();
   const currentUserId = user?.id;
   const onError = (msg) => {
@@ -189,6 +192,7 @@ function CommentThread({ gameId }) {
   };
 
   const toggleReaction = async (commentId, emoji, currentlyMine) => {
+    if (!gate('react')) return;
     const setLocal = (mutator) => {
       setComments((prev) =>
         prev.map((c) => {
@@ -245,29 +249,36 @@ function CommentThread({ gameId }) {
 
       {open && (
         <div className="mt-3 space-y-3">
-          <form onSubmit={submit} className="space-y-2">
-            <label htmlFor={`comment-${gameId}`} className="sr-only">
-              Comment
-            </label>
-            <textarea
-              id={`comment-${gameId}`}
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              maxLength={500}
-              rows={2}
-              placeholder="Add some banter…"
-              className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+          {user ? (
+            <form onSubmit={submit} className="space-y-2">
+              <label htmlFor={`comment-${gameId}`} className="sr-only">
+                Comment
+              </label>
+              <textarea
+                id={`comment-${gameId}`}
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder="Add some banter…"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 px-4 py-3 text-sm text-white outline-none transition duration-200 focus:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400"
+              />
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitting || !body.trim()}
+                  className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Post
+                </button>
+              </div>
+            </form>
+          ) : (
+            <InlineGatePanel
+              label="comment"
+              description="Join the conversation — sign up free or sign in to post."
             />
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={submitting || !body.trim()}
-                className="rounded-2xl bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition duration-200 hover:bg-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Post
-              </button>
-            </div>
-          </form>
+          )}
 
           {loading ? (
             <p className="text-xs text-slate-500">Loading…</p>

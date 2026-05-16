@@ -37,7 +37,7 @@ async function createGroup({ ownerId, name, visibility = 'private' }) {
 }
 
 async function discoverPublic(viewerId) {
-  const joinedIds = await getJoinedGroupIds(viewerId);
+  const joinedIds = viewerId ? await getJoinedGroupIds(viewerId) : [];
   const publicGroups = await Group.findAll({
     where: {
       visibility: 'public',
@@ -64,7 +64,19 @@ async function discoverPublic(viewerId) {
 
 async function getVisible(groupId, viewerId) {
   const group = await getGroupById(groupId);
-  if (!group || !group.members.some((m) => m.userId === viewerId)) {
+  if (!group) throw errors.notFound('Group not found or access denied');
+
+  // Anonymous browse mode: only public groups are visible. Return 404 (not
+  // 403) so the existence of private groups isn't leaked.
+  if (!viewerId) {
+    const raw = await Group.findByPk(groupId);
+    if (!raw || raw.visibility !== 'public') {
+      throw errors.notFound('Group not found or access denied');
+    }
+    return group;
+  }
+
+  if (!group.members.some((m) => m.userId === viewerId)) {
     throw errors.notFound('Group not found or access denied');
   }
   return group;

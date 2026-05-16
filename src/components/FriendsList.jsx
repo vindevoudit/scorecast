@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import EmptyState from './EmptyState';
 import { useFriends } from '../hooks/useFriends';
+import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
 
 function FriendsList() {
   // Tier 13 Chunk 5 — fully self-contained. Friends data + handlers come
   // from useFriends; profile navigation from useData (openProfile).
+  // Hidden entirely for anonymous visitors (no friends to show, and the
+  // action surfaces would all be modal-gated anyway).
+  const { user } = useAuth();
   const {
     friends: friendsData,
     handleSendFriendRequest: onSendRequest,
@@ -17,8 +21,11 @@ function FriendsList() {
   const onCancel = handleUnfriend;
   const onUnfriend = handleUnfriend;
   const { openProfile: onSelectUser } = useData();
-
   const [username, setUsername] = useState('');
+
+  // Anonymous visitors: hide the entire friend surface. All actions inside
+  // would be gated anyway, and the empty lists are noise without a session.
+  if (!user) return null;
 
   const handleSubmit = async (event) => {
     event.preventDefault();

@@ -163,17 +163,32 @@ export function DataProvider({ children }) {
     refreshDiscover,
   ]);
 
-  // Initial boot. Same swallow-401 contract as the original App.jsx — if the
-  // user isn't authenticated, we land on the auth view without surfacing the
-  // "no session" toast.
+  // Anonymous boot path — fetch only the public endpoints. Used when /api/me
+  // 401s on first load, and after logout to repopulate the public slots.
+  const loadAnonDashboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      await Promise.all([refreshGames(), refreshLeaderboard(''), refreshDiscover()]);
+    } finally {
+      setLoading(false);
+    }
+  }, [refreshGames, refreshLeaderboard, refreshDiscover]);
+
+  // Initial boot. Try the authed path first; on 401 (no session) fall back to
+  // the anonymous path so visitors land on a populated browse-mode dashboard.
   useEffect(() => {
     loadDashboard()
-      .catch((error) => {
+      .catch(async (error) => {
         if (
           error.status === 401 ||
           error.message === 'Session expired' ||
           error.message === 'Authentication required'
         ) {
+          try {
+            await loadAnonDashboard();
+          } catch (anonError) {
+            if (anonError.message !== 'Session expired') showStatus(anonError.message);
+          }
           return;
         }
         showStatus(error.message);
@@ -182,19 +197,17 @@ export function DataProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When the user flips back to null (logout / session-expired), clear every
-  // data slot so a fresh login starts clean. AuthContext owns flipping `user`.
+  // When the user flips back to null (logout / session-expired), clear only
+  // the user-specific slots — public slots (games / leaderboard / discover)
+  // stay populated so the anon browse view picks up where they left off.
   useEffect(() => {
     if (user) return;
-    setGames([]);
     setGroups([]);
     setPicks([]);
-    setLeaderboard(emptyLeaderboard);
     setPendingInvites([]);
     setSelectedGroupId('');
     setView('games');
     setFriends(emptyFriends);
-    setDiscoverGroups([]);
     setOwnProfile(null);
   }, [user]);
 
@@ -557,6 +570,7 @@ export function DataProvider({ children }) {
 
     // Reload all
     loadDashboard,
+    loadAnonDashboard,
 
     // Refreshers (exposed for AdminPanel + niche callers)
     refreshGames,

@@ -5,6 +5,7 @@ import { useGames } from './hooks/useGames';
 import DashboardView from './views/DashboardView';
 import AuthView from './views/AuthView';
 import SkeletonView from './views/SkeletonView';
+import SignInModal from './components/SignInModal';
 
 // App.jsx is the layout shell. The provider stack lives in main.jsx
 // (NotificationProvider → AuthProvider → DataProvider). Three views consume
@@ -12,15 +13,26 @@ import SkeletonView from './views/SkeletonView';
 // status banner, and the boot/auth/dashboard view switch — the hero/title
 // chrome was removed when the sidebar nav landed.
 function App() {
-  const { user } = useAuth();
+  const { user, browseAsGuest, showAuth } = useAuth();
   const { bootDone, loading } = useData();
   const { status } = useNotifications();
   const { games } = useGames();
 
+  // View precedence:
+  //   1. authed → Dashboard
+  //   2. anon clicking Sign in from anywhere → AuthView (showAuth wins over
+  //      browseAsGuest so Back returns the visitor to anon-mode, not the
+  //      Landing).
+  //   3. anon guest → Dashboard (read-only)
+  //   4. first-time visitor (no flags) → AuthView (Landing)
   let body;
-  if (!bootDone || (loading && (!user || games.length === 0))) {
+  if (!bootDone || (loading && games.length === 0)) {
     body = <SkeletonView />;
   } else if (user) {
+    body = <DashboardView />;
+  } else if (showAuth) {
+    body = <AuthView />;
+  } else if (browseAsGuest) {
     body = <DashboardView />;
   } else {
     body = <AuthView />;
@@ -41,6 +53,7 @@ function App() {
 
         {body}
       </div>
+      <SignInModal />
     </div>
   );
 }

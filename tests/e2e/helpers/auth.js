@@ -52,7 +52,12 @@ async function logoutViaUI(page) {
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   // Confirm modal still uses "Log out" (two words); scope to the dialog.
   await page.getByRole('dialog').getByRole('button', { name: 'Log out', exact: true }).click();
-  await expect(page.locator('#login-username')).toBeVisible({ timeout: 15_000 });
+  // Post-logout the visitor lands on the anonymous dashboard (browseAsGuest
+  // flipped true by performLogout) — the top utility bar shows a [Sign in]
+  // button in place of the UserMenu.
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 module.exports = { registerViaUI, loginViaUI, logoutViaUI };

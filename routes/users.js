@@ -4,7 +4,8 @@
 // /search and /users/:username/profile (with friend-aware head-to-head).
 const express = require('express');
 const { Op } = require('sequelize');
-const { authMiddleware } = require('../middleware/auth');
+const { optionalAuth } = require('../middleware/optionalAuth');
+const { publicReadLimiter } = require('../middleware/rateLimit');
 const { scorePick } = require('../lib/scoring');
 const { getUserByUsername } = require('../lib/users');
 const { getJoinedGroupIds } = require('../lib/groups');
@@ -14,13 +15,14 @@ const { User, Group, Game, Pick, Badge } = require('../models');
 
 const router = express.Router();
 
-router.get('/search', authMiddleware, async (req, res) => {
+router.get('/search', publicReadLimiter, optionalAuth, async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     const type = req.query.type || 'all';
     if (q.length < 2) return res.json({ users: [], groups: [], games: [] });
 
     const like = `%${q}%`;
+    const viewerId = req.user?.id ?? null;
     const results = { users: [], groups: [], games: [] };
 
     if (type === 'all' || type === 'users') {
@@ -38,7 +40,8 @@ router.get('/search', authMiddleware, async (req, res) => {
     }
 
     if (type === 'all' || type === 'groups') {
-      const joinedIds = await getJoinedGroupIds(req.user.id);
+      // Anonymous viewers see only public groups (joinedIds is empty).
+      const joinedIds = viewerId ? await getJoinedGroupIds(viewerId) : [];
       const groups = await Group.findAll({
         where: {
           name: { [Op.iLike]: like },
@@ -85,12 +88,13 @@ router.get('/search', authMiddleware, async (req, res) => {
   }
 });
 
-router.get('/users/:username/profile', authMiddleware, async (req, res) => {
+router.get('/users/:username/profile', publicReadLimiter, optionalAuth, async (req, res) => {
   try {
     const targetUser = await getUserByUsername(req.params.username);
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
     }
+    const viewerId = req.user?.id ?? null;
 
     const [userPicks, allGames, badges] = await Promise.all([
       Pick.findAll({ where: { userId: targetUser.id } }),
@@ -130,28 +134,32 @@ router.get('/users/:username/profile', authMiddleware, async (req, res) => {
         points: scorePick(pick, game),
       }));
 
-    const friendship = await getFriendshipBetween(req.user.id, targetUser.id);
-    const friendStatus = friendStatusFrom(friendship, req.user.id, targetUser.id);
-
+    // Anonymous viewers don't have friendship or head-to-head data.
+    let friendship = null;
+    let friendStatus = null;
     let headToHead = null;
-    if (friendStatus === 'friends') {
-      const viewerPicks = await Pick.findAll({ where: { userId: req.user.id } });
-      const viewerByGame = new Map(viewerPicks.map((p) => [p.gameId, p]));
-      let viewerWins = 0;
-      let targetWins = 0;
-      let ties = 0;
-      for (const pick of userPicks) {
-        const game = gameById.get(pick.gameId);
-        if (!game || !game.result) continue;
-        const viewerPick = viewerByGame.get(pick.gameId);
-        if (!viewerPick) continue;
-        const viewerPts = scorePick(viewerPick, game);
-        const targetPts = scorePick(pick, game);
-        if (viewerPts > targetPts) viewerWins += 1;
-        else if (targetPts > viewerPts) targetWins += 1;
-        else ties += 1;
+    if (viewerId) {
+      friendship = await getFriendshipBetween(viewerId, targetUser.id);
+      friendStatus = friendStatusFrom(friendship, viewerId, targetUser.id);
+      if (friendStatus === 'friends') {
+        const viewerPicks = await Pick.findAll({ where: { userId: viewerId } });
+        const viewerByGame = new Map(viewerPicks.map((p) => [p.gameId, p]));
+        let viewerWins = 0;
+        let targetWins = 0;
+        let ties = 0;
+        for (const pick of userPicks) {
+          const game = gameById.get(pick.gameId);
+          if (!game || !game.result) continue;
+          const viewerPick = viewerByGame.get(pick.gameId);
+          if (!viewerPick) continue;
+          const viewerPts = scorePick(viewerPick, game);
+          const targetPts = scorePick(pick, game);
+          if (viewerPts > targetPts) viewerWins += 1;
+          else if (targetPts > viewerPts) targetWins += 1;
+          else ties += 1;
+        }
+        headToHead = { viewerWins, targetWins, ties };
       }
-      headToHead = { viewerWins, targetWins, ties };
     }
 
     res.json({

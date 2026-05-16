@@ -35,6 +35,43 @@ export function AuthProvider({ children }) {
   const [forgotSent, setForgotSent] = useState(false);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
 
+  // Anonymous browse flag. When true, App.jsx renders DashboardView with
+  // `user === null` so visitors can explore games / leaderboards / public
+  // groups without an account. Set by Landing's "Browse as guest" CTA and
+  // by performLogout (so logout sends users back to the anon dashboard,
+  // not the auth grid). Persisted to localStorage so refreshing stays in
+  // browse mode.
+  const [browseAsGuest, setBrowseAsGuestState] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem('sc_browse_as_guest') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setBrowseAsGuest = useCallback((next) => {
+    setBrowseAsGuestState(next);
+    try {
+      if (next) window.localStorage.setItem('sc_browse_as_guest', '1');
+      else window.localStorage.removeItem('sc_browse_as_guest');
+    } catch {
+      // localStorage can throw in private-mode browsers; ignore.
+    }
+  }, []);
+
+  // showAuth controls whether AuthView shows the Landing (false) or the
+  // login + register grid (true). Promoted from AuthView's local state so
+  // the SignInModal (mounted at the app root) can flip it. Initial value
+  // reads `sc_visited` so returning users skip the Landing.
+  const [showAuth, setShowAuth] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem('sc_visited') === '1';
+    } catch {
+      return false;
+    }
+  });
+
   // Consume verifyToken / resetToken from the URL once on mount.
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -207,7 +244,18 @@ export function AuthProvider({ children }) {
     }
     setUser(null);
     setConfirmingLogout(false);
-  }, []);
+    // Post-logout, redirect to the marketing landing page. Both flags reset
+    // so AuthView falls through to <Landing />, and `sc_visited` is cleared
+    // so a refresh after logout still lands there — an explicit sign-out is
+    // a fresh start, not a "returning user" experience.
+    setBrowseAsGuest(false);
+    setShowAuth(false);
+    try {
+      window.localStorage.removeItem('sc_visited');
+    } catch {
+      // private-mode browsers can throw on localStorage; ignore.
+    }
+  }, [setBrowseAsGuest]);
 
   const value = {
     user,
@@ -220,6 +268,10 @@ export function AuthProvider({ children }) {
     setForgotSent,
     confirmingLogout,
     setConfirmingLogout,
+    browseAsGuest,
+    setBrowseAsGuest,
+    showAuth,
+    setShowAuth,
     clearSession,
     handleLogin,
     handleRegister,

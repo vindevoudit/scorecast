@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import LoginForm from '../components/LoginForm';
 import RegisterForm from '../components/RegisterForm';
 import ForgotPasswordForm from '../components/ForgotPasswordForm';
@@ -21,6 +21,10 @@ function AuthView() {
     setAuthView,
     forgotSent,
     setForgotSent,
+    showAuth,
+    setShowAuth,
+    browseAsGuest,
+    setBrowseAsGuest,
     handleLogin: authLogin,
     handleRegister: authRegister,
     handleForgotPassword,
@@ -30,20 +34,9 @@ function AuthView() {
   } = useAuth();
   const { loadDashboard } = useData();
 
-  // Show the Landing marketing page by default for unauthenticated visitors.
-  // Both landing CTAs ("Get started" / "Sign in") set this to true to reveal
-  // the login + register grid. Forgot/reset/2FA deep-link flows below
-  // bypass the landing entirely. Returning users (anyone who has previously
-  // authenticated in this browser) also skip the landing — they shouldn't
-  // be re-greeted with marketing copy after a logout or session expiry.
-  const [showAuth, setShowAuth] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.localStorage.getItem('sc_visited') === '1';
-    } catch {
-      return false;
-    }
-  });
+  // showAuth + setShowAuth come from AuthContext now so the SignInModal can
+  // flip them from outside AuthView. Default = `sc_visited === '1'` (set on
+  // successful auth) so returning users skip the marketing Landing.
 
   // Any time we leave the landing for a forgot/reset/2FA flow (typically
   // via a `/?resetToken=…` deep-link), pin showAuth=true so that when the
@@ -53,7 +46,7 @@ function AuthView() {
     if (authView === 'forgot' || authView === 'reset' || authView === 'twofa') {
       setShowAuth(true);
     }
-  }, [authView]);
+  }, [authView, setShowAuth]);
 
   // Mark this browser as a "returning user" so a later logout/refresh sends
   // them straight to the auth grid instead of the marketing landing.
@@ -138,7 +131,13 @@ function AuthView() {
   }
 
   if (!showAuth) {
-    return <Landing onSignIn={() => setShowAuth(true)} onSignUp={() => setShowAuth(true)} />;
+    return (
+      <Landing
+        onSignIn={() => setShowAuth(true)}
+        onSignUp={() => setShowAuth(true)}
+        onBrowseAsGuest={() => setBrowseAsGuest(true)}
+      />
+    );
   }
 
   return (
@@ -160,7 +159,7 @@ function AuthView() {
         >
           <path d="M15 18l-6-6 6-6" />
         </svg>
-        Back to home
+        {browseAsGuest ? 'Back to browsing' : 'Back to home'}
       </button>
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <LoginForm

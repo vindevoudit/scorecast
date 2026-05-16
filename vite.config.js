@@ -15,9 +15,20 @@ export default defineConfig({
     sourcemap: 'hidden',
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          sentry: ['@sentry/react', '@sentry/browser'],
+        manualChunks(id) {
+          // React + ReactDOM stay in a stable vendor chunk
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+            return 'vendor';
+          }
+          // Sentry browser SDK
+          if (id.includes('node_modules/@sentry/')) {
+            return 'sentry';
+          }
+          // Radix primitives (Tier 11) — caches independently of app code
+          if (id.includes('node_modules/@radix-ui/')) {
+            return 'radix';
+          }
+          return undefined;
         },
       },
     },

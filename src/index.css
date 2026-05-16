@@ -2,8 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Tier 11 Chunk 1 — Design tokens.
+ *
+ * Two themes live here: dark (default, on :root) and light (opt-in via
+ * data-theme="light" on <html>). Tailwind's tailwind.config.js wires every
+ * semantic token through `rgb(var(--c-<name>) / <alpha-value>)` so utilities
+ * like `bg-base/80` continue to work.
+ *
+ * Color tokens are space-separated RGB triplets (no rgb() wrapper) — this is
+ * required for Tailwind's <alpha-value> interpolation.
+ */
 :root {
   color-scheme: dark;
+
+  /* Surface + foreground */
+  --c-bg-base: 2 6 23; /* slate-950 */
+  --c-bg-elevated: 11 19 33; /* the existing `surface` color */
+  --c-bg-overlay: 15 23 42; /* slate-900 */
+  --c-fg: 248 250 252; /* slate-50 */
+  --c-fg-muted: 148 163 184; /* slate-400 */
+  --c-fg-subtle: 100 116 139; /* slate-500 */
+
+  /* Borders */
+  --c-border-default: 30 41 59; /* slate-800 */
+  --c-border-strong: 51 65 85; /* slate-700 */
+
+  /* Accent (brand cyan) */
+  --c-accent: 34 211 238; /* cyan-400 */
+  --c-accent-strong: 6 182 212; /* cyan-500 */
+  --c-accent-soft: 103 232 249; /* cyan-300 */
+  --c-accent-fg: 2 6 23; /* foreground on accent surfaces */
+
+  /* Status */
+  --c-success: 74 222 128; /* green-400 */
+  --c-warning: 250 204 21; /* yellow-400 */
+  --c-danger: 248 113 113; /* red-400 */
+  --c-info: 96 165 250; /* blue-400 */
+
+  /* Shadows */
+  --shadow-glow: 0 20px 60px rgba(6, 182, 212, 0.18);
+  /* BANTRYX wordmark three-layer cyan glow — tokenized from the inline
+   * style currently used in DashboardView/Landing. Light mode dials this
+   * down so the bloom doesn't dominate a white background. */
+  --shadow-brand-glow:
+    0 0 12px rgba(34, 211, 238, 0.9), 0 0 24px rgba(34, 211, 238, 0.65),
+    0 0 48px rgba(34, 211, 238, 0.4);
+
+  /* Radii */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 1.75rem;
+
   font-family:
     Inter,
     ui-sans-serif,
@@ -12,6 +64,55 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --c-bg-base: 248 250 252; /* slate-50 */
+  --c-bg-elevated: 255 255 255; /* white */
+  --c-bg-overlay: 241 245 249; /* slate-100 */
+  --c-fg: 15 23 42; /* slate-900 */
+  --c-fg-muted: 71 85 105; /* slate-600 */
+  --c-fg-subtle: 100 116 139; /* slate-500 */
+
+  --c-border-default: 226 232 240; /* slate-200 */
+  --c-border-strong: 203 213 225; /* slate-300 */
+
+  --c-accent: 8 145 178; /* cyan-600 (darker for AA contrast on white) */
+  --c-accent-strong: 14 116 144; /* cyan-700 */
+  --c-accent-soft: 14 165 233; /* sky-500 */
+  --c-accent-fg: 255 255 255;
+
+  --c-success: 22 163 74; /* green-600 */
+  --c-warning: 202 138 4; /* yellow-600 */
+  --c-danger: 220 38 38; /* red-600 */
+  --c-info: 37 99 235; /* blue-600 */
+
+  --shadow-glow: 0 20px 60px rgba(8, 145, 178, 0.12);
+  --shadow-brand-glow:
+    0 0 8px rgba(8, 145, 178, 0.4), 0 0 16px rgba(8, 145, 178, 0.25);
+}
+
+/* When the user actively switches themes, briefly disable transitions on
+ * everything so we don't see a half-themed flash as colors crossfade. The
+ * theme.js helper toggles the class on document.documentElement. */
+html.theme-switching * {
+  transition: none !important;
+}
+
+/* prefers-reduced-motion: kill animations + transitions globally for users
+ * who opted out. Specific motion-rich UI (onboarding tour, page slide-ins)
+ * also checks matchMedia and skips the animation entirely. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 html {
@@ -24,7 +125,8 @@ html {
 
 body {
   min-height: 100vh;
-  background-color: #020617;
+  background-color: rgb(var(--c-bg-base));
+  color: rgb(var(--c-fg));
 }
 
 button,
@@ -41,5 +143,9 @@ input {
     background-image:
       radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 45%),
       radial-gradient(circle at 30% 20%, rgba(14, 165, 233, 0.14), transparent 20%);
+  }
+
+  .text-shadow-brand-glow {
+    text-shadow: var(--shadow-brand-glow);
   }
 }

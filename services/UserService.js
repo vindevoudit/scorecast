@@ -9,9 +9,15 @@ const {
   Group,
   Pick,
   Comment,
+  CommentReaction,
   Friendship,
   GroupMember,
   GroupInvite,
+  Badge,
+  Notification,
+  EmailVerificationToken,
+  PasswordResetToken,
+  RefreshToken,
   sequelize,
 } = require('../models');
 const errors = require('../lib/errors');
@@ -19,6 +25,8 @@ const LeaderboardService = require('./LeaderboardService');
 
 async function cascadeDelete(target, { transaction } = {}) {
   const opts = transaction ? { transaction } : {};
+
+  // Owned groups: tear down their members + invites first.
   const ownedGroups = await Group.findAll({ where: { ownerId: target.id }, ...opts });
   const ownedGroupIds = ownedGroups.map((g) => g.id);
   if (ownedGroupIds.length > 0) {
@@ -26,6 +34,22 @@ async function cascadeDelete(target, { transaction } = {}) {
     await GroupInvite.destroy({ where: { groupId: ownedGroupIds }, ...opts });
     await Group.destroy({ where: { id: ownedGroupIds }, ...opts });
   }
+
+  // Reactions on the user's own comments must go before the comments
+  // themselves (the comment_reactions → comments FK isn't cascading).
+  const ownedComments = await Comment.findAll({
+    where: { userId: target.id },
+    attributes: ['id'],
+    ...opts,
+  });
+  const ownedCommentIds = ownedComments.map((c) => c.id);
+  if (ownedCommentIds.length > 0) {
+    await CommentReaction.destroy({ where: { commentId: ownedCommentIds }, ...opts });
+  }
+
+  // The user's reactions on other people's comments.
+  await CommentReaction.destroy({ where: { userId: target.id }, ...opts });
+
   await Pick.destroy({ where: { userId: target.id }, ...opts });
   await Comment.destroy({ where: { userId: target.id }, ...opts });
   await Friendship.destroy({
@@ -34,6 +58,18 @@ async function cascadeDelete(target, { transaction } = {}) {
   });
   await GroupMember.destroy({ where: { userId: target.id }, ...opts });
   await GroupInvite.destroy({ where: { username: target.username }, ...opts });
+
+  // Tier 6 token tables + notifications + badges. These were created via
+  // `sequelize.sync()` on the original deploy, so their FKs to users(id)
+  // were never given ON DELETE CASCADE (the migrations declared it but
+  // CREATE TABLE IF NOT EXISTS no-op'd against the synced tables). Until a
+  // fix-up migration runs, we destroy these rows explicitly.
+  await Notification.destroy({ where: { userId: target.id }, ...opts });
+  await Badge.destroy({ where: { userId: target.id }, ...opts });
+  await EmailVerificationToken.destroy({ where: { userId: target.id }, ...opts });
+  await PasswordResetToken.destroy({ where: { userId: target.id }, ...opts });
+  await RefreshToken.destroy({ where: { userId: target.id }, ...opts });
+
   await target.destroy(opts);
 }
 

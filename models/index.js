@@ -44,50 +44,63 @@ const EmailVerificationToken = require('./EmailVerificationToken')(sequelize);
 const PasswordResetToken = require('./PasswordResetToken')(sequelize);
 const RefreshToken = require('./RefreshToken')(sequelize);
 
-// Define associations
-User.hasMany(Pick, { foreignKey: 'userId', as: 'picks' });
+// Define associations.
+//
+// `onDelete: 'CASCADE'` is declared on every User-owned child relation so a
+// fresh `sequelize.sync()` produces FKs that match the migration files. The
+// existing prod DB had the bug version of these FKs (NO ACTION) for a long
+// time; migration 20260516000002-cascade-user-fks.js retrofits CASCADE there.
+User.hasMany(Pick, { foreignKey: 'userId', as: 'picks', onDelete: 'CASCADE' });
 Pick.belongsTo(User, { foreignKey: 'userId' });
 
-Game.hasMany(Pick, { foreignKey: 'gameId', as: 'picks' });
+Game.hasMany(Pick, { foreignKey: 'gameId', as: 'picks', onDelete: 'CASCADE' });
 Pick.belongsTo(Game, { foreignKey: 'gameId' });
 
 Group.belongsTo(User, { foreignKey: 'ownerId', as: 'owner' });
-User.hasMany(Group, { foreignKey: 'ownerId', as: 'ownedGroups' });
+User.hasMany(Group, { foreignKey: 'ownerId', as: 'ownedGroups', onDelete: 'CASCADE' });
 
-Group.hasMany(GroupMember, { foreignKey: 'groupId', as: 'members' });
+Group.hasMany(GroupMember, { foreignKey: 'groupId', as: 'members', onDelete: 'CASCADE' });
 GroupMember.belongsTo(Group, { foreignKey: 'groupId' });
 
-User.hasMany(GroupMember, { foreignKey: 'userId', as: 'groupMemberships' });
+User.hasMany(GroupMember, { foreignKey: 'userId', as: 'groupMemberships', onDelete: 'CASCADE' });
 GroupMember.belongsTo(User, { foreignKey: 'userId' });
 
-Group.hasMany(GroupInvite, { foreignKey: 'groupId', as: 'invites' });
+Group.hasMany(GroupInvite, { foreignKey: 'groupId', as: 'invites', onDelete: 'CASCADE' });
 GroupInvite.belongsTo(Group, { foreignKey: 'groupId' });
 
-User.hasMany(Badge, { foreignKey: 'userId', as: 'badges' });
+User.hasMany(Badge, { foreignKey: 'userId', as: 'badges', onDelete: 'CASCADE' });
 Badge.belongsTo(User, { foreignKey: 'userId' });
 
 Friendship.belongsTo(User, { foreignKey: 'requesterId', as: 'requester' });
 Friendship.belongsTo(User, { foreignKey: 'addresseeId', as: 'addressee' });
 
-Game.hasMany(Comment, { foreignKey: 'gameId', as: 'comments' });
+Game.hasMany(Comment, { foreignKey: 'gameId', as: 'comments', onDelete: 'CASCADE' });
 Comment.belongsTo(Game, { foreignKey: 'gameId' });
 Comment.belongsTo(User, { foreignKey: 'userId' });
-User.hasMany(Comment, { foreignKey: 'userId', as: 'comments' });
+User.hasMany(Comment, { foreignKey: 'userId', as: 'comments', onDelete: 'CASCADE' });
 
-User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
+User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications', onDelete: 'CASCADE' });
 Notification.belongsTo(User, { foreignKey: 'userId' });
 
-Comment.hasMany(CommentReaction, { foreignKey: 'commentId', as: 'reactions' });
+Comment.hasMany(CommentReaction, { foreignKey: 'commentId', as: 'reactions', onDelete: 'CASCADE' });
 CommentReaction.belongsTo(Comment, { foreignKey: 'commentId' });
 
 EmailVerificationToken.belongsTo(User, { foreignKey: 'userId' });
-User.hasMany(EmailVerificationToken, { foreignKey: 'userId', as: 'emailVerificationTokens' });
+User.hasMany(EmailVerificationToken, {
+  foreignKey: 'userId',
+  as: 'emailVerificationTokens',
+  onDelete: 'CASCADE',
+});
 
 PasswordResetToken.belongsTo(User, { foreignKey: 'userId' });
-User.hasMany(PasswordResetToken, { foreignKey: 'userId', as: 'passwordResetTokens' });
+User.hasMany(PasswordResetToken, {
+  foreignKey: 'userId',
+  as: 'passwordResetTokens',
+  onDelete: 'CASCADE',
+});
 
 RefreshToken.belongsTo(User, { foreignKey: 'userId' });
-User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens' });
+User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens', onDelete: 'CASCADE' });
 
 // Initialize database
 async function initDatabase() {

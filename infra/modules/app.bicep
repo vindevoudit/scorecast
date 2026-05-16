@@ -55,6 +55,12 @@ var containerAppName = '${appName}-app'
 var defaultPublicUrl = 'https://${containerAppName}.${environment.properties.defaultDomain}'
 var publicAppUrl = empty(customDomain) ? defaultPublicUrl : 'https://${customDomain}'
 
+// Outbound email sender. When customDomain is bound AND verified at Resend
+// (see https://resend.com/domains), use noreply@<custom-domain>; otherwise
+// fall back to Resend's shared sandbox sender which only delivers to the
+// Resend account holder's own email.
+var emailFrom = empty(customDomain) ? 'Bantryx <onboarding@resend.dev>' : 'Bantryx <noreply@${customDomain}>'
+
 // Use a placeholder MCR image on the first deploy so the Container App
 // resource provisions successfully without a built scorecast image in ACR yet.
 // Chunk 4 updates this to the real ACR image via `az containerapp update`.
@@ -152,6 +158,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'PORT', value: '3000' }
             { name: 'PUBLIC_APP_URL', value: publicAppUrl }
             { name: 'CORS_ORIGINS', value: publicAppUrl }
+            { name: 'EMAIL_FROM', value: emailFrom }
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
             { name: 'JWT_SECRET', secretRef: 'jwt-secret' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }

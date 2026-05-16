@@ -177,6 +177,16 @@ router.post(
           .catch((err) => {
             req.log.warn({ err: err.message, userId: user.id }, 'failed to send reset email');
           });
+      } else if (user && !user.emailVerifiedAt) {
+        // Unverified user hit forgot-password — resend the verify email with
+        // password-reset copy so they aren't stuck in a dead-end. Same 204
+        // response keeps the anti-enumeration property.
+        sendVerificationEmail(user, { reason: 'password-reset' }).catch((err) => {
+          req.log.warn(
+            { err: err.message, userId: user.id },
+            'failed to resend verification email on forgot-password',
+          );
+        });
       }
     } catch (error) {
       req.log.error({ err: error.message }, 'forgot-password failed');

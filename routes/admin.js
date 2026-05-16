@@ -13,12 +13,16 @@ const {
   roleSchema,
   bulkGameSchema,
   bulkUserSchema,
+  createLeagueSchema,
+  updateLeagueSchema,
 } = require('../validation/schemas');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const GameService = require('../services/GameService');
 const UserService = require('../services/UserService');
 const LeaderboardService = require('../services/LeaderboardService');
+const LeagueService = require('../services/LeagueService');
+const footballApi = require('../lib/footballApi');
 
 const router = express.Router();
 
@@ -123,5 +127,64 @@ router.post(
 router.get('/admin/cache-stats', authMiddleware, requireAdmin, (req, res) => {
   res.json(LeaderboardService.stats());
 });
+
+// Tier 4b Chunk 1 — league management. Sync is admin-only and synchronous
+// for now (admin sees the result count in the response). The daily cron in
+// Chunk 2 will reuse LeagueService.syncFixtures for every active league.
+router.get(
+  '/admin/leagues',
+  authMiddleware,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const leagues = await LeagueService.listLeagues();
+    res.json({
+      leagues,
+      apiConfigured: footballApi.isConfigured(),
+      apiBudget: footballApi.requestsAvailable(),
+    });
+  }),
+);
+
+router.post(
+  '/admin/leagues',
+  authMiddleware,
+  requireAdmin,
+  validate(createLeagueSchema),
+  asyncHandler(async (req, res) => {
+    const league = await LeagueService.createLeague(req.body);
+    res.status(201).json(league);
+  }),
+);
+
+router.put(
+  '/admin/leagues/:id',
+  authMiddleware,
+  requireAdmin,
+  validate(updateLeagueSchema),
+  asyncHandler(async (req, res) => {
+    const league = await LeagueService.updateLeague(req.params.id, req.body);
+    res.json(league);
+  }),
+);
+
+router.delete(
+  '/admin/leagues/:id',
+  authMiddleware,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await LeagueService.deleteLeague(req.params.id);
+    res.json({ success: true });
+  }),
+);
+
+router.post(
+  '/admin/leagues/:id/sync',
+  authMiddleware,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const summary = await LeagueService.syncFixtures(req.params.id);
+    res.json({ success: true, ...summary });
+  }),
+);
 
 module.exports = router;

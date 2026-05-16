@@ -1,5 +1,8 @@
 // Tier 11 Chunk 2 — AdminPanel tokenized.
+// Tier 4b Chunk 1 — LeagueManager added above GameManager so the synced
+// league + season context is visible when an admin scrolls down to games.
 
+import LeagueManager from './LeagueManager';
 import GameManager from './GameManager';
 import UserManager from './UserManager';
 
@@ -12,6 +15,7 @@ function AdminPanel() {
           Changes here affect every user. Use the destructive actions carefully.
         </p>
       </div>
+      <LeagueManager />
       <GameManager />
       <UserManager />
     </div>

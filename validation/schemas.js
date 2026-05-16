@@ -111,9 +111,13 @@ const editProfileSchema = z
 const ALLOWED_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
 const reactionSchema = z.object({ emoji: z.enum(ALLOWED_EMOJIS) }).openapi('ReactionRequest');
 
+// Bumped from 100 → 500 in Tier 4b Chunk 1. A full Premier League season
+// is ~380 fixtures; the original cap turned "Select all + Delete" into a
+// cryptic 400 once sync was wired up. 500 leaves headroom for WC or
+// future single-league bulk operations without unbounded request sizes.
 const bulkGameSchema = z
   .object({
-    ids: z.array(uuid).min(1).max(100),
+    ids: z.array(uuid).min(1).max(500),
     action: z.enum(['delete', 'setResult']),
     result: z.union([z.enum(['home', 'away']), z.null()]).optional(),
   })
@@ -137,6 +141,30 @@ const clientErrorSchema = z
     level: z.enum(['error', 'warn']).optional(),
   })
   .openapi('ClientErrorRequest');
+
+// Tier 4b Chunk 1 — league management. Provider is restricted to the one
+// we support today; expanding to API-Football or a custom source is a
+// schema bump.
+const leagueProviderEnum = z.enum(['football-data.org']);
+const createLeagueSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    sourceProvider: leagueProviderEnum.optional(),
+    sourceLeagueId: z.string().trim().min(1).max(40),
+    country: z.string().trim().max(80).optional(),
+    logoUrl: z.string().trim().url().max(500).optional(),
+    active: z.boolean().optional(),
+  })
+  .openapi('CreateLeagueRequest');
+
+const updateLeagueSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    country: z.string().trim().max(80).nullable().optional(),
+    logoUrl: z.string().trim().url().max(500).nullable().optional(),
+    active: z.boolean().optional(),
+  })
+  .openapi('UpdateLeagueRequest');
 
 module.exports = {
   registerSchema,
@@ -162,5 +190,7 @@ module.exports = {
   bulkGameSchema,
   bulkUserSchema,
   clientErrorSchema,
+  createLeagueSchema,
+  updateLeagueSchema,
   ALLOWED_EMOJIS,
 };

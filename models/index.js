@@ -43,6 +43,8 @@ const CommentReaction = require('./CommentReaction')(sequelize);
 const EmailVerificationToken = require('./EmailVerificationToken')(sequelize);
 const PasswordResetToken = require('./PasswordResetToken')(sequelize);
 const RefreshToken = require('./RefreshToken')(sequelize);
+const League = require('./League')(sequelize);
+const Season = require('./Season')(sequelize);
 
 // Define associations.
 //
@@ -101,6 +103,18 @@ User.hasMany(PasswordResetToken, {
 
 RefreshToken.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens', onDelete: 'CASCADE' });
+
+// Tier 4b Chunk 1 — League / Season / Game wiring. Deleting a league
+// CASCADEs to its seasons; orphaning games is intentional (ON DELETE SET
+// NULL on the FK) so legacy fixtures aren't blown away.
+League.hasMany(Season, { foreignKey: 'leagueId', as: 'seasons', onDelete: 'CASCADE' });
+Season.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
+
+League.hasMany(Game, { foreignKey: 'leagueId', as: 'games' });
+Game.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
+
+Season.hasMany(Game, { foreignKey: 'seasonId', as: 'games' });
+Game.belongsTo(Season, { foreignKey: 'seasonId', as: 'season' });
 
 // Initialize database
 async function initDatabase() {
@@ -245,6 +259,8 @@ module.exports = {
   EmailVerificationToken,
   PasswordResetToken,
   RefreshToken,
+  League,
+  Season,
   initDatabase,
   runMigrations,
 };

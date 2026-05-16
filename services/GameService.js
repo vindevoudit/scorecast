@@ -49,6 +49,11 @@ async function setResult(gameId, result) {
   if (!game) throw errors.notFound('Game not found');
 
   game.result = result;
+  // Tier 4b — keep status in sync with the manual result. A set result
+  // implies the match is over; clearing it sends the game back to
+  // scheduled. Without this, the useGames bucketing would still classify
+  // the row by `result` only — fine for wins/losses, broken for draws.
+  game.status = result ? 'finished' : 'scheduled';
   await game.save();
 
   if (result) {
@@ -76,6 +81,7 @@ async function bulkSetResult(ids, result) {
   const affected = [];
   for (const game of games) {
     game.result = result;
+    game.status = result ? 'finished' : 'scheduled';
     await game.save();
     if (result) {
       const picksForGame = await Pick.findAll({ where: { gameId: game.id } });

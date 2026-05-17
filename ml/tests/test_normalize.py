@@ -8,9 +8,13 @@ import pytest
 
 from scorecast_ml.inference.normalize import (
     Pair,
+    Triple,
     nudge_off_sentinel,
+    nudge_off_triple_sentinel,
     redistribute_draw_to_two_way,
     round_and_rebalance,
+    round_and_rebalance_triple,
+    to_three_way,
     to_two_way,
 )
 
@@ -125,3 +129,57 @@ def test_to_two_way_strong_favorite_routes_correctly():
     pair = to_two_way(0.70, 0.20, 0.10)
     assert pair.home == 0.88
     assert pair.away == 0.12
+
+
+# ---------------------------------------------------------------------------
+# 3-class (draw-scoring) tests
+# ---------------------------------------------------------------------------
+
+
+def test_to_three_way_sum_invariant_grid():
+    # Sweep the (P_h, P_d, P_a) simplex on a 5% grid; every rounded trio
+    # must sum to exactly 1.0 at DECIMAL(3,2) precision.
+    for h_pct in range(5, 91, 5):
+        for d_pct in range(0, 96 - h_pct, 5):
+            a_pct = 100 - h_pct - d_pct
+            if a_pct < 5:
+                continue
+            triple = to_three_way(h_pct / 100, d_pct / 100, a_pct / 100)
+            total = round(triple.home + triple.draw + triple.away, 2)
+            assert total == 1.0, (h_pct, d_pct, a_pct, triple)
+
+
+def test_to_three_way_nudges_off_post_migration_sentinel():
+    # (0.5, 0.0, 0.5) is the new "untouched by anyone" sentinel — the
+    # post-migration default for fresh games. to_three_way must nudge
+    # off it so the next run's skip-existing logic doesn't treat
+    # ML-written rows as untouched.
+    triple = to_three_way(0.50, 0.00, 0.50)
+    assert triple.as_tuple() != (0.50, 0.00, 0.50)
+    assert triple.draw == 0.00
+    # Tied home/away nudges home-favored (>= comparison).
+    assert (triple.home, triple.away) == (0.51, 0.49)
+
+
+def test_to_three_way_preserves_largest_after_rounding():
+    # The class with the highest raw probability should still be the
+    # largest after rounding + rebalance. Pick a wide-but-rounding-prone
+    # input.
+    triple = to_three_way(0.333, 0.334, 0.333)
+    largest_raw = "draw"  # 0.334 is the max
+    values = {"home": triple.home, "draw": triple.draw, "away": triple.away}
+    assert max(values, key=values.get) == largest_raw
+
+
+def test_round_and_rebalance_triple_absorbs_error_into_largest():
+    # Raw rounds to 0.33 / 0.33 / 0.33 → sum 0.99 (short 0.01). Largest
+    # (here: draw, 0.334) absorbs the 0.01 → (0.33, 0.34, 0.33).
+    raw = Triple(home=0.333, draw=0.334, away=0.333)
+    rounded = round_and_rebalance_triple(raw, decimals=2)
+    assert (rounded.home, rounded.draw, rounded.away) == (0.33, 0.34, 0.33)
+
+
+def test_nudge_off_triple_sentinel_no_op_when_not_sentinel():
+    # Trio that isn't the sentinel passes through unchanged.
+    triple = Triple(home=0.51, draw=0.00, away=0.49)
+    assert nudge_off_triple_sentinel(triple) == triple

@@ -39,7 +39,7 @@ def fetch_upcoming_for_league(
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             'SELECT id, "homeTeam", "awayTeam", "date", "leagueId", "seasonId", '
-            '       "sourceId", "homeProbability", "awayProbability", status '
+            '       "sourceId", "homeProbability", "drawProbability", "awayProbability", status '
             'FROM games '
             'WHERE "leagueId" = %s AND status = %s AND "date" > %s AND "date" < %s '
             'ORDER BY "date" ASC',

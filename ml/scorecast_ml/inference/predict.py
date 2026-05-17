@@ -1,5 +1,5 @@
 """Inference path: load bundle + Elo snapshot, compute features for upcoming
-matches, predict 3-class probabilities, project to 2-class for the DB.
+matches, predict 3-class probabilities, round to DECIMAL(3,2) for the DB.
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ import pandas as pd
 
 from scorecast_ml.elo.engine import EloConfig, TeamState
 from scorecast_ml.features.build import build_inference_features
-from scorecast_ml.inference.normalize import Pair, to_two_way
+from scorecast_ml.inference.normalize import Triple, to_three_way
 from scorecast_ml.train.model import ModelBundle
 
 
@@ -32,13 +32,13 @@ def predict_upcoming(
                 or team→float (from a manual override). Internally
                 normalized to team→float.
 
-    Returns the original `upcoming` DataFrame plus 5 new columns:
-      p_home, p_draw, p_away   — raw 3-class probabilities (sum to 1.0)
-      home_out, away_out       — rounded 2-class write values (sum to 1.0)
+    Returns the original `upcoming` DataFrame plus 6 new columns:
+      p_home, p_draw, p_away          — raw 3-class probabilities (sum to 1.0)
+      home_out, draw_out, away_out    — rounded write values (sum to 1.00)
     """
     if upcoming.empty:
         out = upcoming.copy()
-        for col in ("p_home", "p_draw", "p_away", "home_out", "away_out"):
+        for col in ("p_home", "p_draw", "p_away", "home_out", "draw_out", "away_out"):
             out[col] = []
         return out
 
@@ -57,14 +57,15 @@ def predict_upcoming(
     rows = []
     for i in range(len(upcoming)):
         p_h, p_d, p_a = float(proba[i, 0]), float(proba[i, 1]), float(proba[i, 2])
-        pair: Pair = to_two_way(p_h, p_d, p_a)
+        triple: Triple = to_three_way(p_h, p_d, p_a)
         rows.append(
             {
                 "p_home": p_h,
                 "p_draw": p_d,
                 "p_away": p_a,
-                "home_out": pair.home,
-                "away_out": pair.away,
+                "home_out": triple.home,
+                "draw_out": triple.draw,
+                "away_out": triple.away,
             }
         )
     preds = pd.DataFrame(rows)

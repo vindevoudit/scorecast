@@ -15,6 +15,7 @@ const EMPTY_FORM = {
   awayTeam: '',
   date: '',
   homeProbability: '0.5',
+  drawProbability: '0',
   awayProbability: '0.5',
 };
 
@@ -37,6 +38,7 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
     awayTeam: game.awayTeam,
     date: toLocalInput(game.date),
     homeProbability: String(game.homeProbability),
+    drawProbability: String(game.drawProbability ?? 0),
     awayProbability: String(game.awayProbability),
   });
 
@@ -47,6 +49,7 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
       awayTeam: form.awayTeam.trim(),
       date: toIsoUtc(form.date),
       homeProbability: parseFloat(form.homeProbability),
+      drawProbability: parseFloat(form.drawProbability),
       awayProbability: parseFloat(form.awayProbability),
     });
     setEditing(false);
@@ -88,6 +91,15 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
             step="0.01"
             min="0"
             max="1"
+            label="Draw probability (0–1)"
+            value={form.drawProbability}
+            onChange={(e) => setForm({ ...form, drawProbability: e.target.value })}
+          />
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
             label="Away probability (0–1)"
             value={form.awayProbability}
             onChange={(e) => setForm({ ...form, awayProbability: e.target.value })}
@@ -111,7 +123,8 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
             <p className="text-xs text-fg-muted">
               {new Date(game.date).toLocaleString()} ·{' '}
               <span className="tabular-nums">{Math.round(game.homeProbability * 100)}%</span> /{' '}
-              <span className="tabular-nums">{Math.round(game.awayProbability * 100)}%</span>
+              <span className="tabular-nums">{Math.round((game.drawProbability ?? 0) * 100)}%</span>{' '}
+              / <span className="tabular-nums">{Math.round(game.awayProbability * 100)}%</span>
               {leagueName ? (
                 <span className="ml-2 rounded-full bg-overlay px-2 py-0.5 text-fg-subtle">
                   {leagueName}
@@ -119,7 +132,10 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
               ) : null}
               {game.result ? (
                 <span className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-success">
-                  Result: {displayTeamName(game.result === 'home' ? game.homeTeam : game.awayTeam)}
+                  Result:{' '}
+                  {game.result === 'draw'
+                    ? 'Draw'
+                    : displayTeamName(game.result === 'home' ? game.homeTeam : game.awayTeam)}
                 </span>
               ) : null}
             </p>
@@ -142,6 +158,15 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
               className="border-success/30 bg-success/10 text-success"
             >
               Away won
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => onSetResult(game.id, 'draw')}
+              disabled={busy}
+              className="border-warning/30 bg-warning/10 text-warning"
+            >
+              Draw
             </Button>
             <Button
               size="sm"
@@ -284,6 +309,7 @@ function GameManager() {
           awayTeam: form.awayTeam.trim(),
           date: toIsoUtc(form.date),
           homeProbability: parseFloat(form.homeProbability),
+          drawProbability: parseFloat(form.drawProbability),
           awayProbability: parseFloat(form.awayProbability),
         }),
       });
@@ -427,6 +453,15 @@ function GameManager() {
             step="0.01"
             min="0"
             max="1"
+            label="Draw probability (0–1)"
+            value={form.drawProbability}
+            onChange={(e) => setForm({ ...form, drawProbability: e.target.value })}
+          />
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
             label="Away probability (0–1)"
             value={form.awayProbability}
             onChange={(e) => setForm({ ...form, awayProbability: e.target.value })}
@@ -471,6 +506,15 @@ function GameManager() {
                 className="border-success/30 bg-success/10 text-success"
               >
                 Result → Away
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => runBulk('setResult', 'draw')}
+                className="border-warning/30 bg-warning/10 text-warning"
+              >
+                Result → Draw
               </Button>
               <Button
                 size="sm"

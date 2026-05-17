@@ -108,3 +108,91 @@ def to_two_way(p_h: float, p_d: float, p_a: float) -> Pair:
     rounded = round_and_rebalance(raw, decimals=2)
     final = nudge_off_sentinel(rounded, raw_pair=raw)
     return final
+
+
+# ---------------------------------------------------------------------------
+# 3-class output (draw-scoring tier). The DB schema now accepts all three
+# probabilities so the 2-class collapse is no longer required. The new
+# pipeline output is a Triple; legacy to_two_way() is preserved for ablation
+# scripts under ml/scripts/.
+#
+# The new "untouched by anyone" sentinel — what a fresh game looks like
+# after the draw-scoring migration — is (0.50, 0.00, 0.50): homeProbability
+# defaults to 0.5, drawProbability defaults to 0 (per the migration's NOT
+# NULL DEFAULT 0), awayProbability defaults to 0.5. Writes that would
+# emit this trio get nudged off it so the next run's skip-existing logic
+# doesn't treat ML-written games as untouched.
+# ---------------------------------------------------------------------------
+
+_TRIPLE_SENTINEL = (0.50, 0.00, 0.50)
+
+
+@dataclass(frozen=True)
+class Triple:
+    home: float
+    draw: float
+    away: float
+
+    def as_tuple(self) -> tuple[float, float, float]:
+        return (self.home, self.draw, self.away)
+
+
+def round_and_rebalance_triple(triple: Triple, *, decimals: int = 2) -> Triple:
+    """Round each side and rebalance so the trio sums to exactly 1.0 at the
+    target precision.
+
+    Strategy: round all three; the rounding residual (1.00 - sum) is
+    absorbed by the class with the largest RAW probability, not the
+    largest rounded value. After rounding, three close classes often tie
+    — using the raw values preserves the model's intended ordering.
+    """
+    h = round(triple.home, decimals)
+    d = round(triple.draw, decimals)
+    a = round(triple.away, decimals)
+    diff = round(1.0 - (h + d + a), decimals)
+    if diff == 0:
+        return Triple(home=h, draw=d, away=a)
+    if triple.home >= triple.draw and triple.home >= triple.away:
+        return Triple(home=round(h + diff, decimals), draw=d, away=a)
+    if triple.away >= triple.draw:
+        return Triple(home=h, draw=d, away=round(a + diff, decimals))
+    return Triple(home=h, draw=round(d + diff, decimals), away=a)
+
+
+def nudge_off_triple_sentinel(
+    triple: Triple, *, raw_triple: Triple | None = None
+) -> Triple:
+    """If the rounded trio lands on (0.50, 0.00, 0.50), push home/away
+    apart by 0.01. Direction taken from the raw pre-rounding trio when
+    available; home-favored by default."""
+    if triple.as_tuple() != _TRIPLE_SENTINEL:
+        return triple
+    nudge_home = True
+    if raw_triple is not None:
+        nudge_home = raw_triple.home >= raw_triple.away
+    if nudge_home:
+        return Triple(home=0.51, draw=0.00, away=0.49)
+    return Triple(home=0.49, draw=0.00, away=0.51)
+
+
+def to_three_way(p_h: float, p_d: float, p_a: float) -> Triple:
+    """End-to-end: validate → renormalize → round → rebalance → sentinel-nudge.
+
+    Returns the rounded trio summing to exactly 1.00. This replaces
+    to_two_way() in the live inference path; to_two_way() is kept for
+    ablation scripts and historical comparisons.
+    """
+    if not (-_EPS <= p_h <= 1 + _EPS and -_EPS <= p_d <= 1 + _EPS and -_EPS <= p_a <= 1 + _EPS):
+        raise ValueError(f"Probabilities out of [0, 1]: ({p_h}, {p_d}, {p_a})")
+    total = p_h + p_d + p_a
+    if abs(total - 1.0) > 0.05:
+        raise ValueError(
+            f"Probabilities don't sum to ~1.0: {total:.4f} = {p_h}+{p_d}+{p_a}"
+        )
+    if abs(total - 1.0) > 1e-6:
+        p_h, p_d, p_a = p_h / total, p_d / total, p_a / total
+
+    raw = Triple(home=p_h, draw=p_d, away=p_a)
+    rounded = round_and_rebalance_triple(raw, decimals=2)
+    final = nudge_off_triple_sentinel(rounded, raw_triple=raw)
+    return final

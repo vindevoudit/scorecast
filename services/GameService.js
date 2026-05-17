@@ -65,11 +65,11 @@ async function setResult(gameId, result) {
     const picksForGame = await Pick.findAll({ where: { gameId } });
     for (const pick of picksForGame) {
       const points = scorePick(pick, game);
-      const isWin = pick.choice === result;
-      const title = isWin
-        ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
-        : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
-      NotificationService.notify(pick.userId, 'pick-scored', title).catch(() => {});
+      NotificationService.notify(
+        pick.userId,
+        'pick-scored',
+        pickResultTitle(pick, game, result, points),
+      ).catch(() => {});
       BadgeService.evaluateBadges(pick.userId).catch(() => {});
     }
   }
@@ -79,8 +79,8 @@ async function setResult(gameId, result) {
 }
 
 async function bulkSetResult(ids, result) {
-  if (!(result === 'home' || result === 'away' || result === null)) {
-    throw errors.badRequest('setResult requires result of home, away, or null');
+  if (!(result === 'home' || result === 'away' || result === 'draw' || result === null)) {
+    throw errors.badRequest('setResult requires result of home, away, draw, or null');
   }
   const games = await Game.findAll({ where: { id: ids } });
   const affected = [];
@@ -92,11 +92,11 @@ async function bulkSetResult(ids, result) {
       const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
       for (const pick of picksForGame) {
         const points = scorePick(pick, game);
-        const isWin = pick.choice === result;
-        const title = isWin
-          ? `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✓ Correct +${points} pts`
-          : `Your pick on ${game.homeTeam} vs ${game.awayTeam}: ✗ Missed`;
-        NotificationService.notify(pick.userId, 'pick-scored', title).catch(() => {});
+        NotificationService.notify(
+          pick.userId,
+          'pick-scored',
+          pickResultTitle(pick, game, result, points),
+        ).catch(() => {});
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }
     }
@@ -104,6 +104,17 @@ async function bulkSetResult(ids, result) {
   }
   if (affected.length > 0) LeaderboardService.invalidate('all');
   return affected;
+}
+
+// Format the per-user pick-scored notification title. The three branches —
+// won outright, drew with partial credit, missed — mirror the badges shown
+// on the GameCard outcome chip so the user sees consistent language across
+// the bell and the card.
+function pickResultTitle(pick, game, result, points) {
+  const matchup = `${game.homeTeam} vs ${game.awayTeam}`;
+  if (result === 'draw') return `Your pick on ${matchup}: Drew +${points} pts`;
+  if (pick.choice === result) return `Your pick on ${matchup}: ✓ Correct +${points} pts`;
+  return `Your pick on ${matchup}: ✗ Missed`;
 }
 
 async function bulkDelete(ids) {
@@ -173,11 +184,11 @@ async function applyLiveUpdate(localGame, apiMatch) {
       const picksForGame = await Pick.findAll({ where: { gameId: localGame.id } });
       for (const pick of picksForGame) {
         const points = scorePick(pick, localGame);
-        const isWin = pick.choice === newResult;
-        const title = isWin
-          ? `Your pick on ${localGame.homeTeam} vs ${localGame.awayTeam}: ✓ Correct +${points} pts`
-          : `Your pick on ${localGame.homeTeam} vs ${localGame.awayTeam}: ✗ Missed`;
-        NotificationService.notify(pick.userId, 'pick-scored', title).catch(() => {});
+        NotificationService.notify(
+          pick.userId,
+          'pick-scored',
+          pickResultTitle(pick, localGame, newResult, points),
+        ).catch(() => {});
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }
     } catch (err) {

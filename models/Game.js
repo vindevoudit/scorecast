@@ -25,12 +25,17 @@ module.exports = (sequelize) => {
         type: DataTypes.DECIMAL(3, 2),
         allowNull: false,
       },
+      drawProbability: {
+        type: DataTypes.DECIMAL(3, 2),
+        allowNull: false,
+        defaultValue: 0,
+      },
       awayProbability: {
         type: DataTypes.DECIMAL(3, 2),
         allowNull: false,
       },
       result: {
-        type: DataTypes.ENUM('home', 'away'),
+        type: DataTypes.ENUM('home', 'away', 'draw'),
         allowNull: true,
       },
       // Tier 4b Chunk 1 — league/season/source attribution. leagueId stays

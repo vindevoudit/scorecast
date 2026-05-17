@@ -19,6 +19,7 @@ function formatDate(value) {
 
 function statusBadge(status, points) {
   if (status === 'won') return <Badge tone="success">Won +{points} pts</Badge>;
+  if (status === 'draw') return <Badge tone="warning">Drew +{points} pts</Badge>;
   if (status === 'lost') return <Badge tone="danger">Missed</Badge>;
   if (status === 'live') return <Badge tone="warning">Live</Badge>;
   return <Badge tone="neutral">Pending</Badge>;

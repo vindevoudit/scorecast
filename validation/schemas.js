@@ -50,7 +50,7 @@ const pickSchema = z
   .object({ gameId: uuid, choice: z.enum(['home', 'away']) })
   .openapi('PickRequest');
 const resultSchema = z
-  .object({ result: z.union([z.enum(['home', 'away']), z.null()]) })
+  .object({ result: z.union([z.enum(['home', 'away', 'draw']), z.null()]) })
   .openapi('SetResultRequest');
 
 const friendRequestSchema = z.object({ username }).openapi('FriendRequest');
@@ -70,11 +70,13 @@ const createGameSchema = z
     awayTeam: teamName,
     date: z.string().datetime({ offset: true }),
     homeProbability: probability,
+    drawProbability: probability.optional(),
     awayProbability: probability,
   })
-  .refine((g) => Math.abs(g.homeProbability + g.awayProbability - 1) <= 0.01, {
-    message: 'homeProbability + awayProbability must sum to 1.0',
-  })
+  .refine(
+    (g) => Math.abs(g.homeProbability + (g.drawProbability ?? 0) + g.awayProbability - 1) <= 0.01,
+    { message: 'home + draw + away probabilities must sum to 1.0' },
+  )
   .openapi('CreateGameRequest');
 
 const updateGameSchema = z
@@ -83,16 +85,26 @@ const updateGameSchema = z
     awayTeam: teamName.optional(),
     date: z.string().datetime({ offset: true }).optional(),
     homeProbability: probability.optional(),
+    drawProbability: probability.optional(),
     awayProbability: probability.optional(),
   })
   .refine(
-    (g) =>
-      g.homeProbability === undefined && g.awayProbability === undefined
-        ? true
-        : g.homeProbability !== undefined &&
-          g.awayProbability !== undefined &&
-          Math.abs(g.homeProbability + g.awayProbability - 1) <= 0.01,
-    { message: 'When updating probabilities, both must be provided and sum to 1.0' },
+    (g) => {
+      // No probability fields touched → fine.
+      if (
+        g.homeProbability === undefined &&
+        g.drawProbability === undefined &&
+        g.awayProbability === undefined
+      ) {
+        return true;
+      }
+      // Once any prob is supplied, home + away must both be present. draw
+      // is optional and defaults to 0 (matches the DB default for legacy
+      // rows that haven't been touched since the draw-scoring tier).
+      if (g.homeProbability === undefined || g.awayProbability === undefined) return false;
+      return Math.abs(g.homeProbability + (g.drawProbability ?? 0) + g.awayProbability - 1) <= 0.01;
+    },
+    { message: 'home + draw + away probabilities must sum to 1.0' },
   )
   .openapi('UpdateGameRequest');
 
@@ -119,7 +131,7 @@ const bulkGameSchema = z
   .object({
     ids: z.array(uuid).min(1).max(500),
     action: z.enum(['delete', 'setResult']),
-    result: z.union([z.enum(['home', 'away']), z.null()]).optional(),
+    result: z.union([z.enum(['home', 'away', 'draw']), z.null()]).optional(),
   })
   .openapi('BulkGameRequest');
 

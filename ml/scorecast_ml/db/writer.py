@@ -20,19 +20,24 @@ log = get_logger(__name__)
 _LOGIN_PATH = "/api/login"
 _GAME_PATH_FMT = "/api/admin/games/{game_id}"
 
-# Treat (0.50, 0.50) as the "untouched by anyone" sentinel from
-# services/LeagueService.upsertFixture. Skip games at that pair unless
-# the caller passes overwrite_existing=True.
-_SENTINEL_PAIR = (0.50, 0.50)
+# Post-migration "untouched by anyone" sentinel: a fresh game has
+# homeProbability=0.5, drawProbability=0 (the migration default), and
+# awayProbability=0.5. Skip writing over a non-sentinel trio unless the
+# caller passes overwrite_existing=True.
+_SENTINEL_TRIPLE = (0.50, 0.00, 0.50)
 _SENTINEL_TOL = 0.001
 
 
-def _is_sentinel(home_p: float | None, away_p: float | None) -> bool:
+def _is_sentinel(
+    home_p: float | None, draw_p: float | None, away_p: float | None
+) -> bool:
     if home_p is None or away_p is None:
         return True
+    draw_val = 0.0 if draw_p is None else float(draw_p)
     return (
-        abs(float(home_p) - _SENTINEL_PAIR[0]) < _SENTINEL_TOL
-        and abs(float(away_p) - _SENTINEL_PAIR[1]) < _SENTINEL_TOL
+        abs(float(home_p) - _SENTINEL_TRIPLE[0]) < _SENTINEL_TOL
+        and abs(draw_val - _SENTINEL_TRIPLE[1]) < _SENTINEL_TOL
+        and abs(float(away_p) - _SENTINEL_TRIPLE[2]) < _SENTINEL_TOL
     )
 
 
@@ -81,9 +86,9 @@ def write_probabilities(
 
     Each row dict must contain:
       - id: game UUID (str)
-      - home_out: float
-      - away_out: float
-      - homeProbability, awayProbability: current DB values (for sentinel check)
+      - home_out, draw_out, away_out: floats (sum to 1.00 after rounding)
+      - homeProbability, drawProbability, awayProbability: current DB values
+        used for the sentinel check
 
     Login happens ONCE per call regardless of row count — `/api/login`
     is rate-limited, so don't loop.
@@ -96,8 +101,9 @@ def write_probabilities(
     if dry_run:
         for row in rows:
             current_h = row.get("homeProbability")
+            current_d = row.get("drawProbability")
             current_a = row.get("awayProbability")
-            if not overwrite_existing and not _is_sentinel(current_h, current_a):
+            if not overwrite_existing and not _is_sentinel(current_h, current_d, current_a):
                 result.skipped += 1
                 result.skipped_ids.append(str(row["id"]))
                 continue
@@ -105,6 +111,7 @@ def write_probabilities(
                 "writer_dry_run",
                 game_id=row["id"],
                 home_out=row["home_out"],
+                draw_out=row["draw_out"],
                 away_out=row["away_out"],
             )
             result.written += 1
@@ -118,14 +125,16 @@ def write_probabilities(
         for row in rows:
             game_id = str(row["id"])
             current_h = row.get("homeProbability")
+            current_d = row.get("drawProbability")
             current_a = row.get("awayProbability")
-            if not overwrite_existing and not _is_sentinel(current_h, current_a):
+            if not overwrite_existing and not _is_sentinel(current_h, current_d, current_a):
                 result.skipped += 1
                 result.skipped_ids.append(game_id)
                 continue
 
             payload = {
                 "homeProbability": float(row["home_out"]),
+                "drawProbability": float(row["draw_out"]),
                 "awayProbability": float(row["away_out"]),
             }
             try:
@@ -155,6 +164,7 @@ def write_probabilities(
                 "writer_wrote",
                 game_id=game_id,
                 home_out=payload["homeProbability"],
+                draw_out=payload["drawProbability"],
                 away_out=payload["awayProbability"],
             )
 

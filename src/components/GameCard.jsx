@@ -124,7 +124,11 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
           ? 'away'
           : null
       : null;
-  const winningSide = finished && game.result ? game.result : null;
+  // Narrow to home/away so the draw case leaves both sides un-dimmed and
+  // un-ringed (a draw has no winning side; the outcome badge + locked-pick
+  // chip carry the "Drew +N pts" framing instead).
+  const winningSide =
+    finished && (game.result === 'home' || game.result === 'away') ? game.result : null;
 
   const teamBoxClass = (side, alignRight = false) => {
     const base = `min-w-0 rounded-2xl px-2 py-2.5 transition sm:px-3 ${alignRight ? 'text-right' : ''}`;
@@ -238,7 +242,10 @@ function LockedPickChip({ live, pickedTeam, existingChoice, game, pointsIfWon, p
   let suffix = null;
   if (live) {
     suffix = `locked · ${potentialPoints} pts on the line`;
+  } else if (game.result === 'draw') {
+    suffix = `drew · +${pointsIfWon} pts`;
   } else if (game.result === null) {
+    // Legacy pre-tier draws (status=finished but result was never set).
     suffix = 'drew';
   } else if (game.result === existingChoice) {
     suffix = `won · +${pointsIfWon} pts`;
@@ -294,6 +301,8 @@ function GameCard({ game }) {
   if (game.result) {
     if (!existingChoice) {
       outcomeBadge = <Badge tone="neutral">No pick</Badge>;
+    } else if (game.result === 'draw') {
+      outcomeBadge = <Badge tone="warning">Drew +{pointsIfWon} pts</Badge>;
     } else if (existingChoice === game.result) {
       outcomeBadge = <Badge tone="success">✓ Correct +{pointsIfWon} pts</Badge>;
     } else {

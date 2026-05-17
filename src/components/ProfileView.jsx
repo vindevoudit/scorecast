@@ -36,6 +36,7 @@ function formatDate(value) {
 
 function recentPickStatus(pick) {
   if (!pick.result) return { label: 'Pending', tone: 'neutral' };
+  if (pick.result === 'draw') return { label: `Drew +${pick.points}`, tone: 'warning' };
   if (pick.choice === pick.result) {
     return { label: `Won +${pick.points}`, tone: 'success' };
   }

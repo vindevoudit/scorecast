@@ -52,10 +52,12 @@ python -m scorecast_ml predict-and-write --league PL --horizon-days 7
 - **Features** — 11-column matrix: `elo_diff`, raw home/away Elo,
   last-5 PPG / GF / GA per side, `days_rest` capped at 14.
 - **Train** — XGBoost `multi:softprob` with early stopping on val mlogloss.
-  Time-based train/val/test (NEVER random). 5-season train (2004/05 ->
-  2008/09) + 1-season val (2009/10) + 15-season held-out test
-  (2010/11 -> 2024/25) beats the marginal baseline by ~7 pp accuracy and
-  -0.07 mlogloss across 5,700 matches.
+  Time-based train/val/test (NEVER random). Production split: 15-season
+  train (2009/10 -> 2023/24) + 1-season val (2024/25) + held-out 25/26
+  season (361 in-progress DB matches via `scripts/backtest_2526.py`).
+  Beats marginal baseline by +5.5 pp accuracy and -0.048 mlogloss on
+  honest OOS data. Isotonic calibration fit on val pulls high-end
+  overconfidence (70-80% bucket) from -7pp to -2pp deviation.
 - **Inference + write** — 3-class -> 2-class draw redistribution, round to
   `DECIMAL(3,2)`, re-balance to sum-to-1, nudge off the `(0.50, 0.50)`
   sentinel, PUT through `/api/admin/games/:id`. Auth via cookie + CSRF
@@ -151,11 +153,9 @@ for the 18 remaining 2025/26 PL fixtures (visible in the audit log with
 
 ## Future phases
 
-- **Phase 2** — Isotonic calibration (single biggest remaining quality
-  knob — uncalibrated XGBoost is overconfident at the extremes, which
-  directly underpays correct user picks), MOV multiplier, multi-league
-  expansion (see [ONBOARDING.md](ONBOARDING.md) for the per-league
-  playbook), real CI, pytest suite expansion.
+- **Phase 2** — Isotonic calibration ✅ (shipped). MOV multiplier,
+  multi-league expansion (see [ONBOARDING.md](ONBOARDING.md) for the
+  per-league playbook), real CI, pytest suite expansion still to come.
 - **Phase 3** — Azure Container Apps Job + scheduled GitHub Actions cron.
 - **Phase 4** — Optuna HPO, head-to-head features, model-performance admin
   tab, the draw-partial-credit scoring change (separate tier — needs

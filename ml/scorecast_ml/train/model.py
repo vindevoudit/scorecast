@@ -16,6 +16,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from sklearn.isotonic import IsotonicRegression
 
 from scorecast_ml.config import get_settings
 from scorecast_ml.features.build import FEATURE_NAMES
@@ -54,14 +55,19 @@ class ModelBundle:
     params: dict = field(default_factory=dict)
     num_boost_round: int = DEFAULT_NUM_BOOST_ROUND
     best_iteration: int | None = None
+    # Per-class IsotonicRegression calibrators fit on the val set. None for
+    # bundles trained pre-calibration; in that case predict_proba returns
+    # raw XGBoost output unchanged. Populated by `fit_calibrators(bundle,
+    # X_val, y_val)` after training.
+    calibrators: list[IsotonicRegression] | None = None
 
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Returns (n_rows, 3) probabilities — columns are
-        [P_home_win, P_draw, P_away_win] per the FTR → 0/1/2 mapping."""
+    def predict_proba_raw(self, X: pd.DataFrame) -> np.ndarray:
+        """Raw XGBoost probabilities, bypassing any fitted calibration.
+        Useful for diagnostics + for `fit_calibrators` itself (which must
+        train on the uncalibrated outputs)."""
         if list(X.columns) != self.feature_names:
             X = X[self.feature_names]
         dmat = xgb.DMatrix(X.values, feature_names=self.feature_names)
-        # best_iteration is set when early stopping kicked in.
         if self.best_iteration is not None:
             preds = self.model.predict(
                 dmat, iteration_range=(0, self.best_iteration + 1)
@@ -69,6 +75,31 @@ class ModelBundle:
         else:
             preds = self.model.predict(dmat)
         return np.asarray(preds, dtype=np.float64)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Returns (n_rows, 3) probabilities — columns are
+        [P_home_win, P_draw, P_away_win] per the FTR → 0/1/2 mapping.
+
+        Applies isotonic calibration if `self.calibrators` is set;
+        otherwise returns raw XGBoost output. Calibrated rows are
+        renormalized to sum to 1 (isotonic per-class doesn't preserve
+        the simplex constraint)."""
+        raw = self.predict_proba_raw(X)
+        # `getattr` with default None gracefully handles bundles pickled
+        # before the `calibrators` field existed.
+        cals = getattr(self, "calibrators", None)
+        if not cals:
+            return raw
+        calibrated = np.column_stack(
+            [cal.predict(raw[:, k]) for k, cal in enumerate(cals)]
+        )
+        # Re-normalize per row so probabilities sum to 1.0. Floor any zero
+        # rows at uniform to avoid divide-by-zero downstream — should
+        # never trigger in practice since at least one class will have a
+        # non-zero calibrated value.
+        row_sums = calibrated.sum(axis=1, keepdims=True)
+        row_sums = np.where(row_sums < 1e-9, 1.0, row_sums)
+        return calibrated / row_sums
 
 
 def _git_sha() -> str | None:
@@ -146,6 +177,46 @@ def train(
     )
 
 
+def fit_calibrators(
+    bundle: ModelBundle, X_val: pd.DataFrame, y_val: pd.Series
+) -> ModelBundle:
+    """Fit per-class one-vs-rest isotonic regression on the raw val
+    probabilities, mutate the bundle in place, and return it.
+
+    `cv='prefit'` semantics — calibrators are fit on the SAME val set
+    that early stopping used. The val metrics reported AFTER calibration
+    are therefore optimistic; honest evaluation must be on a held-out
+    test set (in our case, the in-progress current season pulled from
+    the DB via scripts/backtest_2526.py).
+
+    Why hand-rolled isotonic instead of `CalibratedClassifierCV(cv=
+    'prefit')`: sklearn's wrapper expects an estimator with `fit`,
+    `predict_proba`, and `classes_` (i.e. an sklearn-API model). Our
+    bundle wraps an xgb.Booster which doesn't satisfy that contract.
+    The hand-rolled three-class loop is ~5 lines + we keep control of
+    out-of-bounds clipping behavior.
+    """
+    raw_proba = bundle.predict_proba_raw(X_val)
+    y = y_val.values if hasattr(y_val, "values") else np.asarray(y_val)
+    calibrators: list[IsotonicRegression] = []
+    for k in range(3):
+        target = (y == k).astype(int)
+        cal = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+        cal.fit(raw_proba[:, k], target)
+        calibrators.append(cal)
+    bundle.calibrators = calibrators
+    log.info(
+        "calibrators_fit",
+        n_val=len(y),
+        class_share={
+            "home_win": float(np.mean(y == 0)),
+            "draw": float(np.mean(y == 1)),
+            "away_win": float(np.mean(y == 2)),
+        },
+    )
+    return bundle
+
+
 def save_bundle(bundle: ModelBundle, path: Path | None = None) -> tuple[Path, Path]:
     """Persist the bundle. Returns (joblib_path, meta_json_path)."""
     if path is None:
@@ -165,6 +236,7 @@ def save_bundle(bundle: ModelBundle, path: Path | None = None) -> tuple[Path, Pa
                 "params": bundle.params,
                 "num_boost_round": bundle.num_boost_round,
                 "best_iteration": bundle.best_iteration,
+                "calibrated": bundle.calibrators is not None,
             },
             f,
             indent=2,

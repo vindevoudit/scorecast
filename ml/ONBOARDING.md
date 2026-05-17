@@ -386,10 +386,13 @@ distribution every time. If our model can't beat this, something's wrong.
 | 25/26 walk-forward (361 matches) mlogloss | 1.037 |    1.080 | -0.043 |
 | 25/26 walk-forward accuracy               | 47.6% |    42.4% | +5.3pp |
 
-The model is genuinely informative but uncalibrated — overconfident above
-~70% predicted probability (calibration plot in
-[scripts/backtest_2526.py](scripts/backtest_2526.py)). Phase 2 adds
-isotonic calibration which is the single biggest remaining quality knob.
+The model is genuinely informative AND calibrated as of Phase 2 — per-class
+`IsotonicRegression` is fit on the val set inside the train command (skip
+with `--no-calibration` for diagnostics). The calibrator pulls the
+70-80% bucket overconfidence from -7pp to -2pp deviation on the 25/26 OOS
+backtest. `bundle.predict_proba(X)` returns calibrated probabilities;
+`bundle.predict_proba_raw(X)` bypasses the calibration layer if you need
+to compare uncalibrated outputs.
 
 ### 1.9 Stage 7 — Inference
 

@@ -1646,7 +1646,7 @@ The cron + Container Apps Job versions land in Phase 3 — see [ml/ONBOARDING.md
 
 **Known limits + forward path**:
 
-- **Uncalibrated** — raw XGBoost output. Overconfident at the extremes (the calibration check in `backtest_2526.py` shows ~7pp underconfidence above 70%). Phase 2 lands `CalibratedClassifierCV(method='isotonic', cv='prefit')` on the val set. This is the single biggest quality knob remaining — overconfident probs systematically underpay correct user picks.
+- **Isotonic calibration** ✅ shipped (Phase 2). Per-class `IsotonicRegression` fit on val, attached to `ModelBundle.calibrators`. Applied automatically inside `predict_proba`. Live production model trains 15 seasons (2009/10 → 2023/24), validates on 2024/25, calibration measured on the in-progress 25/26 season via `scripts/backtest_2526.py`. 70-80% bucket overconfidence pulled from -7pp to -2pp deviation; the model now reaches >80% confidence on top calls (didn't pre-calibration).
 - **Single-league models** — one model per league, no shared pool. La Liga / Bundesliga / etc. need their own training runs. The pipeline is league-agnostic by design; per-league work is mostly extending `teams.json` and `LEAGUE_CODE_MAP`.
 - **No automated cron yet** — Phase 1 is manual. Phase 3 adds Azure Container Apps Job + GitHub Actions cron workflow mirroring the existing `infra/modules/migrate-job.bicep`.
 - **Pick semantics still winner-only** — draws leave picks at 0 pts (per the existing `result` enum). The "draw partial credit" scoring change (the math is in `ml/scorecast_ml/inference/normalize.py`'s out-of-scope note) is a separate tier touching `PickService.scorePick` + both copies of the scoring formula.

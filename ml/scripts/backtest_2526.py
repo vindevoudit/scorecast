@@ -42,13 +42,17 @@ from scorecast_ml.ingest.football_data_uk import parse_csv  # noqa: E402
 from scorecast_ml.inference.normalize import to_two_way  # noqa: E402
 from scorecast_ml.reconcile.team_mapping import reconcile_dataframe  # noqa: E402
 from scorecast_ml.train.eval import evaluate, majority_class_baseline  # noqa: E402
-from scorecast_ml.train.model import load_bundle  # noqa: E402
+from scorecast_ml.train.model import load_latest_bundle  # noqa: E402
 
 LEAGUE = "PL"
 SEASON_START = pd.Timestamp("2025-07-01", tz="UTC")
 SEASON_END = pd.Timestamp("2026-07-01", tz="UTC")
 HFA = 0.0
-MODEL_FILENAME = "PL_2025-05-25_hfa0.joblib"
+# Load whatever canonical bundle is current — `load_latest_bundle` picks
+# the strict `{LEAGUE}_YYYY-MM-DD.joblib` match (suffixed variants like
+# `_hfa0.joblib` are deliberately ignored so they don't drift into being
+# the "live" reference).
+MODEL_FILENAME = None  # set in main(), via load_latest_bundle
 
 
 def fetch_finished_in_window(conn, league_id: str) -> pd.DataFrame:
@@ -157,11 +161,12 @@ def main() -> None:
     test_meta = augmented.loc[mask, ["date", "home", "away", "fthg", "ftag", "ftr"]].reset_index(drop=True)
     print(f"Test:  {len(X_25_26)} 25/26 matches to score")
 
-    # 7. Load model + predict.
-    bundle_path = settings.models_dir() / MODEL_FILENAME
-    bundle = load_bundle(bundle_path)
+    # 7. Load the current canonical production bundle + predict.
+    bundle, bundle_path = load_latest_bundle(LEAGUE)
     proba = bundle.predict_proba(X_25_26)
-    print(f"Model: {bundle_path.name}  (trained on {bundle.metrics.get('split_summary', {}).get('train_through', '?')})")
+    is_calibrated = bundle.metrics.get("calibrated", False) or bundle.calibrators is not None
+    train_through = bundle.metrics.get('split_summary', {}).get('train_through', '?')
+    print(f"Model: {bundle_path.name}  (trained through {train_through}, calibrated={is_calibrated})")
 
     # 8. Metrics.
     metrics = evaluate(y_25_26.values, proba, label="2025-26-test")

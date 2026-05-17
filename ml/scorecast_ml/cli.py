@@ -162,6 +162,12 @@ def train(
              "showed it's a structural no-op for XGBoost). Pass --hfa 65 to "
              "reproduce the legacy training.",
     ),
+    no_calibration: bool = typer.Option(
+        False, "--no-calibration",
+        help="Skip the per-class isotonic calibration step. Calibration is "
+             "fit on the val set after training; honest OOS evaluation must "
+             "then be on a held-out test set (scripts/backtest_2526.py).",
+    ),
     model_suffix: str | None = typer.Option(
         None, "--model-suffix",
         help="Suffix appended to the model filename (before .joblib). Useful "
@@ -182,7 +188,7 @@ def train(
     from scorecast_ml.reconcile.team_mapping import reconcile_dataframe
     from scorecast_ml.train.dataset import split_by_season_boundary
     from scorecast_ml.train.eval import evaluate, majority_class_baseline
-    from scorecast_ml.train.model import save_bundle, train as train_model
+    from scorecast_ml.train.model import fit_calibrators, save_bundle, train as train_model
 
     raw_dir = get_settings().raw_dir()
     csvs = sorted(raw_dir.glob(f"{league}_*.csv"))
@@ -232,7 +238,24 @@ def train(
         "promoted_team_strategy": elo_cfg.promoted_team_strategy,
     }
     bundle.metrics["split_summary"] = summary
+    bundle.metrics["calibrated"] = not no_calibration
 
+    # Always capture the uncalibrated val baseline before fitting the
+    # calibrators — this is the model's true generalization signal before
+    # the calibration step gets to peek at val. Reported alongside the
+    # calibrated number so reviewers can see exactly how much calibration
+    # shifted the metrics on val (which is, by construction, optimistic).
+    raw_val_proba = bundle.predict_proba_raw(split.X_val)
+    bundle.metrics["val_uncalibrated"] = evaluate(
+        split.y_val.values, raw_val_proba, label="val_uncalibrated"
+    )
+
+    if not no_calibration:
+        fit_calibrators(bundle, split.X_val, split.y_val)
+
+    # After this point, bundle.predict_proba returns CALIBRATED probs
+    # when calibrators are fit. The val metric is intentionally
+    # optimistic — the honest OOS check is a held-out test set.
     val_proba = bundle.predict_proba(split.X_val)
     val_metrics = evaluate(split.y_val.values, val_proba, label="val")
     bundle.metrics["val"] = val_metrics

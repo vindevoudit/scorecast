@@ -67,6 +67,17 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(64),
         allowNull: true,
       },
+      // Tier 4b Chunk 2 follow-up — phase signals so the client can
+      // produce a better "minute" estimate without paid upstream access.
+      halfTimeReached: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      phase: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+      },
     },
     {
       tableName: 'games',

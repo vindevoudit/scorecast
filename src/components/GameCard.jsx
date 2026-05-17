@@ -5,7 +5,7 @@
 // on. The `gate('make a pick')` / `gate('undo a pick')` wiring is preserved.
 
 import { scorePick } from '../utils/scoring';
-import { useCountdown } from '../utils/time';
+import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
@@ -24,14 +24,28 @@ function scoreEstimate(probability) {
   return `${100 - Math.round(probability * 100)} points if correct`;
 }
 
+// Status helpers — prefer the new `status` enum (Tier 4b) but fall back
+// to the legacy result/date heuristic so hand-entered games whose status
+// stayed at the 'scheduled' default still classify correctly.
+function isLiveGame(game) {
+  return game.status === 'in-progress';
+}
+function isFinishedGame(game) {
+  return game.status === 'finished' || Boolean(game.result);
+}
 function isUpcomingGame(game) {
-  return !game.result && new Date(game.date) > new Date();
+  if (isLiveGame(game) || isFinishedGame(game)) return false;
+  if (game.status === 'postponed' || game.status === 'cancelled') return false;
+  return new Date(game.date) > new Date();
 }
 
-function statusLabel(game, upcoming) {
-  if (game.result) return 'Final';
-  if (upcoming) return 'Upcoming';
-  return 'Live';
+function statusLabel(game) {
+  if (game.status === 'cancelled') return 'Cancelled';
+  if (game.status === 'postponed') return 'Postponed';
+  if (isFinishedGame(game)) return 'Final';
+  if (isLiveGame(game)) return 'Live';
+  if (isUpcomingGame(game)) return 'Upcoming';
+  return 'Live'; // past-kickoff non-finished fallback (hand-entered legacy)
 }
 
 function teamCardClass(side, game) {
@@ -39,6 +53,10 @@ function teamCardClass(side, game) {
   if (!game.result) return `${base} bg-overlay/70`;
   if (game.result === side) return `${base} border border-success/40 bg-success/10`;
   return `${base} bg-overlay/70 opacity-60`;
+}
+
+function hasScores(game) {
+  return typeof game.homeScore === 'number' && typeof game.awayScore === 'number';
 }
 
 function pickButtonClass(active, side) {
@@ -58,8 +76,15 @@ function GameCard({ game }) {
   const { pickMap, submitPick, removePick } = usePicks();
   const { gate } = useAuthGate();
   const existingPick = pickMap.get(game.id) || null;
+  const live = isLiveGame(game);
+  const finished = isFinishedGame(game);
   const upcoming = isUpcomingGame(game);
   const countdown = useCountdown(game.date);
+  const liveTime = useMatchMinute(game.date, live, {
+    halfTimeReached: game.halfTimeReached,
+    phase: game.phase,
+  });
+  const showScores = hasScores(game) && (live || finished);
 
   const existingChoice = existingPick?.choice || null;
   const existingPickId = existingPick?.id || null;
@@ -86,7 +111,17 @@ function GameCard({ game }) {
         <div className="min-w-0 space-y-3">
           <div className="flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.25em] text-accent/80">
             <span>{formatDate(game.date)}</span>
-            <span>{statusLabel(game, upcoming)}</span>
+            {live ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/15 px-2.5 py-0.5 text-danger">
+                <span
+                  className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-danger"
+                  aria-hidden="true"
+                />
+                Live{liveTime?.label ? ` · ${liveTime.label}` : ''}
+              </span>
+            ) : (
+              <span>{statusLabel(game)}</span>
+            )}
             {upcoming ? (
               <span className="rounded-full bg-overlay/60 px-3 py-1 normal-case tracking-normal text-fg">
                 Picks lock in {countdown}
@@ -96,14 +131,34 @@ function GameCard({ game }) {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className={teamCardClass('home', game)}>
               <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Home</p>
-              <p className="mt-3 truncate text-xl font-semibold text-fg">{game.homeTeam}</p>
+              <div className="mt-3 flex items-baseline justify-between gap-3">
+                <p className="truncate text-xl font-semibold text-fg">{game.homeTeam}</p>
+                {showScores ? (
+                  <p
+                    className="shrink-0 text-3xl font-bold tabular-nums text-fg"
+                    aria-label={`Home score ${game.homeScore}`}
+                  >
+                    {game.homeScore}
+                  </p>
+                ) : null}
+              </div>
               <p className="mt-2 text-sm text-fg-muted">
                 Win chance: {formatProbability(game.homeProbability)}
               </p>
             </div>
             <div className={teamCardClass('away', game)}>
               <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Away</p>
-              <p className="mt-3 truncate text-xl font-semibold text-fg">{game.awayTeam}</p>
+              <div className="mt-3 flex items-baseline justify-between gap-3">
+                <p className="truncate text-xl font-semibold text-fg">{game.awayTeam}</p>
+                {showScores ? (
+                  <p
+                    className="shrink-0 text-3xl font-bold tabular-nums text-fg"
+                    aria-label={`Away score ${game.awayScore}`}
+                  >
+                    {game.awayScore}
+                  </p>
+                ) : null}
+              </div>
               <p className="mt-2 text-sm text-fg-muted">
                 Win chance: {formatProbability(game.awayProbability)}
               </p>
@@ -111,13 +166,27 @@ function GameCard({ game }) {
           </div>
         </div>
         <div className="space-y-3 text-right">
-          {game.result ? (
+          {finished ? (
             <>
               <p className="text-sm text-fg-muted">Result</p>
               <p className="text-lg font-semibold text-fg">
-                {game.result === 'home' ? game.homeTeam : game.awayTeam} won
+                {game.result === 'home'
+                  ? `${game.homeTeam} won`
+                  : game.result === 'away'
+                    ? `${game.awayTeam} won`
+                    : 'Draw'}
               </p>
               <div className="flex justify-end">{outcomeBadge}</div>
+            </>
+          ) : live ? (
+            <>
+              <p className="text-sm text-fg-muted">Live score</p>
+              <p className="text-2xl font-bold tabular-nums text-fg">
+                {showScores ? `${game.homeScore} – ${game.awayScore}` : '— – —'}
+              </p>
+              <p className="text-sm text-fg-subtle">
+                Your pick: {pickedTeam || 'None'} · picks locked
+              </p>
             </>
           ) : (
             <>

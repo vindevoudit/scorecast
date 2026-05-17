@@ -34,6 +34,17 @@ const notificationsRoutes = require('./routes/notifications');
 const adminRoutes = require('./routes/admin');
 const { buildDocsRouter, mountSwagger } = require('./routes/docs');
 
+// Tier 4b Chunk 2 — register cron jobs at module load. scheduler.start()
+// is called after app.listen() so the listener is healthy before background
+// work begins. Skipping these requires also dropping the start() call below.
+const scheduler = require('./lib/scheduler');
+const syncFixturesJob = require('./lib/jobs/syncFixtures');
+const syncLiveScoresJob = require('./lib/jobs/syncLiveScores');
+const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
+const LIVE_SCORE_SYNC_CRON = process.env.LIVE_SCORE_SYNC_CRON || '* * * * *'; // every minute
+scheduler.register('syncFixtures', FIXTURE_SYNC_CRON, syncFixturesJob.run);
+scheduler.register('syncLiveScores', LIVE_SCORE_SYNC_CRON, syncLiveScoresJob.run);
+
 const PORT = process.env.PORT || 3000;
 
 const app = express();
@@ -161,6 +172,10 @@ app.use(errorMiddleware);
     await initDatabase();
     app.listen(PORT, () => {
       logger.info({ port: PORT }, `ScoreCast server is running on http://localhost:${PORT}`);
+      // Tier 4b Chunk 2 — bring up cron after the HTTP listener is healthy
+      // so /healthz responds immediately even if a job is mid-tick on boot.
+      // Tier 10.5 will move stop() into the SIGTERM graceful-shutdown path.
+      scheduler.start();
     });
   } catch (error) {
     logger.fatal({ err: error }, 'failed to initialize database');

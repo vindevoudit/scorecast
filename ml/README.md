@@ -210,33 +210,54 @@ az containerapp job start \
 
 ### Initial deploy (one-time)
 
-The `ml_pipeline` admin user must already exist in the running app (see
+The `ml_pipeline` admin user must already exist **in the running app**
+(provisioned via AdminPanel → UserManager → Add user against the live
+URL, not a local dev instance — see
 [Provisioning the service-account user](#provisioning-the-service-account-user)
-above). Then apply the infra with the new `mlPipelinePassword` param:
+above). The password you set on that user must exactly match the
+`mlPipelinePassword` you pass to Bicep below.
+
+Then apply the infra:
 
 ```powershell
-# Discover the current Container App certificate id (needed for the
-# customDomain reapply per Tier 9-followup).
-az containerapp env certificate list `
+# 1. Discover the current Container App certificate id (Tier 9-followup
+#    requires this on every reapply to keep the bantryx.com binding).
+$CERT_ID = az containerapp env certificate list `
   --name scorecast-env-p3aaelev7xp52 `
   --resource-group scorecast-prod `
   --query "[?properties.subjectName=='bantryx.com'].id" -o tsv
 
-# Apply infra — 4 params, all required for the reapply to stay idempotent.
+# 2. Discover the live Node app image tag (avoids Bicep flipping the app
+#    back to the helloworld placeholder during reapply).
+$APP_IMG = az containerapp revision list `
+  --name scorecast-app --resource-group scorecast-prod `
+  --query "[?properties.active==``true``].properties.template.containers[0].image | [0]" -o tsv
+$IMAGE_TAG = ($APP_IMG -split ':')[-1]
+
+# 3. Discover the live ml-job image tag (same reason, for the ml-job).
+$ML_IMG = az containerapp job show `
+  --name scorecast-ml-job --resource-group scorecast-prod `
+  --query "properties.template.containers[0].image" -o tsv
+$ML_IMAGE_TAG = ($ML_IMG -split ':')[-1]
+
+# 4. Apply — 6 params, all required for the reapply to stay idempotent.
 az deployment group create `
   -g scorecast-prod `
   -f infra/main.bicep `
-  -p pgAdminPassword=<live postgres admin pw> `
-  -p mlPipelinePassword=<ml_pipeline service-account pw> `
+  -p imageTag=$IMAGE_TAG `
+  -p mlImageTag=$ML_IMAGE_TAG `
+  -p pgAdminPassword='<live postgres admin pw>' `
+  -p mlPipelinePassword='<ml_pipeline service-account pw>' `
   -p customDomain=bantryx.com `
-  -p customDomainCertId=<id from previous command>
+  -p customDomainCertId=$CERT_ID
 ```
 
 That creates the `scorecast-ml-job` Container Apps Job + writes
 `ml-pipeline-password` to Key Vault + grants the Job's managed identity
-`AcrPull` + `Key Vault Secrets User`. The Job initially runs the
-helloworld placeholder image; the first push to `main` touching `ml/**`
-triggers [.github/workflows/ml-deploy.yml](../.github/workflows/ml-deploy.yml)
+`AcrPull` + `Key Vault Secrets User`. On the very first deploy
+(`mlImageTag=placeholder`, the default), the Job runs the helloworld
+bootstrap image; the first push to `main` touching `ml/**` triggers
+[.github/workflows/ml-deploy.yml](../.github/workflows/ml-deploy.yml)
 which builds + pushes the real image and points the Job at it.
 
 ### Rotating the ml_pipeline password

@@ -55,13 +55,19 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
         replicaCompletionCount: 1
         parallelism: 1
       }
-      registries: imageTag == 'placeholder' ? [] : [
+      // Registries/secrets always populated regardless of imageTag — same
+      // reasoning as in app.bicep. Earlier ternaries here cleared the
+      // config on every Bicep reapply with default imageTag, which silently
+      // broke CD: `az containerapp job update --image` had no registry
+      // auth, and any successful image update produced a Job with no
+      // DATABASE_URL env (Sequelize blew up at startup).
+      registries: [
         {
           server: acrLoginServer
           identity: 'system'
         }
       ]
-      secrets: imageTag == 'placeholder' ? [] : [
+      secrets: [
         {
           name: 'database-url'
           keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/database-url'
@@ -75,7 +81,10 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
           name: 'migrate'
           image: imageRef
           // Override the entrypoint to run migrations instead of the server.
-          command: imageTag == 'placeholder' ? [] : [
+          // The placeholder helloworld image ignores this command since it
+          // has its own ENTRYPOINT; for the real ScoreCast image, this
+          // is what actually runs the migrations.
+          command: [
             'npm'
             'run'
             'db:migrate'
@@ -84,7 +93,7 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: imageTag == 'placeholder' ? [] : [
+          env: [
             { name: 'NODE_ENV', value: 'production' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }
           ]

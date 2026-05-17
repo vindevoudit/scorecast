@@ -127,13 +127,20 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           }
         ]
       }
-      registries: imageTag == 'placeholder' ? [] : [
+      // Registries/secrets/env are ALWAYS populated, regardless of imageTag.
+      // The placeholder image branch only changes which IMAGE the container
+      // runs — it doesn't (and shouldn't) clear the config that the real
+      // image will need once CD swaps it in. Earlier ternaries here cleared
+      // these fields on every Bicep reapply with default imageTag, which
+      // silently broke CD's `az containerapp update --image` (no registry
+      // auth) AND any new revision spun up afterwards (no env / secrets).
+      registries: [
         {
           server: acrLoginServer
           identity: 'system'
         }
       ]
-      secrets: imageTag == 'placeholder' ? [] : [
+      secrets: [
         {
           name: 'jwt-secret'
           keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/jwt-secret'
@@ -170,10 +177,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          // Env vars only get attached once we're past the placeholder image
-          // (which doesn't know how to consume them). publicAppUrl falls back
-          // to the Azure-issued FQDN when no custom domain is bound.
-          env: imageTag == 'placeholder' ? [] : [
+          // Env vars always populated. The helloworld placeholder image
+          // simply ignores them; the real ScoreCast image needs them present
+          // in the resource config so any new revision spun up by CD picks
+          // them up. publicAppUrl falls back to the Azure-issued FQDN when
+          // no custom domain is bound.
+          env: [
             { name: 'NODE_ENV', value: 'production' }
             { name: 'PORT', value: '3000' }
             { name: 'PUBLIC_APP_URL', value: publicAppUrl }

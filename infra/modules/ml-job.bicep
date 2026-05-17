@@ -98,13 +98,17 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      registries: imageTag == 'placeholder' ? [] : [
+      // Registries/secrets/env always populated regardless of imageTag —
+      // same reasoning as in app.bicep + migrate-job.bicep. The placeholder
+      // helloworld image ignores them harmlessly; clearing them on every
+      // Bicep reapply silently broke CD.
+      registries: [
         {
           server: acrLoginServer
           identity: 'system'
         }
       ]
-      secrets: imageTag == 'placeholder' ? [] : [
+      secrets: [
         {
           name: 'database-url'
           keyVaultUrl: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/database-url'
@@ -131,7 +135,7 @@ resource job 'Microsoft.App/jobs@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: imageTag == 'placeholder' ? [] : [
+          env: [
             { name: 'SCORECAST_ML_USERNAME', value: 'ml_pipeline' }
             { name: 'SCORECAST_ML_PASSWORD', secretRef: 'ml-pipeline-password' }
             { name: 'SCORECAST_API_BASE_URL', value: apiBaseUrl }

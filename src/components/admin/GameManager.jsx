@@ -29,7 +29,7 @@ function toIsoUtc(localValue) {
   return new Date(localValue).toISOString();
 }
 
-function GameRow({ game, onSave, onSetResult, onDelete, busy }) {
+function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     homeTeam: game.homeTeam,
@@ -110,6 +110,11 @@ function GameRow({ game, onSave, onSetResult, onDelete, busy }) {
               {new Date(game.date).toLocaleString()} ·{' '}
               <span className="tabular-nums">{Math.round(game.homeProbability * 100)}%</span> /{' '}
               <span className="tabular-nums">{Math.round(game.awayProbability * 100)}%</span>
+              {leagueName ? (
+                <span className="ml-2 rounded-full bg-overlay px-2 py-0.5 text-fg-subtle">
+                  {leagueName}
+                </span>
+              ) : null}
               {game.result ? (
                 <span className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-success">
                   Result: {game.result === 'home' ? game.homeTeam : game.awayTeam}
@@ -170,6 +175,8 @@ function GameManager() {
   };
 
   const [games, setGames] = useState([]);
+  const [leagues, setLeagues] = useState([]);
+  const [leagueFilter, setLeagueFilter] = useState('');
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
@@ -177,9 +184,29 @@ function GameManager() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [pendingBulk, setPendingBulk] = useState(null);
 
+  // Map of leagueId -> league name for the per-row chip; built from the
+  // admin leagues endpoint (which includes inactive leagues, so admins can
+  // still filter + clean up games from a deactivated league like BSA).
+  const leagueNameById = leagues.reduce((acc, l) => {
+    acc[l.id] = l.name;
+    return acc;
+  }, {});
+
+  const loadLeagues = async () => {
+    try {
+      const data = await request('/api/admin/leagues');
+      setLeagues(data.leagues || []);
+    } catch (error) {
+      onError?.(error.message);
+    }
+  };
+
   const load = async () => {
     try {
-      const data = await request('/api/games');
+      const url = leagueFilter
+        ? `/api/games?leagueId=${encodeURIComponent(leagueFilter)}`
+        : '/api/games';
+      const data = await request(url);
       setGames([...data].sort((a, b) => new Date(b.date) - new Date(a.date)));
       setSelectedIds(new Set());
     } catch (error) {
@@ -233,9 +260,16 @@ function GameManager() {
   };
 
   useEffect(() => {
-    load();
+    loadLeagues();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refetch the games list whenever the league filter changes (including
+  // initial mount with the default '' = all).
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueFilter]);
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -322,6 +356,33 @@ function GameManager() {
           {creating ? 'Cancel' : 'New game'}
         </Button>
       </div>
+
+      {leagues.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl bg-overlay/60 px-4 py-3">
+          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+            Filter
+          </span>
+          <label className="flex items-center gap-2 text-sm text-fg">
+            <span className="sr-only">League</span>
+            <select
+              value={leagueFilter}
+              onChange={(e) => setLeagueFilter(e.target.value)}
+              className="rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <option value="">All leagues</option>
+              {leagues.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {l.active === false ? ' (inactive)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="ml-auto text-xs tabular-nums text-fg-subtle">
+            {games.length} game{games.length === 1 ? '' : 's'}
+          </span>
+        </div>
+      ) : null}
 
       {creating ? (
         <form
@@ -446,6 +507,7 @@ function GameManager() {
               <div className="min-w-0 flex-1">
                 <GameRow
                   game={game}
+                  leagueName={leagueNameById[game.leagueId]}
                   onSave={handleUpdate}
                   onSetResult={handleSetResult}
                   onDelete={(g) => setPendingDelete(g)}

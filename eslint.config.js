@@ -35,6 +35,9 @@ export default [
       '.husky/**',
       'public/**',
       'coverage/**',
+      // ml/ is a separate Python project; the venv ships JS files (sklearn
+      // HTML repr, pip's emscripten worker) that aren't ours to lint.
+      'ml/**',
     ],
   },
 

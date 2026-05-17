@@ -890,52 +890,168 @@ For each new league, confirm:
 
 ## Part 3 — Operating the pipeline
 
-### 3.1 Daily / weekly workflow (Phase 1 — manual)
+### 3.1 How the system updates itself (Phase 3 production)
+
+Three independent moving parts. Each has its own trigger and cadence;
+understanding them separately makes the whole pipeline tractable.
+
+**Elo ratings — every predict run, from scratch.** `predict-and-write`
+rebuilds Elo across the full CSV corpus (32 PL seasons, ~12,300 matches)
+PLUS every completed game the DB knows about. No incremental cache, no
+snapshot reuse. Runs in <1 second; not worth optimizing. When a 25/26
+game finishes, the next predict run automatically reflects it in both
+the team rating and downstream form features. The flow lives in
+[ml/scorecast_ml/cli.py](scorecast_ml/cli.py) `_build_inference_context`.
+
+**Probabilities — Thursdays 02:30 UTC, via the cron-scheduled Job.**
+The Azure Container Apps Job `scorecast-ml-job` (provisioned in
+[infra/modules/ml-job.bicep](../infra/modules/ml-job.bicep) with
+`triggerType: Schedule`, cron `30 2 * * 4`) fires the baked-in CMD
+`python -m scorecast_ml predict-and-write --league PL --horizon-days 7`.
+Per-game `homeProbability` / `awayProbability` get PUT through
+`/api/admin/games/:id`. Audit-logged with `actor=ml_pipeline`.
+**Idempotent**: skips games already on non-sentinel probs, so ad-hoc
+re-fires within the same gameweek do nothing harmful.
+
+Manual ad-hoc trigger any time:
 
 ```powershell
-# Once per week, before the gameweek opens:
+az containerapp job start --name scorecast-ml-job --resource-group scorecast-prod
+```
+
+**Model bundle — every Docker image build, deterministically.**
+[ml/Dockerfile](Dockerfile) stage 2 runs `python -m scorecast_ml train`
+against the committed CSV corpus. `seed=42` is pinned in
+[ml/scorecast_ml/train/model.py](scorecast_ml/train/model.py), so same
+code + same CSVs = bit-identical model. The rebuild is triggered by any
+push to `main` that touches `ml/**` (path filter in
+[.github/workflows/ml-deploy.yml](../.github/workflows/ml-deploy.yml)).
+The new image lands in ACR as `scorecast-ml:<sha>`; CD repoints the
+Job; next Thursday's fire uses the new model.
+
+#### What a week looks like end-to-end
+
+```
+Mon–Wed   Live-score job (Node, 60s tick) updates DB as games finish.
+          Daily fixture sync at 03:00 UTC pulls newly-announced fixtures.
+          No ML activity.
+
+Thu 02:30 UTC
+          scorecast-ml-job fires. ~60s run inside the container:
+          • Login to bantryx.com as ml_pipeline (one HTTP call)
+          • Rebuild Elo over CSV + DB completed games (Tue/Wed
+            finished matches now factored in)
+          • Compute 11-feature matrix for ~10–15 upcoming fixtures
+          • XGBoost predict_proba → 3-class → isotonic calibration
+            → row-renormalize → draw redistribution → 2-class
+          • Round to DECIMAL(3,2), re-balance, nudge off (0.50, 0.50)
+            sentinel
+          • PUT each game's probs through /api/admin/games/:id
+          • Audit log row per write, actor=ml_pipeline
+
+Fri–Sun   Users place picks against the new probs. The (1 − p_winning) × 100
+          scoring formula is fully active. Live-score job updates DB
+          scores + status as kickoffs happen.
+
+Sun–Mon   Results finalize. PickService scores picks against the
+          probabilities written Thursday. Leaderboard cache invalidates
+          on each result-set and rebuilds within 30s.
+
+Repeat next Thursday.
+```
+
+#### The slow loop: re-learning the model coefficients
+
+Within a season, the model is **fixed**. Predictions still adapt
+because Elo + form rebuild every Thursday with the latest finished
+games — but the XGBoost weights themselves stay the same until a
+rebuild. This is by design (15-season training window is dwarf by
+~12 fresh matches per week; no signal in incremental training).
+
+The natural rebuild moment is **end of season**, when
+Football-Data.co.uk publishes the season's final CSV (typically a few
+weeks after the final matchday at
+`https://www.football-data.co.uk/mmz4281/<season>/E0.csv`):
+
+1. Drop the new CSV into `ml/data/raw/PL_<season>.csv` and `git add` it.
+   Football-Data.co.uk data is public-domain; the
+   [.gitignore negation rule](../.gitignore) allows CSVs through.
+2. Update the training flags in [ml/Dockerfile](Dockerfile) stage 2 to
+   roll the train/val/test windows forward by one season:
+   - `--train-last-season 2425` (was 2324)
+   - `--val-season 2526` (was 2425)
+   - `--test-season 2627` (the next year's empty placeholder)
+3. `git commit && git push`. CD rebuilds the image with a 16-season
+   training window; next Thursday's fire uses it.
+
+### 3.2 Local / development workflow
+
+The production Job is the right path for prod writes. Local invocation
+is for dry-runs, ablations, and validating a change before pushing it:
+
+```powershell
+# From repo root
 cd ml
 .\.venv\Scripts\Activate.ps1
 
-# Loop over leagues you've onboarded:
+# Loop over leagues you've onboarded — dry-run first, always:
 foreach ($code in @('PL', 'PD', 'BL1', 'SA', 'FL1')) {
   python -m scorecast_ml predict-and-write --league $code --horizon-days 10 --dry-run
 }
-# Spot-check the dry-run output, then re-run without --dry-run
+# Spot-check the dry-run output, then re-run without --dry-run if needed
 ```
 
-Re-training cadence: monthly is plenty. Re-train only when:
+`ml/.env` controls which app this writes to via `SCORECAST_API_BASE_URL`
+(`http://localhost:3000` for local dev, `https://bantryx.com` for
+prod). Don't point local at prod casually — the production Job already
+handles prod writes on a deterministic schedule.
 
-- A new season starts (new teams just promoted; old teams may have
-  shifted significantly with summer transfers).
-- You've extended `teams.json` for a newly-promoted team and want their
-  Elo built into the snapshot.
-- You're testing a hyperparameter change.
+Re-ingest cadence: only when adding a NEW season (typically end-of-year)
+or when FDCO publishes a correction to a past season (rare). The
+Football-Data.co.uk CSVs for closed seasons rarely change, so
+`--force-redownload` is essentially never needed.
 
-Re-ingest cadence: only when adding a NEW season or when FDCO publishes a
-correction to a past season (rare). The Football-Data.co.uk CSVs for
-closed seasons rarely change, so `--force-redownload` is the only case
-to worry about.
+### 3.3 When to retrain (and when NOT to)
 
-### 3.2 When to retrain (and when NOT to)
+In Phase 3, "retrain" means "push a commit under `ml/**`". The Docker
+build's stage 2 does the actual `python -m scorecast_ml train`
+invocation. Because training is deterministic (`seed=42` + same CSVs
 
-**Retrain** when:
+- same code), a no-op push produces a _bit-identical_ model. To get a
+  _different_ model, you have to change one of these inputs.
 
-- You've finished a new season (e.g. 2025/26 just ended → re-train with
-  it in the training window).
-- You've onboarded a new league.
-- You've changed Elo config (HFA, K-factor, promoted-team strategy).
-- You're testing a Phase 2+ improvement (calibration, MOV, new features).
+**Changes that actually produce a new model**:
 
-**Don't retrain** for:
+- Adding a new CSV under `ml/data/raw/PL_<season>.csv` (end-of-season).
+- Editing the training flags in [ml/Dockerfile](Dockerfile) stage 2
+  (train window, val/test seasons).
+- Editing [ml/scorecast_ml/train/model.py](scorecast_ml/train/model.py)
+  (hyperparameters, the calibration step, the seed itself).
+- Editing [ml/scorecast_ml/features/build.py](scorecast_ml/features/build.py)
+  or [form.py](scorecast_ml/features/form.py) (new features — also
+  update the expected feature count in the tests).
+- Onboarding a new league (extending
+  [teams.json](scorecast_ml/reconcile/teams.json) + a new training run
+  for that league code; each league has its own bundle).
+- Changing Elo config in
+  [ml/scorecast_ml/elo/engine.py](scorecast_ml/elo/engine.py) (HFA,
+  K-factor, promoted-team strategy).
 
-- Live-score updates within a current season — those reflow through the
-  Elo + form features at inference time automatically. The model itself
-  doesn't change.
-- Onboarding a team mid-season (just extend `teams.json`; the next
-  inference call will pick it up).
+**Changes that do NOT need a retrain**:
 
-### 3.3 Scripts in `ml/scripts/`
+- Live-score updates within the current season. Those reflow through
+  Elo + form at the next predict run automatically. The model
+  coefficients don't change.
+- Onboarding a team mid-season (extend `teams.json`; predict runs pick
+  it up the next Thursday).
+- Bug fixes in the writer / inference normalization (they affect output
+  formatting, not the trained weights).
+- Documentation changes — the `ml/**` path filter is wider than
+  strictly necessary, so docs DO trigger a rebuild, but the
+  deterministic build produces the same model. Wasteful (~3 min CD
+  time) but harmless.
+
+### 3.4 Scripts in `ml/scripts/`
 
 Three useful examples:
 
@@ -954,7 +1070,7 @@ Three useful examples:
 
 All three are runnable via `python scripts/{name}.py` from `ml/`.
 
-### 3.4 Troubleshooting
+### 3.5 Troubleshooting
 
 | Symptom                                                         | Most likely cause                                                                      | Fix                                                                                                                                                |
 | --------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |

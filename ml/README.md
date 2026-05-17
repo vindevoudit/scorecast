@@ -171,6 +171,12 @@ The Job's system-assigned identity pulls `database-url` and
 `ml-pipeline-password` from Key Vault. Same managed identity, same
 Container Apps environment, same Log Analytics workspace as the Node app.
 
+> **Looking for "when does X update?"** → see
+> [ONBOARDING.md → Part 3.1: How the system updates itself](ONBOARDING.md#31-how-the-system-updates-itself-phase-3-production)
+> for the runtime mental model (three independent cadences: Elo per
+> predict run, probabilities every Thursday, model bundle on every
+> `ml/**` push) and the end-to-end weekly timeline.
+
 ### Container image
 
 The image is built fully reproducibly from git via three Dockerfile stages

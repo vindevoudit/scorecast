@@ -1650,6 +1650,14 @@ See [ml/ONBOARDING.md](ml/ONBOARDING.md) for the full walkthrough + per-league o
 
 Manual ad-hoc runs work on a Schedule-triggered job: `az containerapp job start --name scorecast-ml-job --resource-group scorecast-prod`. The Azure portal's Job execution history surfaces logs against the shared Log Analytics workspace.
 
+**Runtime cadences — three independent moving parts** (full mental model + end-to-end weekly timeline in [ml/ONBOARDING.md §3.1](ml/ONBOARDING.md#31-how-the-system-updates-itself-phase-3-production)):
+
+- **Elo ratings** rebuild from scratch on every `predict-and-write` invocation. Full timeline (CSV corpus + DB completed games) walked in <1 s; no incremental snapshot. Tuesday's finished match shows up in Thursday's predictions automatically.
+- **Probabilities** get written every Thursday 02:30 UTC by the scheduled Job. Idempotent — skips games already on non-sentinel probs, so manual re-fires within a gameweek are safe.
+- **Model bundle** rebuilds on every push to `main` that touches `ml/**`. Deterministic (`seed=42` + committed CSV corpus), so no-op pushes produce bit-identical models. The natural retrain moment is end-of-season — drop the new CSV under [ml/data/raw/](ml/data/raw/) and roll the training flags forward in [ml/Dockerfile](ml/Dockerfile).
+
+Within-season adaptation happens via Elo + form (every Thursday); the XGBoost weights themselves are stable between annual rebuilds.
+
 **Schema additions: zero.** The pipeline writes to existing `games.homeProbability` / `games.awayProbability` columns. Audit-logged through the existing `audit_log` table via `auditMutation('admin.game.update', 'game')` already wrapping the route.
 
 **Known limits + forward path**:

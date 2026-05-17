@@ -14,8 +14,11 @@ const NotificationService = require('./NotificationService');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 
-async function listGames() {
-  return Game.findAll({ order: [['date', 'ASC']] });
+async function listGames({ leagueId, seasonId } = {}) {
+  const where = {};
+  if (leagueId) where.leagueId = leagueId;
+  if (seasonId) where.seasonId = seasonId;
+  return Game.findAll({ where, order: [['date', 'ASC']] });
 }
 
 async function createGame(attrs) {

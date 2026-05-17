@@ -45,6 +45,7 @@ const PasswordResetToken = require('./PasswordResetToken')(sequelize);
 const RefreshToken = require('./RefreshToken')(sequelize);
 const League = require('./League')(sequelize);
 const Season = require('./Season')(sequelize);
+const AuditLog = require('./AuditLog')(sequelize);
 
 // Define associations.
 //
@@ -115,6 +116,11 @@ Game.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
 
 Season.hasMany(Game, { foreignKey: 'seasonId', as: 'games' });
 Game.belongsTo(Season, { foreignKey: 'seasonId', as: 'season' });
+
+// Tier 4b Chunk 3 — audit log writes survive admin deletion via SET NULL
+// on actorUserId. AuditLog deliberately has no hasMany hooked from User
+// because the history is a flat append-only stream, not user-owned data.
+AuditLog.belongsTo(User, { foreignKey: 'actorUserId', as: 'actor' });
 
 // Initialize database
 async function initDatabase() {
@@ -261,6 +267,7 @@ module.exports = {
   RefreshToken,
   League,
   Season,
+  AuditLog,
   initDatabase,
   runMigrations,
 };

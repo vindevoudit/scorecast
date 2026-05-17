@@ -12,6 +12,7 @@ import SearchBar from '../components/SearchBar';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
+import GameFiltersBar from '../components/GameFiltersBar';
 import { Button, Input } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
@@ -287,6 +288,9 @@ function DashboardView() {
                   <p className="mt-2 text-fg-muted">
                     Pick winners, earn more points for underdog upsets.
                   </p>
+                  <div className="mt-4">
+                    <GameFiltersBar />
+                  </div>
                 </div>
 
                 {liveGames.length > 0 ? renderGameSection('Live now', liveGames, '') : null}

@@ -14,12 +14,22 @@ const CommentService = require('../services/CommentService');
 
 const router = express.Router();
 
+// UUID-shape guard — silently drop garbage so a malformed URL doesn't 500
+// the public list. Empty-string is the "all" sentinel.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function safeUuid(v) {
+  return typeof v === 'string' && UUID_RE.test(v) ? v : undefined;
+}
+
 router.get(
   '/games',
   publicReadLimiter,
   optionalAuth,
-  asyncHandler(async (_req, res) => {
-    const games = await GameService.listGames();
+  asyncHandler(async (req, res) => {
+    const games = await GameService.listGames({
+      leagueId: safeUuid(req.query.leagueId),
+      seasonId: safeUuid(req.query.seasonId),
+    });
     res.json(games);
   }),
 );

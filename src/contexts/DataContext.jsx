@@ -26,6 +26,10 @@ export function DataProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState('games');
 
+  // Tier 4b Chunk 3 — league/season picker state. Sits in DataContext so
+  // refreshGames (called from many places after picks/admin mutations)
+  // preserves the active filter instead of clobbering it.
+  const [gameFilters, setGameFiltersState] = useState({ leagueId: '', seasonId: '' });
   const [games, setGames] = useState([]);
   const [groups, setGroups] = useState([]);
   const [picks, setPicks] = useState([]);
@@ -55,10 +59,29 @@ export function DataProvider({ children }) {
     setPicks(data);
   }, [request]);
 
-  const refreshGames = useCallback(async () => {
-    const data = await request('/api/games');
-    setGames(data.sort((a, b) => new Date(a.date) - new Date(b.date)));
-  }, [request]);
+  const refreshGames = useCallback(
+    async (overrideFilters) => {
+      const filters = overrideFilters || gameFilters;
+      const params = new URLSearchParams();
+      if (filters.leagueId) params.set('leagueId', filters.leagueId);
+      if (filters.seasonId) params.set('seasonId', filters.seasonId);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const data = await request(`/api/games${qs}`);
+      setGames(data.sort((a, b) => new Date(a.date) - new Date(b.date)));
+    },
+    [request, gameFilters],
+  );
+
+  // Setter that triggers a refresh with the new filters atomically. Wrapping
+  // the two together means a stale fetch can't race the state update.
+  const applyGameFilters = useCallback(
+    async (next) => {
+      const normalized = { leagueId: next.leagueId || '', seasonId: next.seasonId || '' };
+      setGameFiltersState(normalized);
+      await refreshGames(normalized);
+    },
+    [refreshGames],
+  );
 
   const refreshGroups = useCallback(async () => {
     const data = await request('/api/groups');
@@ -605,6 +628,10 @@ export function DataProvider({ children }) {
     refreshGames,
     refreshPicks,
     refreshLeaderboard,
+
+    // Tier 4b Chunk 3 — league/season picker
+    gameFilters,
+    applyGameFilters,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

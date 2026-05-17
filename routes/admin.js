@@ -5,6 +5,10 @@
 // the services (Tier 5.3 invariant). The bulk-user endpoint returns
 // `skipped:[{id,reason:'self'}]` for the caller's own id (CLAUDE.md
 // invariant — preserved inside UserService.bulkAction).
+//
+// Tier 4b Chunk 3 — every mutating endpoint here is wrapped with
+// auditMutation(action, entityType) so the resulting row in audit_log
+// records the actor, request body, and final status code.
 const express = require('express');
 const { validate } = require('../validation/middleware');
 const {
@@ -18,10 +22,12 @@ const {
 } = require('../validation/schemas');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
+const { auditMutation } = require('../middleware/auditLog');
 const GameService = require('../services/GameService');
 const UserService = require('../services/UserService');
 const LeaderboardService = require('../services/LeaderboardService');
 const LeagueService = require('../services/LeagueService');
+const AuditLogService = require('../services/AuditLogService');
 const footballApi = require('../lib/footballApi');
 
 const router = express.Router();
@@ -30,6 +36,7 @@ router.post(
   '/admin/games',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.game.create', 'game'),
   validate(createGameSchema),
   asyncHandler(async (req, res) => {
     const game = await GameService.createGame(req.body);
@@ -41,6 +48,7 @@ router.put(
   '/admin/games/:id',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.game.update', 'game'),
   validate(updateGameSchema),
   asyncHandler(async (req, res) => {
     const game = await GameService.updateGame(req.params.id, req.body);
@@ -52,6 +60,7 @@ router.delete(
   '/admin/games/:id',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.game.delete', 'game'),
   asyncHandler(async (req, res) => {
     await GameService.deleteGame(req.params.id);
     res.json({ success: true });
@@ -71,6 +80,7 @@ router.post(
   '/admin/users/:id/role',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.user.role', 'user'),
   validate(roleSchema),
   asyncHandler(async (req, res) => {
     const role = await UserService.setRole({
@@ -86,6 +96,7 @@ router.delete(
   '/admin/users/:id',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.user.delete', 'user'),
   asyncHandler(async (req, res) => {
     await UserService.deleteUserById({ targetId: req.params.id, requesterId: req.user.id });
     res.json({ success: true });
@@ -96,6 +107,7 @@ router.post(
   '/admin/games/bulk',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.game.bulk', 'game'),
   validate(bulkGameSchema),
   asyncHandler(async (req, res) => {
     const { ids, action, result } = req.body;
@@ -113,6 +125,7 @@ router.post(
   '/admin/users/bulk',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.user.bulk', 'user'),
   validate(bulkUserSchema),
   asyncHandler(async (req, res) => {
     const { affected, skipped } = await UserService.bulkAction({
@@ -149,6 +162,7 @@ router.post(
   '/admin/leagues',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.league.create', 'league'),
   validate(createLeagueSchema),
   asyncHandler(async (req, res) => {
     const league = await LeagueService.createLeague(req.body);
@@ -160,6 +174,7 @@ router.put(
   '/admin/leagues/:id',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.league.update', 'league'),
   validate(updateLeagueSchema),
   asyncHandler(async (req, res) => {
     const league = await LeagueService.updateLeague(req.params.id, req.body);
@@ -171,6 +186,7 @@ router.delete(
   '/admin/leagues/:id',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.league.delete', 'league'),
   asyncHandler(async (req, res) => {
     await LeagueService.deleteLeague(req.params.id);
     res.json({ success: true });
@@ -181,9 +197,25 @@ router.post(
   '/admin/leagues/:id/sync',
   authMiddleware,
   requireAdmin,
+  auditMutation('admin.league.sync', 'league'),
   asyncHandler(async (req, res) => {
     const summary = await LeagueService.syncFixtures(req.params.id);
     res.json({ success: true, ...summary });
+  }),
+);
+
+// Tier 4b Chunk 3 — audit log read endpoint. Paginated; capped at 200
+// per page inside the service. Read-only, admin-only.
+router.get(
+  '/admin/audit-log',
+  authMiddleware,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const page = await AuditLogService.list({
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    res.json(page);
   }),
 );
 

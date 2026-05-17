@@ -1,10 +1,12 @@
 // Tier 11 Chunk 2 — AdminPanel tokenized.
 // Tier 4b Chunk 1 — LeagueManager added above GameManager so the synced
 // league + season context is visible when an admin scrolls down to games.
+// Tier 4b Chunk 3 — AuditLog mounted at the bottom; non-mutating, paginated.
 
 import LeagueManager from './LeagueManager';
 import GameManager from './GameManager';
 import UserManager from './UserManager';
+import AuditLog from './AuditLog';
 
 function AdminPanel() {
   return (
@@ -18,6 +20,7 @@ function AdminPanel() {
       <LeagueManager />
       <GameManager />
       <UserManager />
+      <AuditLog />
     </div>
   );
 }

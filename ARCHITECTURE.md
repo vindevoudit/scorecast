@@ -1605,6 +1605,52 @@ Public endpoint `GET /api/leagues` returns active leagues with their `seasons[]`
 
 `GET /api/games` accepts `leagueId` + `seasonId` query params (UUID-shape guard silently drops malformed values). `GameService.listGames({leagueId, seasonId})` applies them as a Sequelize where-clause. `DataContext.gameFilters` holds the active filter so `refreshGames` (called after picks, admin mutations) preserves it.
 
+### 8.17 ML Probability Pipeline ([ml/](ml/))
+
+Standalone Python project under [ml/](ml/) that produces `(homeProbability, awayProbability)` for upcoming fixtures and writes them via the existing admin HTTP API. The Node app is untouched — the pipeline is purely a consumer of `lib/footballApi.js` outputs (read via the DB) and a producer to `PUT /api/admin/games/:id`. Activates ScoreCast's scoring formula `(1 - p_winning) × 100` which is otherwise a no-op while every game sits at the `(0.50, 0.50)` default from `LeagueService.upsertFixture`.
+
+**Why a separate Python service** — XGBoost + Elo state are easier to express in pandas / scikit-learn than in any Node ML library; isolation also means the Python deps (~600 MB with xgboost / scikit-learn / numpy) never bloat the Node container.
+
+**Pipeline stages** (each isolated under `ml/scorecast_ml/<stage>/`):
+
+1. **Ingest** ([ingest/football_data_uk.py](ml/scorecast_ml/ingest/football_data_uk.py)) — downloads Football-Data.co.uk CSVs (free, ~30 years of major European league history). URL pattern `https://www.football-data.co.uk/mmz4281/{season}/{fdco_code}.csv`. CSVs are cached as `ml/data/raw/{league}_{season}.csv` keyed by ScoreCast's own league code (PL etc.), NOT FDCO's (E0), so provider swaps don't move the cache. Parser uses stdlib `csv` (not pandas) so historical CSVs with ragged trailing columns (e.g. 2003/04 added mid-season odds providers) still parse cleanly — pandas's C/python engines drop those rows.
+
+2. **Reconcile** ([reconcile/team_mapping.py](ml/scorecast_ml/reconcile/team_mapping.py)) — bridges Football-Data.co.uk's short names ("Man United") to football-data.org's canonical names ("Manchester United FC") via a committed alias table at [reconcile/teams.json](ml/scorecast_ml/reconcile/teams.json). Three-tier resolution: exact alias, exact canonical, then `rapidfuzz` fallback (score ≥ 92 = auto-match + WARN; 75 ≤ score < 92 = ERROR; < 75 = ERROR with "likely a new promotion" hint). The loud-error path on unknown names is the design — silently auto-matching at low fuzzy scores is how naive pipelines drift across preseasons.
+
+3. **Elo** ([elo/engine.py](ml/scorecast_ml/elo/engine.py)) — vanilla `expected_score(r_h, r_a, hfa) = 1 / (1 + 10^((r_a - (r_h + hfa)) / 400))` + `update(r, expected, actual, K)`. Two non-vanilla knobs:
+   - `home_field_advantage` defaults to **0**, not the conventional 65. The ablation in [ml/scripts/compare_hfa.py](ml/scripts/compare_hfa.py) shows HFA is a structural no-op for tree-based models — XGBoost absorbs the constant `elo_diff` shift in split thresholds, and the home/away feature pair structure carries the actual home-advantage signal. Test-set mlogloss diff: 0.001.
+   - `promoted_team_strategy = "min_rating"` — a team appearing for the first time AFTER the first season enters at `min(current ratings)`, not the default 1500. Captures the empirical reality that promoted teams underperform the bottom of the league they're joining. `len(seasons_seen) > 1` is the threshold; on the first match of a brand-new league everyone starts at `initial_rating` since there's no "current league" to peg against.
+
+4. **Features** ([features/build.py](ml/scorecast_ml/features/build.py) + [features/form.py](ml/scorecast_ml/features/form.py)) — 11-column matrix: `elo_diff`, raw `home_elo` + `away_elo`, last-5 PPG + GF + GA for each side, `days_rest` capped at 14. **Computed AS-OF the match date, never as-of today** — `compute_form(team_history, as_of, last_n)` filters `prior = team_history[date < as_of]`, the canonical line that prevents future-information leakage. Same builder runs for training (per-match in chronological order) and inference (per upcoming fixture).
+
+5. **Train** ([train/](ml/scorecast_ml/train/)) — XGBoost `multi:softprob` with early stopping on val mlogloss (default 400 rounds, ES patience 30, `max_depth=4`, `lr=0.05`, `tree_method='hist'`, `seed=42`). Time-based train/val/test split (NEVER random — random k-fold gives flattering log-loss because the model sees its own season's future). Production split: 5-season train (2004/05 → 2008/09, 1,900 matches) + 1-season val (2009/10) + 15-season held-out test (2010/11 → 2024/25, 5,700 matches). Achieves **mlogloss 0.992 vs baseline 1.065 (-0.073)** and **accuracy 51.9% vs 44.9% (+7 pp)** across 5,700 OOS matches. Model bundles saved as `{league}_{date}.joblib` + matching `.meta.json`; `load_latest_bundle` matches strictly on the canonical filename so A/B-test artifacts (`--model-suffix hfa0` etc.) don't accidentally become production.
+
+6. **Inference + write** ([inference/](ml/scorecast_ml/inference/) + [db/writer.py](ml/scorecast_ml/db/writer.py)):
+   - 3-class output `(P_h, P_d, P_a)` → 2-class `(home_out, away_out)` via the user-confirmed redistribution `home_out = P_h + (P_h / (P_h + P_a)) · P_d`, which is algebraically `home_out = P_h / (P_h + P_a)` — proof in [normalize.py](ml/scorecast_ml/inference/normalize.py).
+   - **Round to DECIMAL(3,2)** matching the DB column, then re-balance (larger side keeps its rounded value, smaller = `1.00 - larger`) so the pair sums to exactly 1.00. Without re-balance, ~5% of writes fail the validator's `±0.01` constraint.
+   - **Sentinel-avoidance** — never emit `(0.50, 0.50)` (that's `LeagueService.upsertFixture`'s "untouched by anyone" default; emitting it would confuse the next run's skip-existing logic). Nudge to `(0.51, 0.49)` based on which side had the higher pre-rounded probability.
+   - **HTTP write** mirrors [tests/e2e/helpers/api.js](tests/e2e/helpers/api.js) `apiLogin` — POST `/api/login`, extract `sc_csrf` cookie, PUT `/api/admin/games/:id` with `X-CSRF-Token` header. Login once per run (`/api/login` is rate-limited). Per-game PUT is independently idempotent — partial failures don't block the rest.
+
+**Walk-forward correctness** — features for any match are built from data strictly dated before that match. Elo's `home_elo_pre` / `away_elo_pre` columns are the pre-match snapshot; form's `< as_of` filter does the same on the rolling-stats side. The [scripts/backtest_2526.py](ml/scripts/backtest_2526.py) backtest combines CSV history with DB 25/26 finished games and re-runs Elo across the whole chronological set — each 25/26 prediction uses only matches dated strictly before it.
+
+**Operator workflow** (Phase 1 — manual local invocation):
+
+1. Provision an `ml_pipeline` admin user (username regex at [validation/schemas.js:11](validation/schemas.js#L11) only allows `[A-Za-z0-9_]+` — **no hyphens**; older docs that say `ml-pipeline` are wrong).
+2. `cd ml && python -m venv .venv && pip install -r requirements.txt`.
+3. Copy `.env.example` → `.env`, fill `SCORECAST_ML_PASSWORD` and `SCORECAST_DB_URL` (same URL as the Node app's `DATABASE_URL`).
+4. `python -m scorecast_ml ingest --league PL --seasons 9394-2425` then `reconcile` then `train` then `predict-and-write --dry-run` then `predict-and-write`.
+
+The cron + Container Apps Job versions land in Phase 3 — see [ml/ONBOARDING.md](ml/ONBOARDING.md) for the full walkthrough + per-league onboarding playbook (La Liga / Bundesliga / Serie A / Ligue 1).
+
+**Schema additions: zero.** The pipeline writes to existing `games.homeProbability` / `games.awayProbability` columns. Audit-logged through the existing `audit_log` table via `auditMutation('admin.game.update', 'game')` already wrapping the route.
+
+**Known limits + forward path**:
+
+- **Uncalibrated** — raw XGBoost output. Overconfident at the extremes (the calibration check in `backtest_2526.py` shows ~7pp underconfidence above 70%). Phase 2 lands `CalibratedClassifierCV(method='isotonic', cv='prefit')` on the val set. This is the single biggest quality knob remaining — overconfident probs systematically underpay correct user picks.
+- **Single-league models** — one model per league, no shared pool. La Liga / Bundesliga / etc. need their own training runs. The pipeline is league-agnostic by design; per-league work is mostly extending `teams.json` and `LEAGUE_CODE_MAP`.
+- **No automated cron yet** — Phase 1 is manual. Phase 3 adds Azure Container Apps Job + GitHub Actions cron workflow mirroring the existing `infra/modules/migrate-job.bicep`.
+- **Pick semantics still winner-only** — draws leave picks at 0 pts (per the existing `result` enum). The "draw partial credit" scoring change (the math is in `ml/scorecast_ml/inference/normalize.py`'s out-of-scope note) is a separate tier touching `PickService.scorePick` + both copies of the scoring formula.
+
 ---
 
 ## 9. End-to-End Data Flows

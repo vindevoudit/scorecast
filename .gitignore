@@ -111,3 +111,14 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# ml/ pipeline (scorecast-ml — Python ML pipeline)
+ml/.venv/
+ml/**/__pycache__/
+ml/.pytest_cache/
+ml/.ruff_cache/
+ml/data/raw/
+ml/data/elo/
+ml/data/models/
+ml/.env
+ml/*.egg-info/

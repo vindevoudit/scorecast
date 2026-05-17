@@ -247,6 +247,8 @@ Highlights:
 - **[DATABASE_SETUP.md](DATABASE_SETUP.md)** — local Postgres setup walkthrough
 - **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** — how to add a new database migration
 - **[MIGRATIONS_PRIMER.md](MIGRATIONS_PRIMER.md)** — plain-language explainer of the migrations framework
+- **[ml/README.md](ml/README.md)** — Python ML pipeline (Elo + XGBoost) that produces match probabilities for upcoming fixtures
+- **[ml/ONBOARDING.md](ml/ONBOARDING.md)** — end-to-end ML walkthrough + per-league onboarding playbook (Spain, Germany, Italy, France, etc.)
 
 ---
 

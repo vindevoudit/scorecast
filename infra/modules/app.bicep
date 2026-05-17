@@ -149,6 +149,16 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/resend-api-key'
           identity: 'system'
         }
+        // Tier 4b — football-data.org v4 API key for fixture sync + live
+        // scores. Seeded into Key Vault by hand (the value is plan-tier
+        // sensitive and shouldn't be templated). Without this, the cron
+        // jobs in lib/jobs/ silently no-op and admin manual syncs return
+        // 503 with `football_api_unconfigured`.
+        {
+          name: 'football-data-api-key'
+          keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/football-data-api-key'
+          identity: 'system'
+        }
       ]
     }
     template: {
@@ -173,6 +183,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'JWT_SECRET', secretRef: 'jwt-secret' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }
             { name: 'RESEND_API_KEY', secretRef: 'resend-api-key' }
+            { name: 'FOOTBALL_DATA_API_KEY', secretRef: 'football-data-api-key' }
             { name: 'MIGRATE_ON_BOOT', value: 'false' }
           ]
           probes: [

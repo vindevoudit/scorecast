@@ -1490,6 +1490,123 @@ POST /api/login {username, password}
 
 ---
 
+### 8.16 Football Data Integration (Tier 4b)
+
+Pluggable external-football-data integration. Three layers:
+
+**Provider client** ([lib/footballApi.js](lib/footballApi.js))
+
+Wraps [football-data.org v4](https://www.football-data.org/) behind a provider-agnostic surface so a future swap to API-Football Pro / SportMonks / another vendor is a one-file change:
+
+- `getCompetitions()` — list of leagues the API key is entitled to.
+- `getFixtures({code})` — full current-season schedule for one competition (no `dateFrom`/`dateTo` filter — daily sync re-upserts everything).
+- `getLiveMatches()` — single global `GET /v4/matches?status=LIVE,IN_PLAY,PAUSED` call returns every in-progress match across every entitled competition. Caller filters to the active-league set.
+- `getMatchesByIds(ids)` — batch fetch by upstream id (caps at 50 ids per call). Used by the live-score job's reconcile pass to catch the IN_PLAY → FINISHED transition window after a match drops off the LIVE filter.
+
+Rate-limit budget on the free tier is **10 req/min, no daily cap**. The client keeps a 60-s sliding window of request timestamps and bails out early (with a 429-shaped `AppError`) when 9/10 is reached, so admin manual syncs don't starve the cron jobs. Responses are cached via [lib/cache.js](lib/cache.js) — fixture lists 1h, live-match queries 30s. The 1h fixture cache means repeated admin "Sync" clicks within an hour read from cache; cache is per-process and cleared on restart.
+
+The free tier does NOT expose `minute` / `injuryTime`. The client surfaces what it can — `score.winner` (HOME_TEAM / AWAY_TEAM / DRAW), `score.halfTime` presence, `score.duration` (REGULAR / EXTRA_TIME / PENALTY_SHOOTOUT) — and the frontend estimates the match minute from those plus wall-clock-since-kickoff.
+
+**Status / result mapping** ([lib/fixtureStatus.js](lib/fixtureStatus.js))
+
+Single source of truth for two derivations. **Both** the manual/daily sync path (`LeagueService.upsertFixture`) and the live-score path (`GameService.applyLiveUpdate`) import from here so they can never drift.
+
+- `mapUpstreamStatus(raw)` → local `games.status` enum. Upstream `LIVE`/`IN_PLAY`/`PAUSED`/`EXTRA_TIME`/`PENALTY_SHOOTOUT`/`SUSPENDED` all collapse to `'in-progress'`; `FINISHED`/`AWARDED` to `'finished'`; `POSTPONED` and `CANCELLED` stay distinct.
+- `deriveResultFromFixture(fixture, localStatus)` → `'home'` / `'away'` / `null`. Prefers upstream `winner` (handles penalty-shootout knockouts where fullTime is a draw but a winner exists); falls back to score comparison. Draws stay `null` because the existing `result` enum is `'home' | 'away'` only — the UI distinguishes them via `status='finished'`.
+
+**Jobs** ([lib/scheduler.js](lib/scheduler.js) + [lib/jobs/](lib/jobs/))
+
+`lib/scheduler.js` is a thin node-cron wrapper that:
+
+1. Registers handlers at module load (`scheduler.register(name, cronExpression, handler)`).
+2. Acquires a Postgres advisory lock (`pg_try_advisory_lock(crc32(jobName))`) before running each tick. The lock id is deterministic across deploys so a multi-replica deploy (post Tier 10.4) only runs any given tick once.
+3. Logs failures and continues — never crashes the host process.
+4. No-ops entirely when `NODE_ENV=test` (Playwright doesn't want surprise jobs running).
+
+Two jobs ship today, both skipped silently when `FOOTBALL_DATA_API_KEY` is unset:
+
+- **[syncFixtures.js](lib/jobs/syncFixtures.js)** — daily `0 3 * * *` UTC. Iterates active leagues (`active=true` on `leagues` table), calls `LeagueService.syncFixtures(leagueId)` for each. One league failure does not stop the rest.
+- **[syncLiveScores.js](lib/jobs/syncLiveScores.js)** — every 60 s. Two phases:
+  1. Single global `getLiveMatches()` call, filtered to active-league `competition.code`s. Each match routed through `GameService.applyLiveUpdate(localGame, apiMatch)`.
+  2. **Reconcile pass**: find local games where `status='in-progress'` whose `sourceId` did **not** appear in the LIVE response — these likely transitioned to FINISHED between ticks (and so fell off the LIVE filter). Batch-fetch via `getMatchesByIds(ids)` and apply the final state. Without this, a finished match would stay locally `status='in-progress'` indefinitely.
+
+Override defaults via env: `FIXTURE_SYNC_CRON='*/2 * * * *'` for dev rapid iteration; `LIVE_SCORE_SYNC_CRON='*/30 * * * * *'` for 30-s polling (note: 7-field cron format).
+
+**Live update transactional flow** ([services/GameService.js](services/GameService.js) `applyLiveUpdate`)
+
+Per the Tier 5.3 invariant, the write is transactional and the fan-out runs OUTSIDE the transaction so a rollback never produces ghost notifications:
+
+```
+applyLiveUpdate(localGame, apiMatch):
+  newStatus       = mapUpstreamStatus(apiMatch.status)
+  newResult       = deriveResultFromFixture(apiMatch, newStatus)  // only if result was null
+  changed?        = status / homeScore / awayScore / result / halfTimeReached / phase differ
+  if !changed → return early (60-s polls don't churn the DB)
+
+  BEGIN
+    update localGame { status, homeScore, awayScore, result, halfTimeReached, phase }
+  COMMIT
+
+  if transitioned to finished (result null → set):
+    for each pick on this game:
+      NotificationService.notify(pick.userId, 'pick-scored', ...)
+      BadgeService.evaluateBadges(pick.userId)
+    LeaderboardService.invalidate('all')
+```
+
+Result is only DERIVED if `localGame.result === null` — admin-entered results are never clobbered by upstream updates.
+
+**Live-minute display** (frontend, [src/utils/time.js](src/utils/time.js))
+
+Computed in `matchMinute(kickoff, {halfTimeReached, phase})`. Persisted signals on the `games` row:
+
+- `halfTimeReached BOOLEAN` — flips to true once upstream populates `score.halfTime`. Monotonic in `applyLiveUpdate` (never reverts).
+- `phase VARCHAR(20)` — `regular` / `extra-time` / `penalty-shootout`, mirroring upstream `score.duration`.
+
+Display rules (priority order):
+
+1. `phase === 'penalty-shootout'` → `"PEN"`.
+2. `phase === 'extra-time'` → `"ET"`.
+3. `halfTimeReached && raw elapsed in [46, 60]` → `"HT"` (catches the halftime window).
+4. `!halfTimeReached && raw elapsed > 45` → `"45'"` (don't claim 2nd-half minutes without evidence HT happened).
+5. Post-HT (`halfTimeReached && raw elapsed > 60`): displayed minute shifted down by 15 to compensate for the wall-clock HT break.
+6. `displayed > 90` → `"90'+"` (regular-time stoppage).
+7. Otherwise `"{n}'"`.
+
+`useMatchMinute(kickoff, isLive, {halfTimeReached, phase})` ticks every 30 s while the match is live, no-ops otherwise.
+
+**Schema additions**
+
+| Table              | New columns                                                                                                                                                            | Notes                                                                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `leagues` (new)    | `id`, `name`, `sourceProvider`, `sourceLeagueId`, `country`, `logoUrl`, `active`, timestamps                                                                           | Unique on `(sourceProvider, sourceLeagueId)`. Seeded with PL (active) + WC (inactive); admin can add more via UI                                                              |
+| `seasons` (new)    | `id`, `leagueId`, `year`, `startsAt`, `endsAt`, `current`, timestamps                                                                                                  | Unique on `(leagueId, year)`. Created on demand by `LeagueService.ensureSeason` during sync                                                                                   |
+| `games` (extended) | `leagueId` (FK SET NULL → tightened NOT NULL after backfill), `seasonId`, `sourceId`, `status` ENUM, `homeScore`, `awayScore`, `kickoffTz`, `halfTimeReached`, `phase` | Partial unique index `(leagueId, sourceId) WHERE sourceId IS NOT NULL` so hand-entered games don't collide on NULL. `halfTimeReached` + `phase` feed the live-minute estimate |
+| `audit_log` (new)  | `id`, `actorUserId` (SET NULL on user delete), `action`, `entityType`, `entityId`, `before` JSONB, `after` JSONB, `requestId`, `statusCode`, `createdAt`               | Index on `(createdAt DESC)`. Payloads truncated at 4KB by `AuditLogService.record`                                                                                            |
+
+**Audit log** ([middleware/auditLog.js](middleware/auditLog.js) + [services/AuditLogService.js](services/AuditLogService.js))
+
+`auditMutation(action, entityType)` middleware wraps every mutating `/api/admin/*` route. Records via `res.on('finish')` so the captured status code is the real outcome (200, 400, 409, 500…). The middleware never throws back into the request lifecycle — an audit-log outage cannot block a real admin action.
+
+- Action strings follow `admin.<entity>.<verb>` (e.g. `admin.game.delete`, `admin.league.sync`, `admin.user.bulk`).
+- `before` is currently always null (middleware doesn't fetch entity pre-state). `after` is the captured request body for non-DELETE methods; for DELETE it's null and the body lands in `before`.
+- Payloads >4KB are replaced with `{_truncated: true, _bytes, preview: 'first 512 chars'}`.
+- Failed-auth attempts (401/403 thrown before `auditMutation` runs) are NOT audited; this is by design — `authMiddleware` rejects pre-application-layer noise.
+- `GET /api/admin/audit-log?limit=&offset=` reads paginated, capped at 200/page. The admin UI ([src/components/admin/AuditLog.jsx](src/components/admin/AuditLog.jsx)) shows newest-first with collapsible payload previews.
+
+**League / season picker** (anon-safe)
+
+Public endpoint `GET /api/leagues` returns active leagues with their `seasons[]` (id, year, current). Used by [src/components/GameFiltersBar.jsx](src/components/GameFiltersBar.jsx) which:
+
+1. Fetches the leagues list once on mount.
+2. Reads URL state (`?league=PL&season=2026`) — uses the `sourceLeagueId` code, not internal UUID, so links are shareable + stable across DB rebuilds.
+3. Resolves code → UUID against the leagues list and calls `applyGameFilters({leagueId, seasonId})` on `DataContext`.
+4. Pushes URL state on change via `history.replaceState` — no router, no navigation.
+
+`GET /api/games` accepts `leagueId` + `seasonId` query params (UUID-shape guard silently drops malformed values). `GameService.listGames({leagueId, seasonId})` applies them as a Sequelize where-clause. `DataContext.gameFilters` holds the active filter so `refreshGames` (called after picks, admin mutations) preserves it.
+
+---
+
 ## 9. End-to-End Data Flows
 
 ### 9.1 Login → Dashboard Load
@@ -1896,23 +2013,21 @@ Container Apps issues + binds a free Azure managed cert via HTTP-01 ACME validat
 
 ## 12. Known Limitations & Technical Debt
 
-| Area                         | Issue                                                                                                                                                                                                                                                                    | Tier                      |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
-| Tests                        | Playwright E2E covers 8 specs (pick/result, group lifecycle, comment+reaction, auth-security, friend lifecycle, notifications+badges, leaderboard scoring across odds, admin CRUD/bulk/cascade). No unit / integration tests below the E2E layer yet                     | future                    |
-| External data                | No football API integration; admin enters games manually                                                                                                                                                                                                                 | 4b (deferred)             |
-| Live scores                  | No live score display; no auto-poll                                                                                                                                                                                                                                      | 4b (deferred)             |
-| Leagues / seasons            | Single global game pool; no `league` / `season` fields                                                                                                                                                                                                                   | 4b (deferred)             |
-| Pick types                   | Only winner picks; no spread / over-under / score prediction                                                                                                                                                                                                             | 4b (deferred)             |
-| Streaks                      | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits after 4b adds season ordering)                                                                                                                                                             | 4b                        |
-| Real-time                    | No WebSocket; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time                                                                                                                                                     | 7                         |
-| Audit log                    | No record of admin actions (single or bulk)                                                                                                                                                                                                                              | 4b.6                      |
-| Notification spam            | Bulk-setResult can produce many notifications in one request; no batching/dedup                                                                                                                                                                                          | 7                         |
-| Cache scope                  | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so they survive a restart, but the rate-limit + lockout counters are in-memory. Today the app runs single-process so this is fine | Tier 10.4 (Redis backend) |
-| Server-side log shipping     | pino → stdout → Container Apps → Log Analytics workspace (Tier 9.6). Application Insights is provisioned but its SDK isn't wired into app code yet. Sentry covers errors but not access logs                                                                             | Tier 10.6                 |
-| Health / readiness probes    | `/healthz` exists (Tier 9.4) and is used by Container Apps liveness + readiness probes — but it doesn't ping the DB or Redis. A real readiness check (`/readyz` with DB ping) is still pending                                                                           | Tier 10.1                 |
-| Metrics                      | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters                                                                                                                                                                        | Tier 10.3                 |
-| Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset today                                                   | future                    |
-| Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code                                                                                                                   | future                    |
+| Area                         | Issue                                                                                                                                                                                                                                                                                                                                                                                  | Tier                      |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| Tests                        | Playwright E2E covers 8 specs (pick/result, group lifecycle, comment+reaction, auth-security, friend lifecycle, notifications+badges, leaderboard scoring across odds, admin CRUD/bulk/cascade). No unit / integration tests below the E2E layer yet. Tier 4b additions (league sync, live-score job, audit log, league picker) verified by ad-hoc smokes — no Playwright coverage yet | future                    |
+| Pick types                   | Only winner picks; no spread / over-under / score prediction. Deferred from Tier 4b after live-score UX bedded in                                                                                                                                                                                                                                                                      | future (post-4b)          |
+| Match minute is approximate  | football-data.org free tier doesn't expose `minute` / `injuryTime`. Client estimates from kickoff + halfTime/phase signals. Soft by ~5 min around halftime. Swap to paid provider via [lib/footballApi.js](lib/footballApi.js) for an authoritative timer                                                                                                                              | future (provider swap)    |
+| Streaks                      | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits when streak badges become a real product ask)                                                                                                                                                                                                                                                            | future                    |
+| Audit log before-state       | Middleware records `after` payload only; `before` for updates/deletes would need per-entity pre-fetch hooks. Auth-failed admin attempts (401/403 thrown before middleware runs) are not audited                                                                                                                                                                                        | future                    |
+| Real-time                    | No WebSocket; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time. Live-score updates land via the 60-s cron + 30-s frontend poll                                                                                                                                                                                                   | 7                         |
+| Notification spam            | Bulk-setResult can produce many notifications in one request; no batching/dedup. Live-score auto-finalization also fan-outs per-pick on result transition                                                                                                                                                                                                                              | 7                         |
+| Cache scope                  | `leaderboardCache` is process-local; a multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so they survive a restart, but the rate-limit + lockout counters are in-memory. Today the app runs single-process so this is fine                                                                                                               | Tier 10.4 (Redis backend) |
+| Server-side log shipping     | pino → stdout → Container Apps → Log Analytics workspace (Tier 9.6). Application Insights is provisioned but its SDK isn't wired into app code yet. Sentry covers errors but not access logs                                                                                                                                                                                           | Tier 10.6                 |
+| Health / readiness probes    | `/healthz` exists (Tier 9.4) and is used by Container Apps liveness + readiness probes — but it doesn't ping the DB or Redis. A real readiness check (`/readyz` with DB ping) is still pending                                                                                                                                                                                         | Tier 10.1                 |
+| Metrics                      | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters                                                                                                                                                                                                                                                                                      | Tier 10.3                 |
+| Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset today                                                                                                                                                                 | future                    |
+| Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code                                                                                                                                                                                                                                 | future                    |
 
 ---
 
@@ -1926,7 +2041,7 @@ Summary:
 - ✅ **Tier 2** — UX completions (outcome display, full leaderboards, my-picks, sections, countdown, skeletons, confirm, mobile, a11y).
 - ✅ **Tier 3** — Social/engagement (profiles, badges, friends, public groups, comments, notifications).
 - ✅ **Tier 4a** — Admin UI for game CRUD + user moderation.
-- 🟡 **Tier 4b** — Game-data quality remainder: external API integration, live scores, leagues/seasons, additional pick types, streaks, audit log. **All deferred** (requires API-Football key + schema additions).
+- ✅ **Tier 4b** — External football data + leagues/seasons + audit log. Shipped 2026-05-16/17 across 3 chunks: football-data.org v4 client + leagues/seasons schema + manual sync + LeagueManager admin tab (Chunk 1); node-cron scheduler with Postgres advisory locks + daily fixture sync + 60-s live-score poll with reconcile pass + live-minute estimate from kickoff + halfTime/phase signals + live-score game card (Chunk 2); audit-log middleware + paginated admin view + public `/api/leagues` + league/season picker on the games view + `games.leagueId NOT NULL` tightening (Chunk 3). Picks remain winner-only (multi-kind deferred). Cost: $0/mo via the free tier. See §8.16.
 - ✅ **Tier 5 (core)** — Ops & reliability: migrations framework (5.1), leaderboard caching (5.2), transactional cascades (5.3), structured logging (5.4), N+1 elimination (5.7), HTTP compression (5.6).
 - ✅ **Tier 5.4b** — Frontend error reporting: React `ErrorBoundary`, `POST /api/client-errors`, window listeners + reporter, `X-Request-Id` capture, Sentry SDK opt-in. See §6.7.
 - ✅ **Tier 5.5** — Playwright E2E. Three original specs in [tests/e2e/](tests/e2e/): `pick-and-result` (register → pick → admin set result → leaderboard updates), `group-lifecycle` (create → invite → accept → transfer → delete), `comment-reaction` (post → edit → react → delete). Deterministic seeder per run; CI job in [.github/workflows/ci.yml](.github/workflows/ci.yml) with cached Chromium and trace upload on failure. Rate limiters share a `skipInTest` predicate (gated on `NODE_ENV=test`) so the suite doesn't 429 itself off shared 127.0.0.1 traffic.

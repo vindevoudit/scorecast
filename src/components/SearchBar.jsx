@@ -9,6 +9,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
 import { useData } from '../hooks/useData';
+import { displayTeamName } from '../utils/teamNames';
 
 function formatGameDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
@@ -169,7 +170,7 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                           }}
                           className={itemBtn}
                         >
-                          {g.homeTeam} vs {g.awayTeam}
+                          {displayTeamName(g.homeTeam)} vs {displayTeamName(g.awayTeam)}
                           <span className="ml-2 text-xs text-fg-subtle">
                             · {formatGameDate(g.date)}
                           </span>

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import EmptyState from './EmptyState';
 import { Badge } from './ui';
 import { pickStatus, scorePick } from '../utils/scoring';
+import { displayTeamName } from '../utils/teamNames';
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -87,7 +88,9 @@ function PicksHistory({ picks, games }) {
           />
         ) : (
           filtered.map(({ pick, game, status, points }) => {
-            const chosenTeam = pick.choice === 'home' ? game.homeTeam : game.awayTeam;
+            const chosenTeam = displayTeamName(
+              pick.choice === 'home' ? game.homeTeam : game.awayTeam,
+            );
             return (
               <div
                 key={pick.id || `${pick.userId}-${pick.gameId}`}
@@ -99,7 +102,8 @@ function PicksHistory({ picks, games }) {
                       {formatDate(game.date)}
                     </p>
                     <p className="mt-2 truncate text-base font-semibold text-fg">
-                      {game.homeTeam} <span className="text-fg-subtle">vs</span> {game.awayTeam}
+                      {displayTeamName(game.homeTeam)} <span className="text-fg-subtle">vs</span>{' '}
+                      {displayTeamName(game.awayTeam)}
                     </p>
                     <p className="mt-1 text-sm text-fg-muted">
                       Your pick: <span className="text-fg">{chosenTeam}</span>

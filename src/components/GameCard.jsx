@@ -1,4 +1,5 @@
 import { scorePick } from '../utils/scoring';
+import { displayTeamName } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
 import { usePicks } from '../hooks/usePicks';
@@ -148,7 +149,7 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
     <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4">
       <div className={teamBoxClass('home')}>
         <p className="break-words text-base font-bold leading-tight text-fg sm:text-lg">
-          {game.homeTeam}
+          {displayTeamName(game.homeTeam)}
         </p>
         <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider">
           {secondaryLine('home')}
@@ -196,7 +197,7 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
 
       <div className={teamBoxClass('away', true)}>
         <p className="break-words text-base font-bold leading-tight text-fg sm:text-lg">
-          {game.awayTeam}
+          {displayTeamName(game.awayTeam)}
         </p>
         <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider">
           {secondaryLine('away')}
@@ -250,8 +251,15 @@ function GameCard({ game }) {
   const existingChoice = existingPick?.choice || null;
   const existingPickId = existingPick?.id || null;
 
+  // "Your pick: X" uses the short display name to match the scoreboard.
+  // The pick BUTTONS still render full names (they're an action label —
+  // see the Pick {game.homeTeam} buttons below).
   const pickedTeam =
-    existingChoice === 'home' ? game.homeTeam : existingChoice === 'away' ? game.awayTeam : null;
+    existingChoice === 'home'
+      ? displayTeamName(game.homeTeam)
+      : existingChoice === 'away'
+        ? displayTeamName(game.awayTeam)
+        : null;
   const pointsIfWon =
     game.result && existingChoice ? scorePick({ choice: existingChoice }, game) : 0;
   const potentialPoints = existingChoice

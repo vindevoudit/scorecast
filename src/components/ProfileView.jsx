@@ -9,6 +9,7 @@ import TwoFactorSetup from './TwoFactorSetup';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
+import { displayTeamName } from '../utils/teamNames';
 import { Badge, Button, Input, Radio, Textarea } from './ui';
 
 const VISIBILITY_OPTIONS = [
@@ -279,7 +280,7 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
           ) : (
             profile.recentPicks.map((pick) => {
               const status = recentPickStatus(pick);
-              const team = pick.choice === 'home' ? pick.homeTeam : pick.awayTeam;
+              const team = displayTeamName(pick.choice === 'home' ? pick.homeTeam : pick.awayTeam);
               return (
                 <div
                   key={pick.gameId}
@@ -287,7 +288,8 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm text-fg">
-                      {pick.homeTeam} <span className="text-fg-subtle">vs</span> {pick.awayTeam}
+                      {displayTeamName(pick.homeTeam)} <span className="text-fg-subtle">vs</span>{' '}
+                      {displayTeamName(pick.awayTeam)}
                     </p>
                     <p className="text-xs text-fg-subtle">
                       Picked {team} · {formatDate(pick.date)}

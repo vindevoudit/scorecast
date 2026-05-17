@@ -43,6 +43,14 @@ param customDomainCertId string = ''
 @description('Provision an Azure DNS zone for customDomain. Default false because DNS is managed in Cloudflare today. Flip to true only if migrating DNS to Azure.')
 param useAzureDns bool = false
 
+@description('Password for the ml_pipeline service-account admin user. Required on every reapply (same pattern as pgAdminPassword). Stored in Key Vault as ml-pipeline-password and consumed by the ML Container Apps Job.')
+@secure()
+@minLength(8)
+param mlPipelinePassword string
+
+@description('Public URL of the running ScoreCast app, used by the ML pipeline to log in and PUT probabilities. Defaults to https://{customDomain} when customDomain is set, else falls back to the Container App FQDN at runtime via the env wired in app.bicep.')
+param mlApiBaseUrl string = empty(customDomain) ? '' : 'https://${customDomain}'
+
 // Stable suffix derived from the resource group id so naming is idempotent
 // across deployments but globally unique across Azure.
 var nameSuffix = toLower(uniqueString(resourceGroup().id))
@@ -140,6 +148,30 @@ module migrateJob 'modules/migrate-job.bicep' = {
   }
 }
 
+// scorecast-ml weekly probability pipeline. Uses its OWN imageTag param
+// because the ML image is built + pushed by a separate workflow
+// (.github/workflows/ml-deploy.yml) against a different ACR repo
+// (`scorecast-ml`). The Node-app `imageTag` param above tracks the Node
+// image; reapplies don't need to know the current ML tag — the Job
+// resource just keeps whatever image CD last pointed it at.
+module mlJob 'modules/ml-job.bicep' = {
+  name: 'mlJob'
+  params: {
+    location: location
+    appName: appName
+    tags: tags
+    imageTag: 'placeholder'
+    containerAppsEnvId: app.outputs.environmentId
+    acrLoginServer: registry.outputs.loginServer
+    acrName: registry.outputs.name
+    keyVaultName: secrets.outputs.keyVaultName
+    mlPipelinePassword: mlPipelinePassword
+    // Fall back to the Container App FQDN when customDomain isn't set —
+    // first-deploy / pre-DNS-cutover scenarios.
+    apiBaseUrl: !empty(mlApiBaseUrl) ? mlApiBaseUrl : 'https://${app.outputs.containerAppFqdn}'
+  }
+}
+
 // ============================================================================
 // Outputs — handy for CD pipelines + manual inspection
 // ============================================================================
@@ -151,6 +183,8 @@ output keyVaultName string = secrets.outputs.keyVaultName
 output containerAppName string = app.outputs.containerAppName
 output containerAppFqdn string = app.outputs.containerAppFqdn
 output migrateJobName string = migrateJob.outputs.jobName
+output mlJobName string = mlJob.outputs.jobName
+output mlImageRepoName string = mlJob.outputs.imageRepoName
 output postgresServerName string = db.outputs.serverName
 output dnsZoneName string = dns.?outputs.zoneName ?? ''
 output dnsNameServers array = dns.?outputs.nameServers ?? []

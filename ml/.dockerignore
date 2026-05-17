@@ -1,0 +1,42 @@
+# scorecast-ml docker build excludes.
+#
+# Build context is the `ml/` dir. Keep this lean so docker context uploads
+# stay fast and the runtime image stays small.
+
+# Local env (Container Apps passes env via secrets refs)
+.env
+.env.*
+!.env.example
+
+# Local virtualenv (deps install fresh in the image)
+.venv
+venv
+
+# Python caches
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+
+# Test code — not needed at runtime
+tests
+
+# Regenerated at build time / at runtime
+data/elo
+data/models
+
+# Docs that aren't needed in the runtime image
+ONBOARDING.md
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Git metadata (build context shouldn't carry it)
+.git
+.gitignore

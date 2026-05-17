@@ -89,6 +89,8 @@ ml/
 ├── requirements.txt          # pip deps
 ├── .env.example              # runtime config template
 ├── .python-version           # pyenv pin (3.14)
+├── Dockerfile                # 3-stage image (base + train + runtime); Phase 3
+├── .dockerignore             # excludes from the docker build context
 ├── README.md                 # this file
 ├── ONBOARDING.md             # ML deep-dive + per-league onboarding playbook
 ├── scorecast_ml/             # importable package
@@ -106,10 +108,14 @@ ml/
 │   ├── demo_predict_one.py   # single-fixture prediction with diagnostics
 │   ├── compare_hfa.py        # HFA=65 vs HFA=0 ablation comparison
 │   └── backtest_2526.py      # walk-forward 25/26 season backtest from DB
-├── data/                     # gitignored
-│   ├── raw/                  # cached CSVs
-│   ├── elo/                  # Parquet snapshots
-│   └── models/               # trained model bundles
+├── data/                     # mostly gitignored
+│   ├── raw/                  # cached CSVs — *.csv ARE committed (~3MB,
+│   │                         # public-domain) so Docker builds + onboarding
+│   │                         # work without re-downloading. Scratch files
+│   │                         # under here stay ignored.
+│   ├── elo/                  # Parquet snapshots (gitignored)
+│   └── models/               # trained model bundles (gitignored — rebuilt
+│                             # inside the Docker train stage)
 └── tests/                    # pytest smoke tests
 ```
 
@@ -151,12 +157,124 @@ The smoke-test trail lives in the audit log: search
 for the 18 remaining 2025/26 PL fixtures (visible in the audit log with
 `after = {"homeProbability": …, "awayProbability": …}`).
 
+## Phase 3 — Deployment (shipped)
+
+Production runs as a scheduled Azure Container Apps Job. Architecture in
+one paragraph: GitHub Actions builds the image from `ml/**` changes
+([.github/workflows/ml-deploy.yml](../.github/workflows/ml-deploy.yml))
+and pushes to ACR repo `scorecast-ml`. A Container Apps Job
+(`scorecast-ml-job`, provisioned by
+[infra/modules/ml-job.bicep](../infra/modules/ml-job.bicep)) fires the
+image every Thursday at 02:30 UTC and runs the baked-in CMD
+(`python -m scorecast_ml predict-and-write --league PL --horizon-days 7`).
+The Job's system-assigned identity pulls `database-url` and
+`ml-pipeline-password` from Key Vault. Same managed identity, same
+Container Apps environment, same Log Analytics workspace as the Node app.
+
+### Container image
+
+The image is built fully reproducibly from git via three Dockerfile stages
+(see [Dockerfile](Dockerfile)):
+
+1. **base** — `python:3.14-slim` + `libgomp1` (xgboost OpenMP runtime) +
+   `tini` + pip install of `requirements.txt`.
+2. **train** — runs `python -m scorecast_ml train --train-from-season 0910
+--train-last-season 2324 --val-season 2425` against the committed CSV
+   corpus under [data/raw/](data/raw/). Writes the bundle to
+   `/app/data/models/PL_<date>.joblib`. Deterministic via the
+   `seed=42` baked into [train/model.py](scorecast_ml/train/model.py).
+3. **runtime** — non-root (uid 1001), copies code + CSVs + the stage-2
+   model bundle. ENTRYPOINT is `tini`; CMD is `predict-and-write`.
+
+The CSV corpus lives in git (`ml/data/raw/PL_*.csv`, ~3 MB) so the build
+needs no external network beyond pip. Football-Data.co.uk data is public
+domain — the negation rule at [.gitignore:120-124](../.gitignore#L120-L124)
+allows CSVs while blocking scratch files.
+
+### Cron schedule
+
+`30 2 * * 4` (Thursdays 02:30 UTC, standard 5-field cron, UTC). PL fixtures
+cluster Friday–Sunday, so Thursday pre-dawn is the natural pre-gameweek
+slot. The Node app's daily fixture sync runs at 03:00 UTC; ML deliberately
+fires 30 min earlier off yesterday's sync so the two jobs never overlap.
+
+Override the schedule via the `cronExpression` param on
+[infra/modules/ml-job.bicep](../infra/modules/ml-job.bicep). Manual ad-hoc
+runs work on a Schedule-triggered job too:
+
+```bash
+az containerapp job start \
+  --name scorecast-ml-job \
+  --resource-group scorecast-prod
+```
+
+### Initial deploy (one-time)
+
+The `ml_pipeline` admin user must already exist in the running app (see
+[Provisioning the service-account user](#provisioning-the-service-account-user)
+above). Then apply the infra with the new `mlPipelinePassword` param:
+
+```powershell
+# Discover the current Container App certificate id (needed for the
+# customDomain reapply per Tier 9-followup).
+az containerapp env certificate list `
+  --name scorecast-env-p3aaelev7xp52 `
+  --resource-group scorecast-prod `
+  --query "[?properties.subjectName=='bantryx.com'].id" -o tsv
+
+# Apply infra — 4 params, all required for the reapply to stay idempotent.
+az deployment group create `
+  -g scorecast-prod `
+  -f infra/main.bicep `
+  -p pgAdminPassword=<live postgres admin pw> `
+  -p mlPipelinePassword=<ml_pipeline service-account pw> `
+  -p customDomain=bantryx.com `
+  -p customDomainCertId=<id from previous command>
+```
+
+That creates the `scorecast-ml-job` Container Apps Job + writes
+`ml-pipeline-password` to Key Vault + grants the Job's managed identity
+`AcrPull` + `Key Vault Secrets User`. The Job initially runs the
+helloworld placeholder image; the first push to `main` touching `ml/**`
+triggers [.github/workflows/ml-deploy.yml](../.github/workflows/ml-deploy.yml)
+which builds + pushes the real image and points the Job at it.
+
+### Rotating the ml_pipeline password
+
+1. Sign in to ScoreCast → AdminPanel → UserManager → reset password.
+2. Update `ml/.env` locally so manual runs keep working.
+3. Reapply Bicep (same command as above) with the new
+   `mlPipelinePassword`. Key Vault gets the new value; the next Job
+   execution picks it up automatically.
+
+### Retraining
+
+The model is baked into the image at build time, so retraining = rebuild.
+Two paths:
+
+- **Casual retrain on latest CSV / DB data** — push a no-op commit
+  touching `ml/**` (e.g. bump a comment in `ml/scorecast_ml/__init__.py`).
+  CD rebuilds with current code + current CSV corpus + current data;
+  Job picks up the new image on its next fire.
+- **Train locally + smoke-test, then push** — run
+  `python -m scorecast_ml train --league PL` locally to verify metrics
+  look sane before pushing the change that triggers a rebuild.
+
+Both paths produce a deterministic model (`seed=42`). If you want a
+genuinely _new_ dataset (e.g. one more season of CSVs), drop the new
+CSV into `data/raw/` and `git add` it — CD picks it up automatically.
+
+### Cost
+
+$0/mo of new spend. Container Apps Jobs in the Consumption profile bill
+only for actual run time (typical Job run: ~60 s × 0.5 vCPU × 1 GiB →
+sub-cent per week). ACR storage for ML images sits inside the existing
+ACR's free tier headroom.
+
 ## Future phases
 
-- **Phase 2** — Isotonic calibration ✅ (shipped). MOV multiplier,
-  multi-league expansion (see [ONBOARDING.md](ONBOARDING.md) for the
-  per-league playbook), real CI, pytest suite expansion still to come.
-- **Phase 3** — Azure Container Apps Job + scheduled GitHub Actions cron.
-- **Phase 4** — Optuna HPO, head-to-head features, model-performance admin
-  tab, the draw-partial-credit scoring change (separate tier — needs
-  changes in [services/PickService.js](../services/PickService.js)).
+- **Phase 4** — MOV multiplier, head-to-head features, Optuna HPO,
+  model-performance admin tab, the draw-partial-credit scoring change
+  (separate tier — needs changes in
+  [services/PickService.js](../services/PickService.js)), multi-league
+  expansion via [ONBOARDING.md](ONBOARDING.md).

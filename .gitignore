@@ -117,7 +117,11 @@ ml/.venv/
 ml/**/__pycache__/
 ml/.pytest_cache/
 ml/.ruff_cache/
-ml/data/raw/
+# Allow CSV training corpus into git so Docker builds + onboarding work
+# without re-downloading. Football-Data.co.uk data is public-domain. Block
+# everything else under data/raw/ (no scratch files, no logs).
+ml/data/raw/*
+!ml/data/raw/*.csv
 ml/data/elo/
 ml/data/models/
 ml/.env

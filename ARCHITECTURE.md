@@ -1633,14 +1633,22 @@ Standalone Python project under [ml/](ml/) that produces `(homeProbability, away
 
 **Walk-forward correctness** — features for any match are built from data strictly dated before that match. Elo's `home_elo_pre` / `away_elo_pre` columns are the pre-match snapshot; form's `< as_of` filter does the same on the rolling-stats side. The [scripts/backtest_2526.py](ml/scripts/backtest_2526.py) backtest combines CSV history with DB 25/26 finished games and re-runs Elo across the whole chronological set — each 25/26 prediction uses only matches dated strictly before it.
 
-**Operator workflow** (Phase 1 — manual local invocation):
+**Operator workflow — local invocation** (still the right path for dry-runs, ablations, and one-off retrains):
 
 1. Provision an `ml_pipeline` admin user (username regex at [validation/schemas.js:11](validation/schemas.js#L11) only allows `[A-Za-z0-9_]+` — **no hyphens**; older docs that say `ml-pipeline` are wrong).
 2. `cd ml && python -m venv .venv && pip install -r requirements.txt`.
 3. Copy `.env.example` → `.env`, fill `SCORECAST_ML_PASSWORD` and `SCORECAST_DB_URL` (same URL as the Node app's `DATABASE_URL`).
 4. `python -m scorecast_ml ingest --league PL --seasons 9394-2425` then `reconcile` then `train` then `predict-and-write --dry-run` then `predict-and-write`.
 
-The cron + Container Apps Job versions land in Phase 3 — see [ml/ONBOARDING.md](ml/ONBOARDING.md) for the full walkthrough + per-league onboarding playbook (La Liga / Bundesliga / Serie A / Ligue 1).
+See [ml/ONBOARDING.md](ml/ONBOARDING.md) for the full walkthrough + per-league onboarding playbook (La Liga / Bundesliga / Serie A / Ligue 1).
+
+**Production deployment (Phase 3, shipped)** — Azure Container Apps Job on a weekly cron. Three components:
+
+- **Image**: `ml/Dockerfile` is a 3-stage build (base → train → runtime). Stage 2 runs `python -m scorecast_ml train` against the committed CSV corpus at `ml/data/raw/*.csv` (~3 MB, public-domain Football-Data.co.uk data — the gitignore at [.gitignore:120-124](.gitignore#L120-L124) allows `*.csv` while blocking scratch files) and produces a deterministic (`seed=42`) `PL_<date>.joblib`. Stage 3 is a non-root (uid 1001) runtime layer with code + CSVs + the freshly-trained bundle; ENTRYPOINT is `tini`, CMD is `predict-and-write`. Built + pushed to ACR repo `scorecast-ml` (separate from the Node app's `scorecast` repo) by [.github/workflows/ml-deploy.yml](.github/workflows/ml-deploy.yml) on `ml/**` changes.
+- **Job**: `scorecast-ml-job`, provisioned by [infra/modules/ml-job.bicep](infra/modules/ml-job.bicep). `triggerType: Schedule`, cron `30 2 * * 4` (Thursdays 02:30 UTC). System-assigned managed identity with `AcrPull` + `Key Vault Secrets User`. Reads `database-url` + `ml-pipeline-password` from Key Vault; the `ml-pipeline-password` secret is provisioned by the same module from the `mlPipelinePassword` Bicep param (required on every reapply, same pattern as `pgAdminPassword`).
+- **Cron offset**: Thursday 02:30 UTC is the natural pre-gameweek slot (PL fixtures cluster Friday–Sunday) and sits 30 min ahead of the Node app's daily fixture sync at 03:00 UTC so the two jobs never overlap. Predict-and-write skips games whose probabilities aren't the `(0.50, 0.50)` sentinel, so re-runs are idempotent — re-firing within the same gameweek is safe.
+
+Manual ad-hoc runs work on a Schedule-triggered job: `az containerapp job start --name scorecast-ml-job --resource-group scorecast-prod`. The Azure portal's Job execution history surfaces logs against the shared Log Analytics workspace.
 
 **Schema additions: zero.** The pipeline writes to existing `games.homeProbability` / `games.awayProbability` columns. Audit-logged through the existing `audit_log` table via `auditMutation('admin.game.update', 'game')` already wrapping the route.
 
@@ -1648,7 +1656,7 @@ The cron + Container Apps Job versions land in Phase 3 — see [ml/ONBOARDING.md
 
 - **Isotonic calibration** ✅ shipped (Phase 2). Per-class `IsotonicRegression` fit on val, attached to `ModelBundle.calibrators`. Applied automatically inside `predict_proba`. Live production model trains 15 seasons (2009/10 → 2023/24), validates on 2024/25, calibration measured on the in-progress 25/26 season via `scripts/backtest_2526.py`. 70-80% bucket overconfidence pulled from -7pp to -2pp deviation; the model now reaches >80% confidence on top calls (didn't pre-calibration).
 - **Single-league models** — one model per league, no shared pool. La Liga / Bundesliga / etc. need their own training runs. The pipeline is league-agnostic by design; per-league work is mostly extending `teams.json` and `LEAGUE_CODE_MAP`.
-- **No automated cron yet** — Phase 1 is manual. Phase 3 adds Azure Container Apps Job + GitHub Actions cron workflow mirroring the existing `infra/modules/migrate-job.bicep`.
+- **Automated cron** ✅ shipped (Phase 3). Container Apps Job runs Thursdays 02:30 UTC. See the "Production deployment" subsection above for the image / Job / cron triple. Manual local runs and ad-hoc `az containerapp job start` triggers remain available.
 - **Pick semantics still winner-only** — draws leave picks at 0 pts (per the existing `result` enum). The "draw partial credit" scoring change (the math is in `ml/scorecast_ml/inference/normalize.py`'s out-of-scope note) is a separate tier touching `PickService.scorePick` + both copies of the scoring formula.
 
 ---
@@ -1971,46 +1979,49 @@ ScoreCast runs on Azure (`eastus2`) at https://bantryx.com. The whole stack is p
 
 #### Resource topology
 
-| Resource                 | Name                           | Role                                                                                                        | Cost/mo             |
-| ------------------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------- | ------------------- |
-| Resource Group           | `scorecast-prod`               | Container for everything                                                                                    | —                   |
-| Container Apps env       | `scorecast-env-p3aaelev7xp52`  | Consumption plan; hosts the app + the migration Job                                                         | $0 idle             |
-| Container App            | `scorecast-app`                | The Node/Express server; ingress on `:3000` → `:443`; scale 0→3                                             | $0 idle, ~$1/1k req |
-| Container Apps Job       | `scorecast-migrate`            | One-shot `npm run db:migrate` triggered by CD before each roll-out                                          | $0 idle             |
-| Container Registry       | `scorecastacrp3aaelev7xp52`    | Stores `scorecast:<sha>` images. Basic SKU, admin disabled, AcrPull via managed identity                    | ~$5                 |
-| Postgres Flexible Server | `scorecast-pg-p3aaelev7xp52`   | B1ms (1 vCPU, 2 GB), Postgres 16, 32 GB storage, 7-day backups, public + firewall (`AllowAllAzureServices`) | ~$17                |
-| Key Vault                | `scorecast-kv-p3aaelev7xp`     | RBAC mode; holds `jwt-secret`, `database-url`, `postgres-admin-password`, `resend-api-key`                  | ~$0.10              |
-| Log Analytics workspace  | `scorecast-logs-p3aaelev7xp52` | Container Apps stdout sink; 1 GB/day cap                                                                    | ~$2                 |
-| Application Insights     | `scorecast-appi-p3aaelev7xp52` | APM (currently unwired in app code — env var present, SDK not yet imported)                                 | ~$2                 |
-| Azure AD app             | `scorecast-github-cd`          | Federated identity for GitHub OIDC; no client secret                                                        | —                   |
-| DNS                      | (Cloudflare, `bantryx.com`)    | Apex CNAME flattened to Container Apps FQDN, `www` proxied for redirect rule                                | $13/yr domain       |
+| Resource                 | Name                           | Role                                                                                                                               | Cost/mo             |
+| ------------------------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| Resource Group           | `scorecast-prod`               | Container for everything                                                                                                           | —                   |
+| Container Apps env       | `scorecast-env-p3aaelev7xp52`  | Consumption plan; hosts the app + the migration Job                                                                                | $0 idle             |
+| Container App            | `scorecast-app`                | The Node/Express server; ingress on `:3000` → `:443`; scale 0→3                                                                    | $0 idle, ~$1/1k req |
+| Container Apps Job       | `scorecast-migrate`            | One-shot `npm run db:migrate` triggered by CD before each roll-out                                                                 | $0 idle             |
+| Container Apps Job       | `scorecast-ml-job`             | Weekly probability pipeline (Thursdays 02:30 UTC); runs the `scorecast-ml` image's baked-in predict-and-write CMD                  | $0 idle, ~$0.01/run |
+| Container Registry       | `scorecastacrp3aaelev7xp52`    | Stores `scorecast:<sha>` (Node) + `scorecast-ml:<sha>` (Python ML) images. Basic SKU, admin disabled, AcrPull via managed identity | ~$5                 |
+| Postgres Flexible Server | `scorecast-pg-p3aaelev7xp52`   | B1ms (1 vCPU, 2 GB), Postgres 16, 32 GB storage, 7-day backups, public + firewall (`AllowAllAzureServices`)                        | ~$17                |
+| Key Vault                | `scorecast-kv-p3aaelev7xp`     | RBAC mode; holds `jwt-secret`, `database-url`, `postgres-admin-password`, `resend-api-key`, `ml-pipeline-password`                 | ~$0.10              |
+| Log Analytics workspace  | `scorecast-logs-p3aaelev7xp52` | Container Apps stdout sink; 1 GB/day cap                                                                                           | ~$2                 |
+| Application Insights     | `scorecast-appi-p3aaelev7xp52` | APM (currently unwired in app code — env var present, SDK not yet imported)                                                        | ~$2                 |
+| Azure AD app             | `scorecast-github-cd`          | Federated identity for GitHub OIDC; no client secret                                                                               | —                   |
+| DNS                      | (Cloudflare, `bantryx.com`)    | Apex CNAME flattened to Container Apps FQDN, `www` proxied for redirect rule                                                       | $13/yr domain       |
 
 Idle total: **~$30–35/mo**.
 
 #### Bicep modules ([infra/](infra/))
 
-| File                        | What it provisions                                                                                                                                                                                                                                                                              |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main.bicep`                | Orchestrator; takes `location`, `appName`, `imageTag`, `pgAdminPassword` (`@secure`), `customDomain`                                                                                                                                                                                            |
-| `modules/logs.bicep`        | Log Analytics workspace + Application Insights linked to it                                                                                                                                                                                                                                     |
-| `modules/registry.bicep`    | ACR Basic, admin disabled, anonymous pull disabled                                                                                                                                                                                                                                              |
-| `modules/secrets.bicep`     | Key Vault, RBAC mode, soft-delete 7d                                                                                                                                                                                                                                                            |
-| `modules/db.bicep`          | Postgres Flex B1ms; writes `database-url` (with `?sslmode=require`) and `postgres-admin-password` into Key Vault; firewall rule for Azure services                                                                                                                                              |
-| `modules/app.bicep`         | Container Apps env + main app; system-assigned managed identity + RBAC for AcrPull on the registry + Key Vault Secrets User on the vault; secret references via `keyVaultUrl`; liveness + readiness probes on `/healthz`; `publicAppUrl` defaults to the Azure FQDN until `customDomain` is set |
-| `modules/migrate-job.bicep` | Container Apps Job with `command: ['npm', 'run', 'db:migrate']`; same managed-identity RBAC pattern as the app                                                                                                                                                                                  |
-| `modules/dns.bicep`         | Conditional Azure DNS zone (only when `customDomain` is non-empty). Currently unused for production because Cloudflare handles `bantryx.com`                                                                                                                                                    |
+| File                        | What it provisions                                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `main.bicep`                | Orchestrator; takes `location`, `appName`, `imageTag`, `pgAdminPassword` (`@secure`), `customDomain`                                                                                                                                                                                                                                       |
+| `modules/logs.bicep`        | Log Analytics workspace + Application Insights linked to it                                                                                                                                                                                                                                                                                |
+| `modules/registry.bicep`    | ACR Basic, admin disabled, anonymous pull disabled                                                                                                                                                                                                                                                                                         |
+| `modules/secrets.bicep`     | Key Vault, RBAC mode, soft-delete 7d                                                                                                                                                                                                                                                                                                       |
+| `modules/db.bicep`          | Postgres Flex B1ms; writes `database-url` (with `?sslmode=require`) and `postgres-admin-password` into Key Vault; firewall rule for Azure services                                                                                                                                                                                         |
+| `modules/app.bicep`         | Container Apps env + main app; system-assigned managed identity + RBAC for AcrPull on the registry + Key Vault Secrets User on the vault; secret references via `keyVaultUrl`; liveness + readiness probes on `/healthz`; `publicAppUrl` defaults to the Azure FQDN until `customDomain` is set                                            |
+| `modules/migrate-job.bicep` | Container Apps Job with `command: ['npm', 'run', 'db:migrate']`; same managed-identity RBAC pattern as the app                                                                                                                                                                                                                             |
+| `modules/ml-job.bicep`      | Container Apps Job for the weekly ML probability pipeline. `triggerType: Schedule` with cron `30 2 * * 4` (Thursdays 02:30 UTC). Provisions the `ml-pipeline-password` Key Vault secret from the `mlPipelinePassword` Bicep param; consumes that + `database-url` via managed-identity secret refs. Image lives in ACR repo `scorecast-ml` |
+| `modules/dns.bicep`         | Conditional Azure DNS zone (only when `customDomain` is non-empty). Currently unused for production because Cloudflare handles `bantryx.com`                                                                                                                                                                                               |
 
 Resource names use `uniqueString(resourceGroup().id)` so re-deploys are idempotent and globally unique.
 
 #### Secret resolution path
 
 ```
-Container App (system-assigned managed identity)
-  └─► Key Vault (RBAC role: Key Vault Secrets User)
+Container App + Container Apps Jobs (each has its own system-assigned managed identity)
+  └─► Key Vault (RBAC role: Key Vault Secrets User on each identity)
         ├─ jwt-secret             ◄── seeded once via `az keyvault secret set`
         ├─ database-url           ◄── written by db.bicep at deploy time
         ├─ resend-api-key         ◄── placeholder; replace with real key when ready
-        └─ postgres-admin-password ◄── written by db.bicep (kept for break-glass access)
+        ├─ postgres-admin-password ◄── written by db.bicep (kept for break-glass access)
+        └─ ml-pipeline-password    ◄── written by ml-job.bicep from the `mlPipelinePassword` Bicep param
 ```
 
 The Container App's `secrets:` block references each Key Vault entry via `keyVaultUrl` + `identity: 'system'`. At container start, Container Apps resolves the references, sets the values as environment variables (e.g. `JWT_SECRET`, `DATABASE_URL`), and starts the process. The app reads them as plain `process.env.X` — no Key Vault SDK call in app code.

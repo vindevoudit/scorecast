@@ -251,9 +251,6 @@ function GameCard({ game }) {
   const existingChoice = existingPick?.choice || null;
   const existingPickId = existingPick?.id || null;
 
-  // "Your pick: X" uses the short display name to match the scoreboard.
-  // The pick BUTTONS still render full names (they're an action label —
-  // see the Pick {game.homeTeam} buttons below).
   const pickedTeam =
     existingChoice === 'home'
       ? displayTeamName(game.homeTeam)
@@ -302,9 +299,9 @@ function GameCard({ game }) {
                 if (!gate('make a pick')) return;
                 submitPick(game.id, 'home');
               }}
-              aria-label={`Pick ${game.homeTeam} to win`}
+              aria-label={`Pick ${displayTeamName(game.homeTeam)} to win`}
             >
-              Pick {game.homeTeam}
+              Pick {displayTeamName(game.homeTeam)}
             </button>
             <button
               type="button"
@@ -313,9 +310,9 @@ function GameCard({ game }) {
                 if (!gate('make a pick')) return;
                 submitPick(game.id, 'away');
               }}
-              aria-label={`Pick ${game.awayTeam} to win`}
+              aria-label={`Pick ${displayTeamName(game.awayTeam)} to win`}
             >
-              Pick {game.awayTeam}
+              Pick {displayTeamName(game.awayTeam)}
             </button>
           </div>
           {existingPickId ? (

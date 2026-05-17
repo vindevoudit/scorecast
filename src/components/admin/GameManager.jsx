@@ -8,6 +8,7 @@ import { Button, Input } from '../ui';
 import { useRequest } from '../../hooks/useRequest';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useData } from '../../hooks/useData';
+import { displayTeamName } from '../../utils/teamNames';
 
 const EMPTY_FORM = {
   homeTeam: '',
@@ -104,7 +105,8 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-fg">
-              {game.homeTeam} <span className="text-fg-subtle">vs</span> {game.awayTeam}
+              {displayTeamName(game.homeTeam)} <span className="text-fg-subtle">vs</span>{' '}
+              {displayTeamName(game.awayTeam)}
             </p>
             <p className="text-xs text-fg-muted">
               {new Date(game.date).toLocaleString()} ·{' '}
@@ -117,7 +119,7 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
               ) : null}
               {game.result ? (
                 <span className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-success">
-                  Result: {game.result === 'home' ? game.homeTeam : game.awayTeam}
+                  Result: {displayTeamName(game.result === 'home' ? game.homeTeam : game.awayTeam)}
                 </span>
               ) : null}
             </p>
@@ -501,7 +503,7 @@ function GameManager() {
                 type="checkbox"
                 checked={selectedIds.has(game.id)}
                 onChange={() => toggleOne(game.id)}
-                aria-label={`Select ${game.homeTeam} vs ${game.awayTeam}`}
+                aria-label={`Select ${displayTeamName(game.homeTeam)} vs ${displayTeamName(game.awayTeam)}`}
                 className="mt-5 shrink-0"
               />
               <div className="min-w-0 flex-1">
@@ -524,7 +526,7 @@ function GameManager() {
         title="Delete game?"
         description={
           pendingDelete
-            ? `${pendingDelete.homeTeam} vs ${pendingDelete.awayTeam} and all picks/comments on it will be removed.`
+            ? `${displayTeamName(pendingDelete.homeTeam)} vs ${displayTeamName(pendingDelete.awayTeam)} and all picks/comments on it will be removed.`
             : ''
         }
         confirmLabel="Delete"

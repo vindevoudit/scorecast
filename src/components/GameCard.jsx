@@ -1,14 +1,10 @@
-import { scorePick } from '../utils/scoring';
+import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scoring';
 import { displayTeamName } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { Badge } from './ui';
-
-function formatProbability(value) {
-  return `${Math.round(value * 100)}%`;
-}
 
 function formatDate(dateText) {
   const date = new Date(dateText);
@@ -131,7 +127,7 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
   const winningSide = finished && game.result ? game.result : null;
 
   const teamBoxClass = (side, alignRight = false) => {
-    const base = `min-w-0 rounded-2xl px-3 py-2.5 transition ${alignRight ? 'text-right' : ''}`;
+    const base = `min-w-0 rounded-2xl px-2 py-2.5 transition sm:px-3 ${alignRight ? 'text-right' : ''}`;
     if (winningSide === side) return `${base} ring-1 ring-success/40 bg-success/5`;
     if (winningSide && winningSide !== side) return `${base} opacity-60`;
     return base;
@@ -141,19 +137,20 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
     if (winningSide === side) {
       return <span className="text-success">Winner</span>;
     }
-    const prob = side === 'home' ? game.homeProbability : game.awayProbability;
-    return <span className="text-fg-muted">{formatProbability(prob)}</span>;
+    return null;
   };
 
   return (
     <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4">
       <div className={teamBoxClass('home')}>
-        <p className="break-words text-base font-bold leading-tight text-fg sm:text-lg">
+        <p className="break-words text-sm font-bold leading-tight text-fg [text-wrap:balance] sm:text-lg">
           {displayTeamName(game.homeTeam)}
         </p>
-        <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider">
-          {secondaryLine('home')}
-        </p>
+        {secondaryLine('home') ? (
+          <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider">
+            {secondaryLine('home')}
+          </p>
+        ) : null}
       </div>
 
       <div className="px-1 text-center sm:px-3">
@@ -185,7 +182,7 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
           </p>
         ) : (
           <>
-            <p className="text-2xl font-bold tabular-nums tracking-tight text-fg sm:text-3xl">
+            <p className="text-lg font-bold tabular-nums tracking-tight text-fg sm:text-3xl">
               {formatKickoffTime(game.date)}
             </p>
             <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-fg-subtle">
@@ -196,12 +193,42 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
       </div>
 
       <div className={teamBoxClass('away', true)}>
-        <p className="break-words text-base font-bold leading-tight text-fg sm:text-lg">
+        <p className="break-words text-sm font-bold leading-tight text-fg [text-wrap:balance] sm:text-lg">
           {displayTeamName(game.awayTeam)}
         </p>
-        <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider">
-          {secondaryLine('away')}
-        </p>
+        {secondaryLine('away') ? (
+          <p className="mt-1.5 text-xs font-semibold uppercase tracking-wider">
+            {secondaryLine('away')}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function PayoutMatrix({ game }) {
+  const homeWin = expectedWinPoints('home', game);
+  const awayWin = expectedWinPoints('away', game);
+  const homeDraw = expectedDrawPoints('home', game);
+  const awayDraw = expectedDrawPoints('away', game);
+  // `+x` / `+y` are visible placeholders until the draw-scoring tier writes
+  // game.drawProbability. They resolve to real numbers automatically.
+  const homeDrawDisplay = homeDraw === null ? '+x' : `+${homeDraw}`;
+  const awayDrawDisplay = awayDraw === null ? '+y' : `+${awayDraw}`;
+
+  const labelClass =
+    'px-2 text-center text-[11px] font-semibold uppercase tracking-[0.25em] text-fg-muted';
+  const valueClass = 'text-base font-semibold tabular-nums text-fg sm:text-lg';
+
+  return (
+    <div className="mt-5 rounded-2xl bg-overlay/70 p-3">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4">
+        <p className={valueClass}>+{homeWin}</p>
+        <p className={labelClass}>Win</p>
+        <p className={`${valueClass} text-right`}>+{awayWin}</p>
+        <p className={`${valueClass} mt-1`}>{homeDrawDisplay}</p>
+        <p className={`${labelClass} mt-1`}>Draw</p>
+        <p className={`${valueClass} mt-1 text-right`}>{awayDrawDisplay}</p>
       </div>
     </div>
   );
@@ -288,6 +315,8 @@ function GameCard({ game }) {
         pickedTeam={pickedTeam}
       />
       <ScoreboardBody game={game} live={live} finished={finished} isHalted={isHalted} />
+
+      {upcoming ? <PayoutMatrix game={game} /> : null}
 
       {upcoming ? (
         <>

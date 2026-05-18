@@ -186,10 +186,10 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
           </p>
         ) : (
           <>
-            <p className="text-lg font-bold tabular-nums tracking-tight text-fg sm:text-3xl">
+            <p className="text-sm font-bold tabular-nums tracking-tight text-fg sm:text-3xl">
               {formatKickoffTime(game.date)}
             </p>
-            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-fg-subtle">
+            <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-fg-subtle sm:text-[10px] sm:tracking-[0.3em]">
               Kickoff
             </p>
           </>

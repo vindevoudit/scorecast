@@ -333,12 +333,16 @@ router.post('/auth/2fa/verify', validate(totpVerifySchema), async (req, res) => 
     } else if (typeof recoveryCode === 'string') {
       const normalized = recoveryCode.trim().toUpperCase();
       const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
-      for (let i = 0; i < codes.length; i++) {
-        if (await bcrypt.compare(normalized, codes[i])) {
-          valid = true;
-          usedRecoveryIndex = i;
-          break;
-        }
+      // Always run every bcrypt.compare regardless of an early match — an
+      // early-exit loop leaks the matched index via response time. The
+      // index itself is information-free (codes are equivalent) but it
+      // shouldn't be observable. Parallelize via Promise.all so total
+      // latency stays at one bcrypt rather than N.
+      const matches = await Promise.all(codes.map((hash) => bcrypt.compare(normalized, hash)));
+      const matchIndex = matches.indexOf(true);
+      if (matchIndex >= 0) {
+        valid = true;
+        usedRecoveryIndex = matchIndex;
       }
     }
     if (!valid) return res.status(400).json({ error: 'Code did not match' });

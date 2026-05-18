@@ -189,12 +189,11 @@ router.post('/me/2fa/disable', authMiddleware, validate(totpVerifySchema), async
     } else if (typeof recoveryCode === 'string') {
       const normalized = recoveryCode.trim().toUpperCase();
       const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
-      for (const hash of codes) {
-        if (await bcrypt.compare(normalized, hash)) {
-          valid = true;
-          break;
-        }
-      }
+      // Run every bcrypt.compare in parallel rather than early-exit so the
+      // total latency doesn't leak whether the match was first or last in
+      // the list (mirrors /auth/2fa/verify).
+      const matches = await Promise.all(codes.map((hash) => bcrypt.compare(normalized, hash)));
+      if (matches.some(Boolean)) valid = true;
     }
     if (!valid) return res.status(400).json({ error: 'Code did not match' });
     user.totpSecret = null;

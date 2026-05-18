@@ -5,7 +5,7 @@
 // badge evaluations + cache invalidation per the Tier 5.2/5.3 invariants:
 // notify() runs OUTSIDE any wrapping transaction; cache invalidate runs
 // AFTER the transaction commits.
-const { Game, Pick, Comment, sequelize } = require('../models');
+const { Game, League, Pick, Comment, sequelize } = require('../models');
 const errors = require('../lib/errors');
 const logger = require('../lib/logger');
 const { scorePick } = require('../lib/scoring');
@@ -22,6 +22,23 @@ async function listGames({ leagueId, seasonId } = {}) {
 }
 
 async function createGame(attrs) {
+  // games.leagueId is NOT NULL (Tier 4b Chunk 3) but the admin form
+  // doesn't surface a league picker. Default to the Legacy / Imported
+  // league created by migration 20260518000007 so manual admin entries
+  // still land somewhere identifiable. If the legacy row is missing
+  // (shouldn't happen post-migration, but guard anyway), surface a clear
+  // 400 instead of letting Postgres reject with a cryptic NOT NULL.
+  if (!attrs.leagueId) {
+    const legacy = await League.findOne({
+      where: { sourceProvider: 'legacy', sourceLeagueId: 'LEGACY' },
+    });
+    if (!legacy) {
+      throw errors.badRequest(
+        'No league specified and the Legacy / Imported league is missing — create or pick a league first',
+      );
+    }
+    attrs = { ...attrs, leagueId: legacy.id };
+  }
   return Game.create(attrs);
 }
 

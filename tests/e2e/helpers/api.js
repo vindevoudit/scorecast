@@ -137,7 +137,11 @@ async function clearPicksAndBadges(userIds) {
 
 async function clearGameResults(gameIds) {
   const { Game } = getModels();
-  await Game.update({ result: null }, { where: { id: gameIds } });
+  // Tier 4b Chunk 2 linked status to result: setResult flips both. The
+  // reset must do the same or the games stay in `status: 'finished'` and
+  // useGames buckets them as completed, hiding the pick button from any
+  // later spec that needs to pick on them.
+  await Game.update({ result: null, status: 'scheduled' }, { where: { id: gameIds } });
 }
 
 async function clearNotifications(userIds) {

@@ -101,7 +101,13 @@ function ScoreboardHeader({
         ) : null}
         {upcoming ? (
           <span className="rounded-full bg-overlay/60 px-3 py-1 text-[11px] font-medium normal-case tracking-normal text-fg">
-            Picks lock in {countdown}
+            {pickedTeam ? (
+              <>
+                Your pick: <span className="text-fg">{pickedTeam}</span> · locks in {countdown}
+              </>
+            ) : (
+              <>Picks lock in {countdown}</>
+            )}
           </span>
         ) : null}
         {isHalted ? (

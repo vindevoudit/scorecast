@@ -13,8 +13,8 @@ process.env.NODE_ENV = process.env.NODE_ENV || 'test';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
 
 const bcrypt = require('bcryptjs');
-const { sequelize, User, Game } = require('../../../models');
-const { FIXTURE_USERS, FIXTURE_GAMES } = require('./data');
+const { sequelize, User, Game, League, Season } = require('../../../models');
+const { FIXTURE_USERS, FIXTURE_GAMES, LEAGUE_ID, SEASON_ID } = require('./data');
 
 async function truncateAll() {
   const [tables] = await sequelize.query(`
@@ -31,6 +31,38 @@ async function seedFixtures() {
   await truncateAll();
 
   const now = new Date();
+
+  // Tier 4b Chunk 3 tightened games.leagueId to NOT NULL. truncateAll wipes
+  // the migration-seeded leagues, so reinstate one (plus its season) with the
+  // stable IDs from data.js so the game fixtures can reference them. Also
+  // reinstate the Legacy / Imported league with the same shape migration
+  // 20260518000007 creates so GameService.createGame's leagueId default works
+  // (admin-panel.spec.js's game-CRUD test creates games without a league).
+  await League.create({
+    id: LEAGUE_ID,
+    name: 'E2E Test League',
+    sourceProvider: 'legacy',
+    sourceLeagueId: 'E2E',
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await League.create({
+    name: 'Legacy / Imported',
+    sourceProvider: 'legacy',
+    sourceLeagueId: 'LEGACY',
+    active: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await Season.create({
+    id: SEASON_ID,
+    leagueId: LEAGUE_ID,
+    year: now.getUTCFullYear(),
+    current: true,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   // Pre-hash so we can bulkCreate without per-row hooks (faster + avoids
   // the rehash-already-hashed guard path).

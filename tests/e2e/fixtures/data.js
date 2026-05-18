@@ -4,6 +4,13 @@
 // reference rows directly without lookups. Passwords are stored plain here and
 // hashed in seed.js before insertion.
 
+// Tier 4b Chunk 3 tightened games.leagueId to NOT NULL. The seed inserts a
+// dedicated "E2E Test League" with these stable IDs and points every fixture
+// game at it; truncating wipes the migration-seeded Legacy league between
+// runs, so the seed reinstates one of its own.
+const LEAGUE_ID = '22222222-0000-4000-8000-000000000001';
+const SEASON_ID = '33333333-0000-4000-8000-000000000001';
+
 const USERS = {
   admin: {
     id: '00000000-0000-4000-8000-000000000001',
@@ -44,6 +51,8 @@ const GAMES = {
     homeProbability: 0.5,
     awayProbability: 0.5,
     result: null,
+    leagueId: LEAGUE_ID,
+    seasonId: SEASON_ID,
   },
   eagles: {
     id: '11111111-0000-4000-8000-000000000002',
@@ -53,6 +62,8 @@ const GAMES = {
     homeProbability: 0.6,
     awayProbability: 0.4,
     result: null,
+    leagueId: LEAGUE_ID,
+    seasonId: SEASON_ID,
   },
   wolves: {
     id: '11111111-0000-4000-8000-000000000003',
@@ -62,12 +73,16 @@ const GAMES = {
     homeProbability: 0.4,
     awayProbability: 0.6,
     result: null,
+    leagueId: LEAGUE_ID,
+    seasonId: SEASON_ID,
   },
 };
 
 module.exports = {
   USERS,
   GAMES,
+  LEAGUE_ID,
+  SEASON_ID,
   FIXTURE_USERS: Object.values(USERS),
   FIXTURE_GAMES: Object.values(GAMES),
 };

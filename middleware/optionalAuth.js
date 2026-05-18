@@ -16,7 +16,7 @@ function optionalAuth(req, _res, next) {
     return next();
   }
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    req.user = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
   } catch {
     req.user = null;
   }

@@ -14,7 +14,10 @@ function authMiddleware(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    // Pin HS256 — jsonwebtoken@9 already rejects `alg: none` by default, but
+    // pinning the algorithm protects against future regressions and any
+    // hypothetical confusion if JWT_SECRET resembled a public key.
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     req.user = payload;
     next();
   } catch (error) {

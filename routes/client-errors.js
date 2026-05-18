@@ -18,7 +18,7 @@ router.post('/client-errors', clientErrorLimiter, validate(clientErrorSchema), (
   try {
     const token = req.cookies?.[ACCESS_COOKIE];
     if (token) {
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
       userId = payload?.id || null;
     }
   } catch (_) {

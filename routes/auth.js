@@ -167,43 +167,53 @@ router.post(
   validate(forgotPasswordSchema),
   async (req, res) => {
     const { email: emailAddress } = req.body;
+    let user = null;
     try {
-      const user = await User.findOne({
+      user = await User.findOne({
         where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
       });
-      if (user && user.emailVerifiedAt) {
-        const raw = generateRawToken();
-        await PasswordResetToken.create({
-          userId: user.id,
-          tokenHash: hashToken(raw),
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-        });
-        const link = `${PUBLIC_APP_URL}/?resetToken=${raw}`;
-        email
-          .send({
+    } catch (error) {
+      req.log.error({ err: error.message }, 'forgot-password lookup failed');
+    }
+
+    // Always 204 immediately. Token creation + email send + verification
+    // re-send all happen asynchronously so the response timing is dominated
+    // only by the email lookup (which runs in all three branches) — without
+    // this, the verified branch's PasswordResetToken.create gives away a
+    // timing oracle for "exists + verified" vs the other two cases, defeating
+    // the 204-everywhere anti-enumeration property.
+    res.status(204).end();
+
+    if (!user) return;
+
+    setImmediate(async () => {
+      try {
+        if (user.emailVerifiedAt) {
+          const raw = generateRawToken();
+          await PasswordResetToken.create({
+            userId: user.id,
+            tokenHash: hashToken(raw),
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+          });
+          const link = `${PUBLIC_APP_URL}/?resetToken=${raw}`;
+          await email.send({
             to: user.email,
             subject: 'Reset your Bantryx password',
             text: `Open this link to reset your password:\n${link}\n\nThe link expires in 15 minutes. If you didn't request this, ignore this email.`,
             html: `<p>Open this link to reset your password:</p><p><a href="${link}">${link}</a></p><p>The link expires in 15 minutes. If you didn't request this, ignore this email.</p>`,
-          })
-          .catch((err) => {
-            req.log.warn({ err: err.message, userId: user.id }, 'failed to send reset email');
           });
-      } else if (user && !user.emailVerifiedAt) {
-        // Unverified user hit forgot-password — resend the verify email with
-        // password-reset copy so they aren't stuck in a dead-end. Same 204
-        // response keeps the anti-enumeration property.
-        sendVerificationEmail(user, { reason: 'password-reset' }).catch((err) => {
-          req.log.warn(
-            { err: err.message, userId: user.id },
-            'failed to resend verification email on forgot-password',
-          );
-        });
+        } else {
+          // Unverified user hit forgot-password — resend the verify email
+          // with password-reset copy so they aren't stuck in a dead-end.
+          await sendVerificationEmail(user, { reason: 'password-reset' });
+        }
+      } catch (err) {
+        req.log.warn(
+          { err: err.message, userId: user.id },
+          'forgot-password background work failed',
+        );
       }
-    } catch (error) {
-      req.log.error({ err: error.message }, 'forgot-password failed');
-    }
-    res.status(204).end();
+    });
   },
 );
 
@@ -298,7 +308,7 @@ router.post('/auth/2fa/verify', validate(totpVerifySchema), async (req, res) => 
   }
   let payload;
   try {
-    payload = jwt.verify(challengeToken, JWT_SECRET);
+    payload = jwt.verify(challengeToken, JWT_SECRET, { algorithms: ['HS256'] });
     if (payload?.type !== '2fa-pending') throw new Error('not a challenge');
   } catch (_) {
     res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });

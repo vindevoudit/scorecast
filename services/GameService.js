@@ -5,7 +5,8 @@
 // badge evaluations + cache invalidation per the Tier 5.2/5.3 invariants:
 // notify() runs OUTSIDE any wrapping transaction; cache invalidate runs
 // AFTER the transaction commits.
-const { Game, League, Pick, Comment, sequelize } = require('../models');
+const { Op } = require('sequelize');
+const { Game, League, Pick, Comment, Notification, sequelize } = require('../models');
 const errors = require('../lib/errors');
 const logger = require('../lib/logger');
 const { scorePick } = require('../lib/scoring');
@@ -13,6 +14,13 @@ const { mapUpstreamStatus, deriveResultFromFixture } = require('../lib/fixtureSt
 const NotificationService = require('./NotificationService');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
+
+// Two-layer noise gate threshold. DECIMAL(3,2) stores at 0.01 resolution;
+// anything below 0.005 rounds to the same value (and so the same rounded
+// payout). Using 0.01 means "the smallest representable probability shift
+// that could possibly move a rounded payout."
+const PROBABILITY_DELTA_EPSILON = 0.01;
+const ODDS_SHIFT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 async function listGames({ leagueId, seasonId } = {}) {
   const where = {};
@@ -45,9 +53,86 @@ async function createGame(attrs) {
 async function updateGame(gameId, patch) {
   const game = await Game.findByPk(gameId);
   if (!game) throw errors.notFound('Game not found');
+
+  // Capture BEFORE assign. Sequelize returns DECIMAL columns as strings —
+  // parseFloat normalizes so the epsilon comparison below isn't string-vs-
+  // number after the save round-trip.
+  const prev = {
+    home: parseFloat(game.homeProbability),
+    draw: parseFloat(game.drawProbability),
+    away: parseFloat(game.awayProbability),
+  };
+
   Object.assign(game, patch);
   await game.save();
+
+  const next = {
+    home: parseFloat(game.homeProbability),
+    draw: parseFloat(game.drawProbability),
+    away: parseFloat(game.awayProbability),
+  };
+  const maxDelta = Math.max(
+    Math.abs(prev.home - next.home),
+    Math.abs(prev.draw - next.draw),
+    Math.abs(prev.away - next.away),
+  );
+  // Game-level Δ gate runs BEFORE the pick query — otherwise daily ML
+  // rewrites with no real shift would walk every pick row for nothing.
+  // Skip when the game already has a result — the score is settled, so a
+  // "tap to revisit" notification would be meaningless. Awaited so a rapid
+  // second admin edit's cooldown check sees the first fan-out's writes (no
+  // race), with .catch() preserving the invariant that a fan-out failure
+  // must not break the admin's save.
+  if (maxDelta >= PROBABILITY_DELTA_EPSILON && !game.result) {
+    await notifyOddsShiftFanOut(game, next).catch((err) => {
+      logger.error({ err, gameId: game.id }, 'updateGame: odds-shift fan-out failed');
+    });
+  }
   return game;
+}
+
+// Per-pick fan-out for `odds-shifted` notifications. The two-layer noise
+// gate's first layer (game-level Δ ≥ 0.01) is checked by the caller; this
+// function applies layer two — per-pick "rounded payout actually changed"
+// gate — plus a 24h cooldown per (userId, gameId) to keep daily ML drifts
+// from producing a notification storm. Only fires for picks WITH non-null
+// snapshots (legacy NULL picks have no locked value to compare against and
+// are silently skipped). Draw partial-credit shifts are intentionally NOT
+// notified — pick.choice is home/away only, draw payouts are bounded by
+// drawProbability and noisy. Errors are swallowed: an outage in the fan-out
+// must never block the admin's save() / live-score commit.
+async function notifyOddsShiftFanOut(game, next) {
+  const picks = await Pick.findAll({ where: { gameId: game.id } });
+  if (picks.length === 0) return;
+
+  const sinceCutoff = new Date(Date.now() - ODDS_SHIFT_COOLDOWN_MS);
+  const link = `/games/${game.id}`;
+
+  for (const pick of picks) {
+    if (pick.pickedHomeProbability == null) continue; // legacy: silent skip
+
+    const lockedProb = parseFloat(
+      pick.choice === 'home' ? pick.pickedHomeProbability : pick.pickedAwayProbability,
+    );
+    const currentProb = pick.choice === 'home' ? next.home : next.away;
+    const lockedPayout = Math.round((1 - lockedProb) * 100);
+    const currentPayout = Math.round((1 - currentProb) * 100);
+    if (lockedPayout === currentPayout) continue; // sub-rounding noise
+
+    const recent = await Notification.findOne({
+      where: {
+        userId: pick.userId,
+        type: 'odds-shifted',
+        link,
+        createdAt: { [Op.gte]: sinceCutoff },
+      },
+    });
+    if (recent) continue;
+
+    const title = `Odds shifted for ${game.homeTeam} vs ${game.awayTeam}`;
+    const body = `Your locked pick pays +${lockedPayout}; current odds would pay +${currentPayout}. Tap to revisit.`;
+    NotificationService.notify(pick.userId, 'odds-shifted', title, body, link).catch(() => {});
+  }
 }
 
 async function cascadeDelete(game, { transaction } = {}) {

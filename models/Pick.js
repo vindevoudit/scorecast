@@ -21,6 +21,22 @@ module.exports = (sequelize) => {
         type: DataTypes.ENUM('home', 'away'),
         allowNull: false,
       },
+      // Pick-time probability snapshot. PickService.createPick writes the
+      // three together; lib/scoring.js prefers them over game.* when
+      // pickedHomeProbability is non-null (all-or-nothing read). Legacy
+      // pre-tier picks have NULL → fallback to live game.* values.
+      pickedHomeProbability: {
+        type: DataTypes.DECIMAL(3, 2),
+        allowNull: true,
+      },
+      pickedDrawProbability: {
+        type: DataTypes.DECIMAL(3, 2),
+        allowNull: true,
+      },
+      pickedAwayProbability: {
+        type: DataTypes.DECIMAL(3, 2),
+        allowNull: true,
+      },
       submittedAt: {
         type: DataTypes.DATE,
         allowNull: false,

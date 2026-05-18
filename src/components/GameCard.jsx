@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scoring';
 import { displayTeamName } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
+import ConfirmModal from './ConfirmModal';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { Badge } from './ui';
@@ -244,7 +246,15 @@ function PayoutMatrix({ game }) {
   );
 }
 
-function LockedPickChip({ live, pickedTeam, existingChoice, game, pointsIfWon, potentialPoints }) {
+function LockedPickChip({
+  live,
+  pickedTeam,
+  existingChoice,
+  game,
+  pointsIfWon,
+  potentialPoints,
+  oddsShiftedHint,
+}) {
   let suffix = null;
   if (live) {
     suffix = `locked · ${potentialPoints} pts on the line`;
@@ -266,6 +276,11 @@ function LockedPickChip({ live, pickedTeam, existingChoice, game, pointsIfWon, p
           <span className="text-fg-muted">Your pick: </span>
           <span className="text-fg">{pickedTeam}</span>
           <span className="text-fg-subtle"> · {suffix}</span>
+          {oddsShiftedHint ? (
+            <div className="mt-1 text-[10px] font-medium normal-case tracking-normal text-fg-muted">
+              {oddsShiftedHint}
+            </div>
+          ) : null}
         </>
       ) : (
         <span className="text-fg-subtle">No pick made</span>
@@ -297,11 +312,39 @@ function GameCard({ game }) {
       : existingChoice === 'away'
         ? displayTeamName(game.awayTeam)
         : null;
-  const pointsIfWon =
-    game.result && existingChoice ? scorePick({ choice: existingChoice }, game) : 0;
-  const potentialPoints = existingChoice
-    ? scorePick({ choice: existingChoice }, { ...game, result: existingChoice })
+  // Pass the full existingPick (not a synthesized {choice} stub) so scorePick
+  // honors the pick-time snapshot when present. Legacy NULL-snapshot picks
+  // fall through to game.* via the all-or-nothing read in scoring.js.
+  const pointsIfWon = game.result && existingPick ? scorePick(existingPick, game) : 0;
+  const potentialPoints = existingPick
+    ? scorePick(existingPick, { ...game, result: existingPick.choice })
     : 0;
+
+  // Locked vs current payout for the user's chosen side. `lockedPayout` is
+  // null on legacy NULL-snapshot picks (nothing to compare against, so no
+  // "odds shifted" hint and no undo warning fires). currentPayout always
+  // computable from game.*.
+  const usesSnapshot = existingPick?.pickedHomeProbability != null;
+  const lockedPayout = usesSnapshot
+    ? Math.round(
+        (1 -
+          parseFloat(
+            existingChoice === 'home'
+              ? existingPick.pickedHomeProbability
+              : existingPick.pickedAwayProbability,
+          )) *
+          100,
+      )
+    : null;
+  const currentPayout = existingChoice ? expectedWinPoints(existingChoice, game) : null;
+  const oddsShifted =
+    lockedPayout != null && currentPayout != null && lockedPayout !== currentPayout;
+  // Hint shown under the chip on live games — informational only. Skip on
+  // finished games (the outcome is settled; comparing to "current" is noise)
+  // and on draws (chip's "drew +N pts" already tells the locked story).
+  const oddsShiftedHint = oddsShifted && live ? `Current odds would pay +${currentPayout}` : null;
+
+  const [confirmingUndo, setConfirmingUndo] = useState(false);
 
   let outcomeBadge = null;
   if (game.result) {
@@ -313,6 +356,18 @@ function GameCard({ game }) {
       outcomeBadge = <Badge tone="success">✓ Correct +{pointsIfWon} pts</Badge>;
     } else {
       outcomeBadge = <Badge tone="danger">✗ Missed</Badge>;
+    }
+  }
+
+  function handleUndoClick() {
+    if (!gate('undo a pick')) return;
+    // Only warn when re-picking right now would pay strictly less. If locked
+    // is null (legacy) or locked <= current, undoing isn't a downgrade — fire
+    // immediately.
+    if (lockedPayout != null && currentPayout != null && lockedPayout > currentPayout) {
+      setConfirmingUndo(true);
+    } else {
+      removePick(existingPickId);
     }
   }
 
@@ -363,10 +418,7 @@ function GameCard({ game }) {
             <div className="mt-2 flex justify-end">
               <button
                 type="button"
-                onClick={() => {
-                  if (!gate('undo a pick')) return;
-                  removePick(existingPickId);
-                }}
+                onClick={handleUndoClick}
                 className="rounded-2xl px-3 py-2 text-xs text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               >
                 Undo pick
@@ -384,10 +436,28 @@ function GameCard({ game }) {
           game={game}
           pointsIfWon={pointsIfWon}
           potentialPoints={potentialPoints}
+          oddsShiftedHint={oddsShiftedHint}
         />
       ) : null}
 
       <CommentThread gameId={game.id} />
+
+      <ConfirmModal
+        open={confirmingUndo}
+        title="Undo your pick?"
+        description={
+          lockedPayout != null && currentPayout != null
+            ? `Your locked-in payout for this pick is +${lockedPayout} pts. The current odds would only give +${currentPayout} pts if you re-pick. Continue with undo?`
+            : 'Continue with undo?'
+        }
+        confirmLabel="Undo anyway"
+        cancelLabel="Keep my pick"
+        onConfirm={() => {
+          setConfirmingUndo(false);
+          removePick(existingPickId);
+        }}
+        onCancel={() => setConfirmingUndo(false)}
+      />
     </div>
   );
 }

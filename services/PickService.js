@@ -23,13 +23,28 @@ async function createPick({ userId, gameId, choice }) {
     throw errors.badRequest('Picks can only be created or changed for upcoming games');
   }
 
+  // Snapshot the three probabilities at pick time. Locks the user's payout
+  // against subsequent ML rewrites of game.{home,draw,away}Probability.
+  // Re-picking (same team or switch) refreshes the snapshot intentionally —
+  // "re-pick = re-lock at current odds." All three written together so the
+  // all-or-nothing read in lib/scoring.js can use pickedHomeProbability as
+  // the sentinel.
+  const snapshot = {
+    pickedHomeProbability: game.homeProbability,
+    pickedDrawProbability: game.drawProbability,
+    pickedAwayProbability: game.awayProbability,
+  };
+
   const existingPick = await Pick.findOne({ where: { userId, gameId } });
   if (existingPick) {
     existingPick.choice = choice;
     existingPick.submittedAt = new Date();
+    existingPick.pickedHomeProbability = snapshot.pickedHomeProbability;
+    existingPick.pickedDrawProbability = snapshot.pickedDrawProbability;
+    existingPick.pickedAwayProbability = snapshot.pickedAwayProbability;
     await existingPick.save();
   } else {
-    await Pick.create({ userId, gameId, choice });
+    await Pick.create({ userId, gameId, choice, ...snapshot });
   }
 
   BadgeService.evaluateBadges(userId).catch(() => {});

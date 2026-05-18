@@ -55,6 +55,56 @@ test.describe('POST /api/picks', () => {
     }
   });
 
+  // Pick-time probability snapshot — three DECIMAL(3,2) columns frozen on the
+  // pick row at creation/upsert time. The lions fixture has home=0.5 / away=0.5
+  // and the draw-scoring migration's default sets draw=0, so the snapshot trio
+  // is (0.50, 0.00, 0.50). Sequelize returns DECIMAL as string — parseFloat to
+  // normalize before comparing.
+  test('snapshot fields populated on create', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertOk(authed, 'POST', '/api/picks', { gameId: GAMES.lions.id, choice: 'home' });
+      const list = await assertOk(authed, 'GET', '/api/picks');
+      const pick = list.find((p) => p.gameId === GAMES.lions.id);
+      expect(pick).toBeDefined();
+      expect(parseFloat(pick.pickedHomeProbability)).toBeCloseTo(0.5, 2);
+      expect(parseFloat(pick.pickedDrawProbability)).toBeCloseTo(0, 2);
+      expect(parseFloat(pick.pickedAwayProbability)).toBeCloseTo(0.5, 2);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  // Re-pick (same team or switch) intentionally refreshes the snapshot —
+  // "re-pick = re-lock at current odds." A user holding an old payout
+  // must NOT re-pick if they want to keep it.
+  test('snapshot refreshes on re-pick', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertOk(authed, 'POST', '/api/picks', {
+        gameId: GAMES.eagles.id,
+        choice: 'home',
+      });
+      const firstList = await assertOk(authed, 'GET', '/api/picks');
+      const first = firstList.find((p) => p.gameId === GAMES.eagles.id);
+      expect(parseFloat(first.pickedHomeProbability)).toBeCloseTo(0.6, 2);
+
+      // Switch teams — snapshot must reflect the same game's current odds,
+      // not be stale from the prior pick.
+      await assertOk(authed, 'POST', '/api/picks', {
+        gameId: GAMES.eagles.id,
+        choice: 'away',
+      });
+      const secondList = await assertOk(authed, 'GET', '/api/picks');
+      const second = secondList.find((p) => p.gameId === GAMES.eagles.id);
+      expect(second.choice).toBe('away');
+      expect(parseFloat(second.pickedHomeProbability)).toBeCloseTo(0.6, 2);
+      expect(parseFloat(second.pickedAwayProbability)).toBeCloseTo(0.4, 2);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
   test('unknown game id → 404', async () => {
     const authed = await apiLogin(USERS.alice);
     try {

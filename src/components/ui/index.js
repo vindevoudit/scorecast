@@ -4,6 +4,7 @@
 export { Button, buttonStyles } from './Button';
 export { Card, CardHeader, CardBody, CardFooter, cardStyles } from './Card';
 export { Input } from './Input';
+export { PasswordInput } from './PasswordInput';
 export { Textarea } from './Textarea';
 export { Badge, badgeStyles } from './Badge';
 export { Skeleton } from './Skeleton';

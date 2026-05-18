@@ -2,7 +2,7 @@
 // primitives. The #login-username / #login-password ids are preserved
 // because Playwright targets them directly.
 
-import { Button, Card, Input } from './ui';
+import { Button, Card, Input, PasswordInput } from './ui';
 
 function LoginForm({ authData, setAuthData, onSubmit, onForgotPassword }) {
   return (
@@ -20,10 +20,9 @@ function LoginForm({ authData, setAuthData, onSubmit, onForgotPassword }) {
             setAuthData((prev) => ({ ...prev, loginUsername: event.target.value }))
           }
         />
-        <Input
+        <PasswordInput
           id="login-password"
           name="password"
-          type="password"
           label="Password"
           autoComplete="current-password"
           value={authData.loginPassword}

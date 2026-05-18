@@ -1,6 +1,6 @@
 // Tier 11 Chunk 2 — ResetPasswordForm migrated.
 
-import { Button, Card, Input } from './ui';
+import { Button, Card, PasswordInput } from './ui';
 
 function ResetPasswordForm({ authData, setAuthData, onSubmit, onCancel }) {
   return (
@@ -10,10 +10,9 @@ function ResetPasswordForm({ authData, setAuthData, onSubmit, onCancel }) {
         Enter a new password for your account. The reset link expires after 15 minutes.
       </p>
       <form onSubmit={onSubmit} className="mt-8 space-y-5">
-        <Input
+        <PasswordInput
           id="reset-password"
           name="password"
-          type="password"
           label="New password"
           autoComplete="new-password"
           required

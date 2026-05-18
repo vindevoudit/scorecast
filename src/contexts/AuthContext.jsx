@@ -17,6 +17,7 @@ const initialAuthData = {
   loginPassword: '',
   registerUsername: '',
   registerPassword: '',
+  registerPasswordConfirm: '',
   registerEmail: '',
   forgotEmail: '',
   resetPassword: '',
@@ -145,6 +146,11 @@ export function AuthProvider({ children }) {
   const handleRegister = useCallback(
     async (event) => {
       event?.preventDefault?.();
+      if (authData.registerPassword !== authData.registerPasswordConfirm) {
+        const mismatchError = new Error('Passwords do not match');
+        showStatus(mismatchError.message);
+        throw mismatchError;
+      }
       try {
         const data = await apiFetch('/api/register', {
           method: 'POST',
@@ -163,7 +169,13 @@ export function AuthProvider({ children }) {
         throw error;
       }
     },
-    [authData.registerUsername, authData.registerPassword, authData.registerEmail, showStatus],
+    [
+      authData.registerUsername,
+      authData.registerPassword,
+      authData.registerPasswordConfirm,
+      authData.registerEmail,
+      showStatus,
+    ],
   );
 
   const handleForgotPassword = useCallback(

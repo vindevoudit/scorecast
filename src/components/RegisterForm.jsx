@@ -1,8 +1,12 @@
 // Tier 11 Chunk 2 — RegisterForm migrated. ids preserved for Playwright.
 
-import { Button, Card, Input } from './ui';
+import { Button, Card, Input, PasswordInput } from './ui';
 
 function RegisterForm({ authData, setAuthData, onSubmit }) {
+  const mismatch =
+    authData.registerPasswordConfirm.length > 0 &&
+    authData.registerPassword !== authData.registerPasswordConfirm;
+
   return (
     <Card variant="default" className="p-8 shadow-glow">
       <h2 className="text-2xl font-semibold text-fg">Create an account</h2>
@@ -31,16 +35,26 @@ function RegisterForm({ authData, setAuthData, onSubmit }) {
             setAuthData((prev) => ({ ...prev, registerEmail: event.target.value }))
           }
         />
-        <Input
+        <PasswordInput
           id="register-password"
           name="password"
-          type="password"
           label="Password"
           autoComplete="new-password"
           value={authData.registerPassword}
           onChange={(event) =>
             setAuthData((prev) => ({ ...prev, registerPassword: event.target.value }))
           }
+        />
+        <PasswordInput
+          id="register-password-confirm"
+          name="passwordConfirm"
+          label="Confirm password"
+          autoComplete="new-password"
+          value={authData.registerPasswordConfirm}
+          onChange={(event) =>
+            setAuthData((prev) => ({ ...prev, registerPasswordConfirm: event.target.value }))
+          }
+          error={mismatch ? 'Passwords do not match' : undefined}
         />
         <Button type="submit" variant="secondary" size="lg" className="w-full">
           Register

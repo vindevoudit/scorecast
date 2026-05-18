@@ -42,6 +42,7 @@ async function registerViaUI(page, { username, email, password }) {
   await page.locator('#register-username').fill(username);
   await page.locator('#register-email').fill(email);
   await page.locator('#register-password').fill(password);
+  await page.locator('#register-password-confirm').fill(password);
   await page.getByRole('button', { name: /^Register$/ }).click();
   await dismissOnboardingTour(page);
   await expect(page.getByRole('tab', { name: DASHBOARD_SENTINEL }).first()).toBeVisible({

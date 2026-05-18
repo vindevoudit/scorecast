@@ -22,6 +22,22 @@ const CSRF_HEADER = 'X-CSRF-Token';
 
 // --- HTTP helpers ------------------------------------------------------------
 
+// Bare anonymous APIRequestContext for use cases that need to hit endpoints
+// without any cookie/CSRF state — primarily the 401-when-unauthenticated
+// boundary tests in tests/e2e/api/*.
+async function apiAnon() {
+  return pwRequest.newContext({ baseURL: BASE_URL });
+}
+
+// Clone an authed context's cookie state without the X-CSRF-Token default
+// header. Use this to test the CSRF-rejected boundary on state-changing
+// routes: the bare context still presents sc_access but is missing the
+// double-submit header, so middleware/csrf.js returns 403.
+async function stripCsrf(authed) {
+  const state = await authed.storageState();
+  return pwRequest.newContext({ baseURL: BASE_URL, storageState: state });
+}
+
 // Returns an authenticated APIRequestContext that already carries the auth
 // cookies (sc_access/sc_refresh/sc_csrf) and defaults the X-CSRF-Token header
 // for state-changing requests. Caller is responsible for `dispose()`.
@@ -149,6 +165,34 @@ async function clearNotifications(userIds) {
   await Notification.destroy({ where: { userId: userIds } });
 }
 
+async function clearComments(gameId) {
+  const { Comment } = getModels();
+  await Comment.destroy({ where: { gameId } });
+}
+
+async function clearGroupsCreatedBy(userIds) {
+  const { Group, GroupMember, GroupInvite } = getModels();
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  const groups = await Group.findAll({ where: { ownerId: ids } });
+  const groupIds = groups.map((g) => g.id);
+  if (groupIds.length === 0) return;
+  await GroupInvite.destroy({ where: { groupId: groupIds } });
+  await GroupMember.destroy({ where: { groupId: groupIds } });
+  await Group.destroy({ where: { id: groupIds } });
+}
+
+async function clearLeaguesByName(namePrefix) {
+  const { League } = getModels();
+  const { Op } = require('sequelize');
+  await League.destroy({ where: { name: { [Op.like]: `${namePrefix}%` } } });
+}
+
+async function clearAuditLog() {
+  const { AuditLog } = getModels();
+  if (!AuditLog) return;
+  await AuditLog.destroy({ truncate: true });
+}
+
 async function getUserId(username) {
   const { User } = getModels();
   const user = await User.findOne({ where: { username } });
@@ -194,7 +238,9 @@ async function closeDb() {
 
 module.exports = {
   // HTTP
+  apiAnon,
   apiLogin,
+  stripCsrf,
   setGameResult,
   createPick,
   markAllNotificationsRead,
@@ -207,6 +253,10 @@ module.exports = {
   clearPicksAndBadges,
   clearGameResults,
   clearNotifications,
+  clearComments,
+  clearGroupsCreatedBy,
+  clearLeaguesByName,
+  clearAuditLog,
   getUserId,
   setProfileVisibility,
   createAcceptedFriendship,

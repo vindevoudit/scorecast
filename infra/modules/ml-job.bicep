@@ -45,8 +45,8 @@ param mlPipelinePassword string
 @description('Public URL of the running ScoreCast app (no trailing slash). e.g. https://bantryx.com — the writer logs in here and PUTs probabilities.')
 param apiBaseUrl string
 
-@description('Cron expression for the scheduled run (UTC). Default: Thursdays 02:30 — pre-gameweek slot, before the Node app\'s 03:00 UTC fixture sync.')
-param cronExpression string = '30 2 * * 4'
+@description('Cron expression for the scheduled run (UTC). Default: daily 02:30 — sits 30 min ahead of the Node app\'s 03:00 UTC fixture sync. Daily cadence is idempotent (predict-and-write skips non-sentinel rows) so re-runs on the same fixtures are no-ops.')
+param cronExpression string = '30 2 * * *'
 
 var jobName = '${appName}-ml-job'
 var imageRepoName = 'scorecast-ml'

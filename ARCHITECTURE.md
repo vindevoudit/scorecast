@@ -133,7 +133,7 @@ There is **one server process**, **one database**, **no message queue**, **no wo
 | Background jobs    | **node-cron** ([lib/scheduler.js](lib/scheduler.js)) with `pg_try_advisory_lock(crc32(jobName))` for multi-replica safety. Two scheduled jobs ([lib/jobs/syncFixtures.js](lib/jobs/syncFixtures.js): daily 03:00 UTC; [lib/jobs/syncLiveScores.js](lib/jobs/syncLiveScores.js): every 60 s). No-op when `NODE_ENV=test`. See §8.16                                                                                                                                                                                                                                                      |
 | External data      | **football-data.org v4** free tier (10 req/min) behind a provider-agnostic surface at [lib/footballApi.js](lib/footballApi.js); status/result normalization in [lib/fixtureStatus.js](lib/fixtureStatus.js); response cache in [lib/cache.js](lib/cache.js). See §8.16                                                                                                                                                                                                                                                                                                                  |
 | Audit log          | **`auditMutation(action, entityType)` middleware** (Tier 4b Chunk 3) wraps every `/api/admin/*` mutation; records via `res.on('finish')` through [services/AuditLogService.js](services/AuditLogService.js) with 4KB payload truncation; never throws back into the request lifecycle. See §8.16                                                                                                                                                                                                                                                                                        |
-| ML pipeline        | **Python project under [ml/](ml/)**, deployed as a separate Azure Container Apps Job (`scorecast-ml-job`, weekly cron Thursdays 02:30 UTC). XGBoost `multi:softprob` + Elo + isotonic calibration → writes `(homeProbability, drawProbability, awayProbability)` via `PUT /api/admin/games/:id`. See §8.17                                                                                                                                                                                                                                                                              |
+| ML pipeline        | **Python project under [ml/](ml/)**, deployed as a separate Azure Container Apps Job (`scorecast-ml-job`, daily cron 02:30 UTC). XGBoost `multi:softprob` + Elo + isotonic calibration → writes `(homeProbability, drawProbability, awayProbability)` via `PUT /api/admin/games/:id`. See §8.17                                                                                                                                                                                                                                                                                         |
 | Tests              | **Playwright** (`@playwright/test`) — 22 specs, **270 tests** total. UI/flow specs at [tests/e2e/](tests/e2e/); per-endpoint boundary specs at [tests/e2e/api/](tests/e2e/api/) (one file per route file). See §10.6                                                                                                                                                                                                                                                                                                                                                                    |
 | Container          | **Multi-stage Dockerfile** (`node:20-alpine`, non-root uid 1001, `tini`, `HEALTHCHECK /healthz`) — Tier 9.4. `docker-compose.yml` for local Postgres 16 + Redis 7 stack                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | CI / CD            | **GitHub Actions** ([.github/workflows/ci.yml](.github/workflows/ci.yml): lint + format-check + `npm audit` + build + migrations smoke + Playwright; [deploy.yml](.github/workflows/deploy.yml): build → migrate → roll out on push to main, OIDC-authed; [ml-deploy.yml](.github/workflows/ml-deploy.yml): rebuilds the ML image on `ml/**` changes). Dependabot opens weekly grouped PRs for npm / pip / github-actions / docker                                                                                                                                                      |
@@ -377,7 +377,7 @@ ScoreCast/
 │   │   └── apiAssertions.js             # assertOk/assertUnauthorized/assertForbiddenWithoutAdmin/assertCsrfRejected/assertValidationError/assertNotFound/assertNoContent/expectShape one-call helpers
 │   └── fixtures/                        # data.js (USERS + GAMES constants), env.js (DB URL), seed.js (deterministic seed users + games + onboardingCompletedAt pre-set), global-setup.js (migrate + truncate + reseed)
 │
-├── ml/                                  # Standalone Python ML pipeline (Tier 4b post-launch). Separate Docker image, scheduled weekly. See §8.17
+├── ml/                                  # Standalone Python ML pipeline (Tier 4b post-launch). Separate Docker image, scheduled daily 02:30 UTC. See §8.17
 │   ├── Dockerfile                       # 3-stage: base → train (runs `python -m scorecast_ml train` against committed CSV corpus, seed=42 → PL_<date>.joblib) → runtime (non-root uid 1001, tini, CMD predict-and-write)
 │   ├── README.md, ONBOARDING.md         # per-league playbook (PL → La Liga / Bundesliga / Serie A / Ligue 1)
 │   ├── data/raw/PL_*.csv                # Public-domain Football-Data.co.uk corpus, ~3 MB, committed to git via .gitignore negation `!ml/data/raw/*.csv`
@@ -2317,7 +2317,7 @@ See [ml/ONBOARDING.md](ml/ONBOARDING.md) for the per-league onboarding playbook 
 
 #### Production deployment (Phase 3, shipped)
 
-Azure Container Apps Job on a weekly cron. Three components:
+Azure Container Apps Job on a daily cron. Three components:
 
 **Image** ([ml/Dockerfile](ml/Dockerfile)) — 3-stage build:
 
@@ -2358,19 +2358,21 @@ Built + pushed to ACR repo **`scorecast-ml`** (separate from the Node app's `sco
 **Job** ([infra/modules/ml-job.bicep](infra/modules/ml-job.bicep)) — Azure Container Apps Job:
 
 - Name: `scorecast-ml-job`.
-- `triggerType: Schedule` with cron expression `30 2 * * 4` (5-field standard cron, UTC) → **Thursdays at 02:30 UTC**.
+- `triggerType: Schedule` with cron expression `30 2 * * *` (5-field standard cron, UTC) → **daily at 02:30 UTC**.
 - System-assigned managed identity with `AcrPull` on the ACR + `Key Vault Secrets User` on the vault.
 - Reads `database-url` + `ml-pipeline-password` from Key Vault via `secretRef`. The `ml-pipeline-password` secret is provisioned by the module from the `mlPipelinePassword` Bicep param — **required on every Bicep reapply** (same pattern as `pgAdminPassword`).
 - Sets env vars `SCORECAST_DB_URL`, `SCORECAST_ML_PASSWORD`, `SCORECAST_API_BASE_URL`, `SCORECAST_ML_USERNAME=ml_pipeline`.
 - Resources: 0.5 vCPU + 1 GiB. Typical execution time <60 s. Logs flow to the shared Log Analytics workspace.
 
-**Cron offset rationale** — Thursday 02:30 UTC sits:
+**Cron offset rationale** — 02:30 UTC daily sits:
 
-- Pre-PL-gameweek: PL fixtures cluster Friday → Sunday.
-- 30 min ahead of the Node app's daily fixture sync at 03:00 UTC, so the two jobs never race on the same row.
-- Outside the 60-s live-score poll window (no in-progress matches expected at 02:30 UTC on a Thursday).
+- **30 min ahead of the Node app's daily fixture sync at 03:00 UTC**, so the two jobs never race on the same row. This is the load-bearing offset — don't move the ML job into the 03:00–03:05 window.
+- Outside the 60-s live-score poll's active window (PL kickoffs are 12:00–22:00 UTC; 02:30 is always between fixtures, including midweek competitions).
+- Pre-PL-gameweek when run on a Thursday morning (PL fixtures cluster Fri–Sun). Pre-midweek-fixtures when run on a Tue/Wed morning (Champions League etc.). Pre-anything when run any other day.
 
-**Idempotency** — `predict-and-write` skips games whose probabilities aren't the `(0.50, 0.00, 0.50)` sentinel, so re-firing within the same gameweek is safe.
+**Idempotency** — `predict-and-write` skips games whose probabilities aren't the `(0.50, 0.00, 0.50)` sentinel, so re-firing on the same fixtures is a no-op. Daily runs therefore stack cleanly: each one only writes to (a) newly-synced fixtures still on the sentinel and (b) cancelled/postponed fixtures that got rescheduled and reset.
+
+**Cost** — ~$0.07/mo at the daily cadence (~60s × 0.5 vCPU × 1 GiB × 30 runs/mo on Consumption pricing). Up from the weekly's ~$0.01/mo. Trivial.
 
 **Manual ad-hoc runs** work on a Schedule-triggered Job:
 
@@ -2388,11 +2390,12 @@ az containerapp job start --name scorecast-ml-job --resource-group scorecast-pro
 ├──────────────┼────────────────────────────┼──────────────────────────────────┤
 │ Elo ratings  │ Every predict-and-write    │ Each Job execution rebuilds      │
 │              │ invocation (sub-second)    │ from scratch (CSV + DB completed)│
-│              │                            │ → Tuesday's finished match shows │
-│              │                            │   up in Thursday's predictions   │
+│              │                            │ → yesterday's finished match     │
+│              │                            │   shows up in tomorrow's writes  │
 ├──────────────┼────────────────────────────┼──────────────────────────────────┤
-│ Probabilities│ Thursdays 02:30 UTC        │ Scheduled Job. Idempotent skip-  │
-│              │ (1x per week)              │ existing → manual re-fires safe  │
+│ Probabilities│ Daily 02:30 UTC            │ Scheduled Job. Idempotent skip-  │
+│              │ (~30 runs/mo)              │ existing → daily stack cleanly,  │
+│              │                            │   only new sentinel rows written │
 ├──────────────┼────────────────────────────┼──────────────────────────────────┤
 │ Model bundle │ Every push to main         │ ml-deploy.yml rebuilds the image,│
 │              │ touching ml/**             │ Stage 2 retrains. Deterministic  │
@@ -2403,31 +2406,42 @@ az containerapp job start --name scorecast-ml-job --resource-group scorecast-pro
 └──────────────┴────────────────────────────┴──────────────────────────────────┘
 ```
 
-Within-season adaptation happens via Elo + form (every Thursday); the XGBoost weights themselves are stable between annual rebuilds. This is the right cadence — the model captures slow structural priors (style of play, squad tier), Elo captures fast match-by-match shifts.
+Within-season adaptation happens via Elo + form (every day at 02:30 UTC); the XGBoost weights themselves are stable between annual rebuilds. This is the right cadence — the model captures slow structural priors (style of play, squad tier), Elo captures fast match-by-match shifts. Daily probability writes mean a Tuesday-night Champions League result lands in Wednesday's predictions automatically, without a manual ad-hoc trigger.
 
 #### How the writes land in Bantryx
 
-End-to-end weekly timeline:
+End-to-end daily timeline (the same loop, repeated every 24h):
 
 ```
-Sun-Wed   : Live matches finish → status='in-progress' → 'finished'
-            via lib/jobs/syncLiveScores.js (60-s cron). Scores +
-            results land in DB.
+Continuous : Live matches finish → status='in-progress' → 'finished'
+             via lib/jobs/syncLiveScores.js (60-s cron). Scores +
+             results land in DB throughout the day.
 
-Thu 02:30 : scorecast-ml-job fires.
+03:00 UTC  : Node app's daily fixture sync (cron `0 3 * * *`) pulls
+   (prior     fresh upcoming fixtures from football-data.org. New
+    day)      fixtures land in `games` with sentinel probabilities
+             (homeProbability=0.50, drawProbability=0.00,
+              awayProbability=0.50).
+
+02:30 UTC  : scorecast-ml-job fires (30 min ahead of THAT day's 03:00
+             fixture sync; works on fixtures synced the previous day).
              1. Login as ml_pipeline (POST /api/login).
              2. Read upcoming + completed from DB (psycopg).
-             3. Rebuild Elo (CSV + DB merge).
+             3. Rebuild Elo (CSV + DB merge — uses yesterday's
+                finished matches automatically).
              4. predict_proba → to_three_way → rounded trios.
-             5. For each upcoming Fri-Sun fixture: sentinel-check,
+             5. For each upcoming fixture (next 7d): sentinel-check,
                 PUT /api/admin/games/:id with {home, draw, away}Probability.
+                **Already-written fixtures are skipped** — only the
+                rows still on the sentinel get the new write. Daily
+                cadence stacks cleanly.
              6. Each PUT triggers auditMutation → audit_log row.
-             7. setResult-cache-invalidate is NOT triggered (PUT
-                is to /admin/games/:id which goes through GameService
-                update, not setResult — but LeaderboardService.invalidate
-                fires there too as standard precaution).
+             7. PUT to /admin/games/:id flows through GameService
+                update; LeaderboardService.invalidate fires as standard
+                precaution (no in-flight picks are affected since
+                probabilities only matter at result-set time).
 
-Fri-Sun   : Users visit Bantryx. GameCard renders:
+Throughout : Users visit Bantryx. GameCard renders:
              - PayoutMatrix preview uses (home, draw, away)Probability
                via expectedWinPoints / expectedDrawPoints in
                src/utils/scoring.js.
@@ -2436,10 +2450,10 @@ Fri-Sun   : Users visit Bantryx. GameCard renders:
                points payout via scorePick.
              User picks lock at game.date.
 
-Sun-Tue   : Live matches → finished. scorePick computes per-pick
-            points via the now-real probabilities; pick-scored
-            notifications fire; leaderboard reflects skill-weighted
-            standings.
+Post-match : Live matches → finished. scorePick computes per-pick
+             points via the now-real probabilities; pick-scored
+             notifications fire; leaderboard reflects skill-weighted
+             standings.
 ```
 
 #### Schema additions (post-draw-scoring tier)
@@ -2475,7 +2489,7 @@ The legacy 2-class `to_two_way` + `(0.50, 0.50)` sentinel is preserved in [norma
 #### Known limits + forward path
 
 - **Isotonic calibration** ✅ shipped (Phase 2). Per-class `IsotonicRegression` fit on val, attached to `ModelBundle.calibrators`. Applied automatically inside `predict_proba` with `[0.01, 0.99]` clip + renormalize.
-- **Automated cron** ✅ shipped (Phase 3). Container Apps Job runs Thursdays 02:30 UTC.
+- **Automated cron** ✅ shipped (Phase 3, daily as of 2026-05-18). Container Apps Job runs every day at 02:30 UTC.
 - **Draw scoring** ✅ shipped (post-tier). Pipeline writes all 3 probabilities via `to_three_way`. Pick semantics stay winner-only.
 - **Single-league models** — one model per league, no shared pool. La Liga / Bundesliga / Serie A / Ligue 1 each need their own training runs + `teams.json` alias extension + ingest + reconcile + train + predict-and-write. The pipeline is league-agnostic by design; per-league work is mostly data, not code.
 - **No incremental Elo snapshot** — `_build_inference_context` rebuilds Elo from scratch on every prediction. Sub-second on ~6 seasons; would matter at 10x league coverage. Phase N+1 cache invalidation would key on (league, max(completed_match_date)).
@@ -3059,7 +3073,7 @@ ScoreCast runs on Azure (`eastus2`) at https://bantryx.com. The whole stack is p
 | Container Apps env       | `scorecast-env-p3aaelev7xp52`  | Consumption plan; hosts the app + the migration Job                                                                                | $0 idle             |
 | Container App            | `scorecast-app`                | The Node/Express server; ingress on `:3000` → `:443`; scale 0→3                                                                    | $0 idle, ~$1/1k req |
 | Container Apps Job       | `scorecast-migrate`            | One-shot `npm run db:migrate` triggered by CD before each roll-out                                                                 | $0 idle             |
-| Container Apps Job       | `scorecast-ml-job`             | Weekly probability pipeline (Thursdays 02:30 UTC); runs the `scorecast-ml` image's baked-in predict-and-write CMD                  | $0 idle, ~$0.01/run |
+| Container Apps Job       | `scorecast-ml-job`             | Daily probability pipeline (02:30 UTC); runs the `scorecast-ml` image's baked-in predict-and-write CMD                             | $0 idle, ~$0.07/mo  |
 | Container Registry       | `scorecastacrp3aaelev7xp52`    | Stores `scorecast:<sha>` (Node) + `scorecast-ml:<sha>` (Python ML) images. Basic SKU, admin disabled, AcrPull via managed identity | ~$5                 |
 | Postgres Flexible Server | `scorecast-pg-p3aaelev7xp52`   | B1ms (1 vCPU, 2 GB), Postgres 16, 32 GB storage, 7-day backups, public + firewall (`AllowAllAzureServices`)                        | ~$17                |
 | Key Vault                | `scorecast-kv-p3aaelev7xp`     | RBAC mode; holds `jwt-secret`, `database-url`, `postgres-admin-password`, `resend-api-key`, `ml-pipeline-password`                 | ~$0.10              |
@@ -3072,17 +3086,17 @@ Idle total: **~$30–35/mo**.
 
 #### Bicep modules ([infra/](infra/))
 
-| File                        | What it provisions                                                                                                                                                                                                                                                                                                                         |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `main.bicep`                | Orchestrator; takes `location`, `appName`, `imageTag`, `pgAdminPassword` (`@secure`), `customDomain`                                                                                                                                                                                                                                       |
-| `modules/logs.bicep`        | Log Analytics workspace + Application Insights linked to it                                                                                                                                                                                                                                                                                |
-| `modules/registry.bicep`    | ACR Basic, admin disabled, anonymous pull disabled                                                                                                                                                                                                                                                                                         |
-| `modules/secrets.bicep`     | Key Vault, RBAC mode, soft-delete 7d                                                                                                                                                                                                                                                                                                       |
-| `modules/db.bicep`          | Postgres Flex B1ms; writes `database-url` (with `?sslmode=require`) and `postgres-admin-password` into Key Vault; firewall rule for Azure services                                                                                                                                                                                         |
-| `modules/app.bicep`         | Container Apps env + main app; system-assigned managed identity + RBAC for AcrPull on the registry + Key Vault Secrets User on the vault; secret references via `keyVaultUrl`; liveness + readiness probes on `/healthz`; `publicAppUrl` defaults to the Azure FQDN until `customDomain` is set                                            |
-| `modules/migrate-job.bicep` | Container Apps Job with `command: ['npm', 'run', 'db:migrate']`; same managed-identity RBAC pattern as the app                                                                                                                                                                                                                             |
-| `modules/ml-job.bicep`      | Container Apps Job for the weekly ML probability pipeline. `triggerType: Schedule` with cron `30 2 * * 4` (Thursdays 02:30 UTC). Provisions the `ml-pipeline-password` Key Vault secret from the `mlPipelinePassword` Bicep param; consumes that + `database-url` via managed-identity secret refs. Image lives in ACR repo `scorecast-ml` |
-| `modules/dns.bicep`         | Conditional Azure DNS zone (only when `customDomain` is non-empty). Currently unused for production because Cloudflare handles `bantryx.com`                                                                                                                                                                                               |
+| File                        | What it provisions                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.bicep`                | Orchestrator; takes `location`, `appName`, `imageTag`, `pgAdminPassword` (`@secure`), `customDomain`                                                                                                                                                                                                                                                                                         |
+| `modules/logs.bicep`        | Log Analytics workspace + Application Insights linked to it                                                                                                                                                                                                                                                                                                                                  |
+| `modules/registry.bicep`    | ACR Basic, admin disabled, anonymous pull disabled                                                                                                                                                                                                                                                                                                                                           |
+| `modules/secrets.bicep`     | Key Vault, RBAC mode, soft-delete 7d                                                                                                                                                                                                                                                                                                                                                         |
+| `modules/db.bicep`          | Postgres Flex B1ms; writes `database-url` (with `?sslmode=require`) and `postgres-admin-password` into Key Vault; firewall rule for Azure services                                                                                                                                                                                                                                           |
+| `modules/app.bicep`         | Container Apps env + main app; system-assigned managed identity + RBAC for AcrPull on the registry + Key Vault Secrets User on the vault; secret references via `keyVaultUrl`; liveness + readiness probes on `/healthz`; `publicAppUrl` defaults to the Azure FQDN until `customDomain` is set                                                                                              |
+| `modules/migrate-job.bicep` | Container Apps Job with `command: ['npm', 'run', 'db:migrate']`; same managed-identity RBAC pattern as the app                                                                                                                                                                                                                                                                               |
+| `modules/ml-job.bicep`      | Container Apps Job for the daily ML probability pipeline. `triggerType: Schedule` with cron `30 2 * * *` (daily 02:30 UTC, 30 min ahead of the Node app's 03:00 UTC fixture sync). Provisions the `ml-pipeline-password` Key Vault secret from the `mlPipelinePassword` Bicep param; consumes that + `database-url` via managed-identity secret refs. Image lives in ACR repo `scorecast-ml` |
+| `modules/dns.bicep`         | Conditional Azure DNS zone (only when `customDomain` is non-empty). Currently unused for production because Cloudflare handles `bantryx.com`                                                                                                                                                                                                                                                 |
 
 Resource names use `uniqueString(resourceGroup().id)` so re-deploys are idempotent and globally unique.
 
@@ -3198,7 +3212,7 @@ Summary:
 - ✅ **Security hardening batch** (standalone, shipped 2026-05-18) — 12 fixes: H1 `trust proxy 1` (real client IPs through Cloudflare → Azure); H2 constant-time login (`LOGIN_DUMMY_HASH`); H3 `currentPassword` required on `PATCH /me/email` + `POST /me/2fa/setup`; M1 `setImmediate` for forgot-password token INSERT + email send (closes timing-based enumeration); M3 Sentry PII redaction (`sendDefaultPii:false` + `beforeSend` redacts password/secret/token/recovery/otp/totp/cookie/set-cookie/authorization/csrf/api-key keys); M4 `algorithms:['HS256']` pinned on every `jwt.verify`; M5 new `POST /api/me/password` + `ChangePasswordPanel` (calling client stays signed in, every other refresh-bearing device kicked out); L3 Permissions-Policy header; L4 `bodyParser.json({limit:'32kb'})`; L5 constant-time recovery-code verify (`Promise.all(codes.map(bcrypt.compare))`); L6 `displayName`/`bio` reject bidi-override + zero-width + control codepoints (ZWJ U+200D intentionally allowed for emoji); L8 CI `npm audit --audit-level=high --omit=dev` + Dependabot weekly grouped PRs. See §10.2.
 - ✅ **Per-endpoint API test suite** (standalone, shipped 2026-05-18) — ~250 new Playwright tests under [tests/e2e/api/](tests/e2e/api/) — one spec per route file covering happy path + 401 + admin-403 + CSRF-403 + 400 + 404 + ownership for every one of the 68 endpoints. New helper [apiAssertions.js](tests/e2e/helpers/apiAssertions.js) collapses per-test boilerplate. Plus two UI smokes ([change-email-panel.spec.js](tests/e2e/change-email-panel.spec.js) + [change-password-panel.spec.js](tests/e2e/change-password-panel.spec.js)). Total suite now 270 tests across 22 specs. See §10.6.
 - ✅ **Leaderboard league + season filters** (standalone, shipped 2026-05-18) — `GET /api/leaderboard?leagueId=&seasonId=` scopes overall + per-group blocks. Builders `buildGroupLeaderboard(groupId, {leagueId, seasonId})` + `buildUserSummary({leagueId, seasonId})` add `where: gameWhere` on Game.findAll. In-memory pick loop's existing `if (!gameById.has(pick.gameId)) continue` guard drops out-of-scope picks from both numerator AND denominator → winRate scopes automatically. Cache key extended via `LeaderboardService.buildKey(scope, {leagueId, seasonId})` to `overall:l:<id|*>:s:<id|*>` and `group:<groupId>:l:<id|*>:s:<id|*>`. New `lib/leaderboardCache.js invalidatePrefix(prefix)` required because one logical scope now spans many keys. New [LeaderboardFiltersBar](src/components/LeaderboardFiltersBar.jsx) + `?lbLeague=&lbSeason=` URL keys (separate axis from games-view) + `DataContext.leaderboardFilters` slot. Mounts on Leaderboard + My Picks tabs (one global "stats scope" filter).
-- ✅ **ML probability pipeline** — Phase 1 (PL only, manual, shipped 2026-05-17): standalone Python project at [ml/](ml/) producing `(homeProbability, awayProbability)` via Elo + XGBoost. 5-season train (2004/05–2008/09) → 15-season held-out test (2010/11–2024/25, 5,700 OOS matches): mlogloss 0.992 vs baseline 1.065 (-0.073), accuracy 51.9% vs 44.9% (+7pp). Phase 2 (isotonic calibration, shipped 2026-05-17): per-class IsotonicRegression fit on val; clip every class to [0.01, 0.99] before renormalization; 15-season train + 1-season val + held-out 25/26 test; 70-80% bucket overconfidence pulled from -7pp to -2pp deviation. Phase 3 (Azure deployment, shipped 2026-05-17): `scorecast-ml-job` Container Apps Job, Schedule trigger cron `30 2 * * 4` (Thursdays 02:30 UTC, pre-PL gameweek, sits 30 min ahead of Node app's daily fixture sync); ml-deploy.yml workflow path-filtered on `ml/**`; CSV training corpus committed to git via `.gitignore` negation; image-baked-in trained bundle. Post-draw-scoring: pipeline writes all 3 probabilities via `to_three_way` + sentinel updated to `(0.50, 0.00, 0.50)`. See §8.17.
+- ✅ **ML probability pipeline** — Phase 1 (PL only, manual, shipped 2026-05-17): standalone Python project at [ml/](ml/) producing `(homeProbability, awayProbability)` via Elo + XGBoost. 5-season train (2004/05–2008/09) → 15-season held-out test (2010/11–2024/25, 5,700 OOS matches): mlogloss 0.992 vs baseline 1.065 (-0.073), accuracy 51.9% vs 44.9% (+7pp). Phase 2 (isotonic calibration, shipped 2026-05-17): per-class IsotonicRegression fit on val; clip every class to [0.01, 0.99] before renormalization; 15-season train + 1-season val + held-out 25/26 test; 70-80% bucket overconfidence pulled from -7pp to -2pp deviation. Phase 3 (Azure deployment, shipped 2026-05-17; daily cadence as of 2026-05-18): `scorecast-ml-job` Container Apps Job, Schedule trigger cron `30 2 * * *` (daily 02:30 UTC, sits 30 min ahead of Node app's 03:00 UTC fixture sync; daily cadence so newly-synced fixtures get probabilities within 24h, idempotent skip-existing keeps re-runs cheap); ml-deploy.yml workflow path-filtered on `ml/**`; CSV training corpus committed to git via `.gitignore` negation; image-baked-in trained bundle. Post-draw-scoring: pipeline writes all 3 probabilities via `to_three_way` + sentinel updated to `(0.50, 0.00, 0.50)`. See §8.17.
 
 ---
 

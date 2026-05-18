@@ -87,4 +87,4 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --image "$IMAGE" \
             --output none
-          echo "Pointed $AZURE_ML_JOB at $IMAGE — next scheduled fire (Thursdays 02:30 UTC) will use it."
+          echo "Pointed $AZURE_ML_JOB at $IMAGE — next scheduled fire (daily 02:30 UTC) will use it."

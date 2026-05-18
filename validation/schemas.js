@@ -178,6 +178,22 @@ const updateLeagueSchema = z
   })
   .openapi('UpdateLeagueRequest');
 
+// Leaderboard filtering — both group block (when groupId supplied) and
+// overall (when omitted) accept the optional leagueId/seasonId pair. When
+// either is set, the builder's Game.findAll() inherits a WHERE clause and
+// the leaderboard rows only count picks on in-scope games (winRate scopes
+// naturally via the same filtered game set).
+const leaderboardQuerySchema = z
+  .object({
+    groupId: uuid.optional(),
+    orderBy: z.enum(['points', 'winRate', 'username']).optional(),
+    offset: z.coerce.number().int().min(0).max(10000).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    leagueId: uuid.optional(),
+    seasonId: uuid.optional(),
+  })
+  .openapi('LeaderboardQuery');
+
 module.exports = {
   registerSchema,
   loginSchema,
@@ -204,5 +220,6 @@ module.exports = {
   clientErrorSchema,
   createLeagueSchema,
   updateLeagueSchema,
+  leaderboardQuerySchema,
   ALLOWED_EMOJIS,
 };

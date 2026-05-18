@@ -46,15 +46,39 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
   return <div className={baseClass}>{content}</div>;
 }
 
-function LeaderboardCard({ title, entries, currentUserId, description, onSelectUser }) {
+function LeaderboardCard({
+  title,
+  entries,
+  currentUserId,
+  description,
+  onSelectUser,
+  isFiltered = false,
+}) {
+  // When a filter is active and the resulting list is "everyone at 0 pts"
+  // (which renders identical to truly empty), surface the scope so the
+  // user understands the filter is the cause rather than missing data.
+  const allZeroPoints = entries.length > 0 && entries.every((e) => (e.points || 0) === 0);
+  const showFilteredEmpty = isFiltered && (entries.length === 0 || allZeroPoints);
   return (
     <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
-      <h2 className="text-2xl font-semibold text-fg">{title}</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-2xl font-semibold text-fg">{title}</h2>
+        {isFiltered ? (
+          <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
+            Filtered
+          </span>
+        ) : null}
+      </div>
       <p className="mt-2 text-fg-muted">
         {description || 'Top performers based on correct picks and probability scoring.'}
       </p>
       <div className="mt-6 max-h-96 space-y-3 overflow-y-auto pr-2">
-        {entries.length === 0 ? (
+        {showFilteredEmpty ? (
+          <EmptyState
+            title="No picks in this scope yet"
+            description="Try a different league/season, or clear the filter to see global rankings."
+          />
+        ) : entries.length === 0 ? (
           <EmptyState
             title="No leaderboard data yet"
             description="Once games have results, points will appear here."

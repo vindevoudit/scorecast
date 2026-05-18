@@ -46,12 +46,22 @@ function applyMasking(rows, ctx) {
   });
 }
 
-async function getOverall() {
-  return leaderboardCache.getOrBuild('overall', buildUserSummary);
+// Cache key shape with filter axes encoded. The `?? '*'` sentinel keeps
+// the unfiltered case as `overall:l:*:s:*` / `group:<id>:l:*:s:*` (instead
+// of `overall:l:undefined:s:undefined`) so two requests with no filter
+// land on the same key.
+function buildKey(scope, { leagueId, seasonId } = {}) {
+  return `${scope}:l:${leagueId ?? '*'}:s:${seasonId ?? '*'}`;
 }
 
-async function getOverallForViewer(viewer) {
-  const rows = await getOverall();
+async function getOverall({ leagueId, seasonId } = {}) {
+  return leaderboardCache.getOrBuild(buildKey('overall', { leagueId, seasonId }), () =>
+    buildUserSummary({ leagueId, seasonId }),
+  );
+}
+
+async function getOverallForViewer(opts = {}, viewer = null) {
+  const rows = await getOverall(opts);
   const ctx = {
     viewerId: viewer?.id ?? null,
     viewerIsAdmin: viewer?.role === 'admin',
@@ -60,9 +70,13 @@ async function getOverallForViewer(viewer) {
   return applyMasking(rows, ctx);
 }
 
-async function getForGroup(groupId, { orderBy = 'points', offset = 0, limit = 20, viewerId } = {}) {
-  const groupRowsRaw = await leaderboardCache.getOrBuild(`group:${groupId}`, () =>
-    buildGroupLeaderboard(groupId),
+async function getForGroup(
+  groupId,
+  { orderBy = 'points', offset = 0, limit = 20, viewerId, leagueId, seasonId } = {},
+) {
+  const groupRowsRaw = await leaderboardCache.getOrBuild(
+    buildKey(`group:${groupId}`, { leagueId, seasonId }),
+    () => buildGroupLeaderboard(groupId, { leagueId, seasonId }),
   );
   const safeOrderBy = ['points', 'winRate', 'username'].includes(orderBy) ? orderBy : 'points';
   const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
@@ -103,6 +117,15 @@ function invalidate(scope) {
   leaderboardCache.invalidate(scope);
 }
 
+// Prefix-aware invalidator. Required because adding filter axes to the
+// cache key means one logical scope (a group) now spans many keys
+// (`group:<id>:l:*:s:*`, `group:<id>:l:<uuid>:s:*`, etc). Callers that
+// already use `invalidate('all')` keep working unchanged — `'all'` blows
+// away every entry regardless of key shape.
+function invalidatePrefix(prefix) {
+  leaderboardCache.invalidatePrefix(prefix);
+}
+
 function stats() {
   return leaderboardCache.stats();
 }
@@ -113,5 +136,6 @@ module.exports = {
   getForGroup,
   getForGroupForViewer,
   invalidate,
+  invalidatePrefix,
   stats,
 };

@@ -13,6 +13,7 @@ import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
 import GameFiltersBar from '../components/GameFiltersBar';
+import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
 import { Button, Input } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
@@ -78,7 +79,9 @@ function DashboardView() {
     handleChangeGroupOrder,
     handleChangeGroupOffset,
     handleGroupSelection,
+    leaderboardFilters,
   } = useData();
+  const isLeaderboardFiltered = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
   const { games, upcomingGames, liveGames, completedGames } = useGames();
 
   const tabs = useMemo(() => {
@@ -570,27 +573,32 @@ function DashboardView() {
           ) : null}
 
           {view === 'leaderboard' ? (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <LeaderboardCard
-                title="Overall Leaderboard"
-                entries={leaderboard.overall}
-                currentUserId={user?.id}
-                onSelectUser={openProfile}
-              />
-              <GroupLeaderboardCard
-                groups={groups}
-                selectedGroupId={selectedGroupId}
-                onGroupSelection={handleGroupSelection}
-                leaderboardGroup={leaderboard.group}
-                currentUserId={user?.id}
-                onSelectUser={openProfile}
-                groupMeta={leaderboard.groupMeta}
-                orderBy={groupOrderBy}
-                offset={groupOffset}
-                limit={groupLimit}
-                onChangeOrder={handleChangeGroupOrder}
-                onChangeOffset={handleChangeGroupOffset}
-              />
+            <div className="space-y-4">
+              <LeaderboardFiltersBar />
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <LeaderboardCard
+                  title="Overall Leaderboard"
+                  entries={leaderboard.overall}
+                  currentUserId={user?.id}
+                  onSelectUser={openProfile}
+                  isFiltered={isLeaderboardFiltered}
+                />
+                <GroupLeaderboardCard
+                  groups={groups}
+                  selectedGroupId={selectedGroupId}
+                  onGroupSelection={handleGroupSelection}
+                  leaderboardGroup={leaderboard.group}
+                  currentUserId={user?.id}
+                  onSelectUser={openProfile}
+                  groupMeta={leaderboard.groupMeta}
+                  orderBy={groupOrderBy}
+                  offset={groupOffset}
+                  limit={groupLimit}
+                  onChangeOrder={handleChangeGroupOrder}
+                  onChangeOffset={handleChangeGroupOffset}
+                  isFiltered={isLeaderboardFiltered}
+                />
+              </div>
             </div>
           ) : null}
 

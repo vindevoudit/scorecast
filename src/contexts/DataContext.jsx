@@ -30,6 +30,14 @@ export function DataProvider({ children }) {
   // refreshGames (called from many places after picks/admin mutations)
   // preserves the active filter instead of clobbering it.
   const [gameFilters, setGameFiltersState] = useState({ leagueId: '', seasonId: '' });
+  // Leaderboard filter (shared by Leaderboard + My Picks). Separate state
+  // slot from gameFilters so picking a league for stats doesn't also scope
+  // the games view (and vice versa). URL keys are `?lbLeague=` / `?lbSeason=`
+  // (LeaderboardFiltersBar handles parse/write).
+  const [leaderboardFilters, setLeaderboardFiltersState] = useState({
+    leagueId: '',
+    seasonId: '',
+  });
   const [games, setGames] = useState([]);
   const [groups, setGroups] = useState([]);
   const [picks, setPicks] = useState([]);
@@ -113,11 +121,17 @@ export function DataProvider({ children }) {
       const effectiveGroupId = groupId || selectedGroupId || groups[0]?.id || '';
       const orderBy = overrides.orderBy ?? groupOrderBy;
       const offset = overrides.offset ?? groupOffset;
+      // Allow callers to override filters atomically (used by
+      // applyLeaderboardFilters so we don't race state-set vs. fetch). Falls
+      // back to the current slot otherwise.
+      const filters = overrides.leaderboardFilters ?? leaderboardFilters;
       const params = new URLSearchParams();
       if (effectiveGroupId) params.set('groupId', effectiveGroupId);
       if (orderBy) params.set('orderBy', orderBy);
       if (offset) params.set('offset', String(offset));
       params.set('limit', String(groupLimit));
+      if (filters.leagueId) params.set('leagueId', filters.leagueId);
+      if (filters.seasonId) params.set('seasonId', filters.seasonId);
       const query = params.toString() ? `?${params.toString()}` : '';
       const data = await request(`/api/leaderboard${query}`);
       setLeaderboard({
@@ -126,7 +140,18 @@ export function DataProvider({ children }) {
         groupMeta: data.groupMeta || null,
       });
     },
-    [request, selectedGroupId, groups, groupOrderBy, groupOffset],
+    [request, selectedGroupId, groups, groupOrderBy, groupOffset, leaderboardFilters],
+  );
+
+  // Atomic state-set + refresh. Mirrors applyGameFilters' guarantee that a
+  // stale fetch can't race the state update.
+  const applyLeaderboardFilters = useCallback(
+    async (next) => {
+      const normalized = { leagueId: next.leagueId || '', seasonId: next.seasonId || '' };
+      setLeaderboardFiltersState(normalized);
+      await refreshLeaderboard('', { leaderboardFilters: normalized });
+    },
+    [refreshLeaderboard],
   );
 
   const handleChangeGroupOrder = useCallback(
@@ -632,6 +657,10 @@ export function DataProvider({ children }) {
     // Tier 4b Chunk 3 — league/season picker
     gameFilters,
     applyGameFilters,
+
+    // Leaderboard filter (shared by Leaderboard tab + My Picks tab)
+    leaderboardFilters,
+    applyLeaderboardFilters,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

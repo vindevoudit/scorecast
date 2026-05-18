@@ -146,7 +146,7 @@ async function acceptInvite({ groupId, inviteId, userId }) {
       `${user.username} joined "${group.name}"`,
     ).catch(() => {});
   }
-  LeaderboardService.invalidate(`group:${groupId}`);
+  LeaderboardService.invalidatePrefix(`group:${groupId}`);
   return getGroupById(groupId);
 }
 
@@ -169,7 +169,7 @@ async function joinPublic({ groupId, userId }) {
   if (existing) throw errors.badRequest('Already a member');
 
   await GroupMember.create({ groupId, userId });
-  LeaderboardService.invalidate(`group:${groupId}`);
+  LeaderboardService.invalidatePrefix(`group:${groupId}`);
   const joiner = await getUserById(userId);
   if (group.ownerId !== userId) {
     NotificationService.notify(
@@ -190,7 +190,7 @@ async function leave({ groupId, userId }) {
   if (!membership) throw errors.badRequest('Not a member of this group');
 
   await membership.destroy();
-  LeaderboardService.invalidate(`group:${groupId}`);
+  LeaderboardService.invalidatePrefix(`group:${groupId}`);
   const leaver = await getUserById(userId);
   NotificationService.notify(
     group.ownerId,
@@ -235,7 +235,7 @@ async function deleteGroup({ groupId, requesterId }) {
   await sequelize.transaction(async (t) => {
     await cascadeDelete(group, { transaction: t });
   });
-  LeaderboardService.invalidate(`group:${groupId}`);
+  LeaderboardService.invalidatePrefix(`group:${groupId}`);
 
   for (const memberId of memberIds) {
     NotificationService.notify(

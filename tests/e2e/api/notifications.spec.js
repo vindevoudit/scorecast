@@ -24,7 +24,9 @@ const {
 const BOGUS_ID = '99999999-0000-4000-8000-999999999999';
 
 // Produce a real notification for alice by going through the pick + result
-// flow. setResult emits a `pick-scored` notification per pick.
+// flow. setResult emits a `pick-scored` notification per pick via
+// fire-and-forget NotificationService.notify(...).catch — so we poll briefly
+// until the row lands rather than racing the async write.
 async function seedAliceNotification() {
   await clearPicksAndBadges([USERS.alice.id]);
   await clearNotifications([USERS.alice.id]);
@@ -41,11 +43,31 @@ async function seedAliceNotification() {
   } finally {
     await admin.dispose();
   }
+  const pollCtx = await apiLogin(USERS.alice);
+  try {
+    for (let i = 0; i < 30; i++) {
+      const list = await assertOk(pollCtx, 'GET', '/api/notifications');
+      const arr = Array.isArray(list) ? list : list.items;
+      if (arr && arr.length > 0) return arr[0].id;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return null;
+  } finally {
+    await pollCtx.dispose();
+  }
 }
 
 // ---------------------------------------------------------------------------
 // GET /api/notifications
 // ---------------------------------------------------------------------------
+
+test.afterAll(async () => {
+  // Notification seed sets a result on the Lions game; restore so later
+  // specs (notably api/picks) can still create picks on it.
+  await clearGameResults([GAMES.lions.id]);
+  await clearPicksAndBadges([USERS.alice.id]);
+  await clearNotifications([USERS.alice.id]);
+});
 
 test.describe('GET /api/notifications', () => {
   test.beforeAll(async () => {
@@ -88,15 +110,7 @@ test.describe('POST /api/notifications/:id/read', () => {
   let notificationId;
 
   test.beforeEach(async () => {
-    await seedAliceNotification();
-    const authed = await apiLogin(USERS.alice);
-    try {
-      const list = await assertOk(authed, 'GET', '/api/notifications');
-      const arr = Array.isArray(list) ? list : list.notifications;
-      notificationId = arr?.[0]?.id;
-    } finally {
-      await authed.dispose();
-    }
+    notificationId = await seedAliceNotification();
   });
 
   test('owner marks own → 200', async () => {

@@ -7,7 +7,7 @@
 const { test, expect } = require('@playwright/test');
 
 const { USERS, GAMES } = require('../fixtures/data');
-const { apiLogin, clearPicksAndBadges, createPick } = require('../helpers/api');
+const { apiLogin, clearPicksAndBadges, clearGameResults, createPick } = require('../helpers/api');
 const {
   assertOk,
   assertUnauthorized,
@@ -24,6 +24,7 @@ const BOGUS_ID = '99999999-0000-4000-8000-999999999999';
 
 test.describe('POST /api/picks', () => {
   test.beforeEach(async () => {
+    await clearGameResults([GAMES.lions.id, GAMES.eagles.id, GAMES.wolves.id]);
     await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
   });
 
@@ -101,6 +102,7 @@ test.describe('POST /api/picks', () => {
 
 test.describe('GET /api/picks', () => {
   test.beforeAll(async () => {
+    await clearGameResults([GAMES.lions.id]);
     await clearPicksAndBadges([USERS.alice.id]);
     const authed = await apiLogin(USERS.alice);
     try {
@@ -136,6 +138,7 @@ test.describe('DELETE /api/picks/:id', () => {
   let alicePickId;
 
   test.beforeEach(async () => {
+    await clearGameResults([GAMES.lions.id]);
     await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
     const authed = await apiLogin(USERS.alice);
     try {

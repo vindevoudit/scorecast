@@ -82,6 +82,10 @@ const createGameSchema = z
     homeProbability: probability,
     drawProbability: probability.optional(),
     awayProbability: probability,
+    // Optional — when omitted, GameService.createGame falls back to the
+    // Legacy / Imported league (migration 20260518000007). The admin form
+    // now surfaces a picker so the common path supplies it directly.
+    leagueId: uuid.optional(),
   })
   .refine(
     (g) => Math.abs(g.homeProbability + (g.drawProbability ?? 0) + g.awayProbability - 1) <= 0.01,

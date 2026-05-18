@@ -17,6 +17,11 @@ const EMPTY_FORM = {
   homeProbability: '0.5',
   drawProbability: '0',
   awayProbability: '0.5',
+  // Populated by an effect once /api/admin/leagues lands — defaulting to
+  // the first active league. Required by the form even though the schema
+  // marks it optional (server-side legacy fallback is a safety net, not
+  // the intended UX).
+  leagueId: '',
 };
 
 function toLocalInput(value) {
@@ -298,8 +303,22 @@ function GameManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leagueFilter]);
 
+  // Default the create-form's leagueId to the first active league (else the
+  // first league at all) once leagues land. Only runs when the field is
+  // empty so we don't clobber a user pick.
+  useEffect(() => {
+    if (leagues.length === 0) return;
+    if (form.leagueId) return;
+    const fallback = leagues.find((l) => l.active) || leagues[0];
+    setForm((prev) => (prev.leagueId ? prev : { ...prev, leagueId: fallback.id }));
+  }, [leagues, form.leagueId]);
+
   const handleCreate = async (event) => {
     event.preventDefault();
+    if (!form.leagueId) {
+      onError?.('Pick a league before creating the game');
+      return;
+    }
     setBusy(true);
     try {
       await request('/api/admin/games', {
@@ -311,6 +330,7 @@ function GameManager() {
           homeProbability: parseFloat(form.homeProbability),
           drawProbability: parseFloat(form.drawProbability),
           awayProbability: parseFloat(form.awayProbability),
+          leagueId: form.leagueId,
         }),
       });
       setForm(EMPTY_FORM);
@@ -417,6 +437,33 @@ function GameManager() {
           onSubmit={handleCreate}
           className="mt-4 grid gap-3 rounded-2xl bg-overlay/70 p-4 sm:grid-cols-2"
         >
+          <div className="sm:col-span-2">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
+                League
+              </span>
+              <select
+                value={form.leagueId}
+                onChange={(e) => setForm({ ...form, leagueId: e.target.value })}
+                required
+                className="rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                {leagues.length === 0 ? (
+                  <option value="">No leagues yet — create one above</option>
+                ) : (
+                  <>
+                    <option value="">Select a league</option>
+                    {leagues.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                        {l.active === false ? ' (inactive)' : ''}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </label>
+          </div>
           <Input
             label="Home team"
             value={form.homeTeam}

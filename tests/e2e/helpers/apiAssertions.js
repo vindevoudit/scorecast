@@ -31,12 +31,24 @@ async function assertStatus(res, expected, hint) {
   }
 }
 
-// 401 when no cookies are presented. Use only for routes wrapped in
-// authMiddleware (i.e. not optionalAuth and not pre-auth /api/auth/*).
+// 401 when no auth cookie is presented. Middleware order is csrf → auth, so
+// state-changing routes would 403 on CSRF before they ever reach the auth
+// gate. We seed an sc_csrf cookie (and matching header for non-GET methods)
+// via a throwaway GET so the CSRF middleware passes and we land on the auth
+// check itself.
 async function assertUnauthorized(method, path, body) {
   const anon = await apiAnon();
   try {
-    const res = await callRaw(anon, method, path, body);
+    const upper = method.toUpperCase();
+    const opts = body !== undefined ? { data: body } : {};
+    if (upper !== 'GET' && upper !== 'HEAD') {
+      await anon.get('/healthz');
+      const state = await anon.storageState();
+      const csrf = state.cookies.find((c) => c.name === 'sc_csrf')?.value;
+      if (csrf) opts.headers = { ...(opts.headers || {}), 'X-CSRF-Token': csrf };
+    }
+    const fn = anon[method.toLowerCase()];
+    const res = await fn.call(anon, path, opts);
     await assertStatus(res, 401, `${method} ${path} should require auth`);
   } finally {
     await anon.dispose();

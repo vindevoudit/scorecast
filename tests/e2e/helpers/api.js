@@ -193,6 +193,44 @@ async function clearAuditLog() {
   await AuditLog.destroy({ truncate: true });
 }
 
+// Wipes a user by exact username — used to clean up users created by
+// /api/register inside the auth boundary suite. Cascade-delete (migration
+// 20260516000002) tears down their refresh tokens / verify tokens / etc.
+async function deleteUserByUsername(username) {
+  const { User } = getModels();
+  const user = await User.findOne({ where: { username } });
+  if (user) await user.destroy();
+}
+
+// Reset a user's TOTP fields so the 2FA-spec teardown leaves the seed user
+// in its baseline state regardless of which step failed in the middle.
+async function clear2faForUser(userId) {
+  const { User } = getModels();
+  await User.update(
+    { totpSecret: null, totpEnabledAt: null, totpRecoveryCodes: null },
+    { where: { id: userId }, hooks: false },
+  );
+}
+
+// Force a user's password back to a known value (bcrypt-hashed via the model
+// hook). Used by reset-password / change-password specs to restore the seed
+// password after a test mutates it.
+async function setUserPassword(userId, plainPassword) {
+  const { User } = getModels();
+  const user = await User.findByPk(userId);
+  if (!user) throw new Error(`setUserPassword: user ${userId} not found`);
+  user.password = plainPassword;
+  await user.save();
+}
+
+// Generic update for spec teardown — patches a user row without re-running
+// hooks. Use this to restore email / emailVerifiedAt / displayName / bio /
+// profileVisibility after a test mutates them.
+async function updateUserFields(userId, fields) {
+  const { User } = getModels();
+  await User.update(fields, { where: { id: userId }, hooks: false });
+}
+
 async function getUserId(username) {
   const { User } = getModels();
   const user = await User.findOne({ where: { username } });
@@ -257,6 +295,10 @@ module.exports = {
   clearGroupsCreatedBy,
   clearLeaguesByName,
   clearAuditLog,
+  deleteUserByUsername,
+  clear2faForUser,
+  setUserPassword,
+  updateUserFields,
   getUserId,
   setProfileVisibility,
   createAcceptedFriendship,

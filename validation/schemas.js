@@ -122,10 +122,32 @@ const roleSchema = z.object({ role: z.enum(['user', 'admin']) }).openapi('RoleRe
 
 const transferOwnerSchema = z.object({ newOwnerId: uuid }).openapi('TransferOwnerRequest');
 
+// Bidi overrides + zero-width spaces + ASCII/C1 controls. Rejected on free-
+// text profile fields so a malicious displayName / bio can't impersonate
+// another user on the leaderboard via right-to-left override (U+202E) or
+// hide tracking marks via invisible characters. Username is unaffected —
+// `username` already pins `[A-Za-z0-9_]+`. ZWJ (U+200D) is deliberately
+// NOT in the set so ZWJ-emoji like 👨‍💻 still work.
+const DANGEROUS_TEXT_CHARS =
+  // eslint-disable-next-line no-control-regex
+  /[\u202A-\u202E\u2066-\u2069\u200B\u200C\u200E\u200F\uFEFF\u0000-\u001F\u007F-\u009F]/u;
+const NO_DANGEROUS_TEXT_MSG = 'Invisible or control characters are not allowed';
+
+const displayName = z
+  .string()
+  .trim()
+  .max(60)
+  .refine((s) => !DANGEROUS_TEXT_CHARS.test(s), { message: NO_DANGEROUS_TEXT_MSG });
+const bio = z
+  .string()
+  .trim()
+  .max(280)
+  .refine((s) => !DANGEROUS_TEXT_CHARS.test(s), { message: NO_DANGEROUS_TEXT_MSG });
+
 const editProfileSchema = z
   .object({
-    displayName: z.union([z.string().trim().max(60), z.literal('')]).optional(),
-    bio: z.union([z.string().trim().max(280), z.literal('')]).optional(),
+    displayName: z.union([displayName, z.literal('')]).optional(),
+    bio: z.union([bio, z.literal('')]).optional(),
     profileVisibility: z.enum(['public', 'friends', 'private']).optional(),
   })
   .openapi('EditProfileRequest');

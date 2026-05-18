@@ -36,6 +36,12 @@ jobs:
       - name: Format check
         run: npm run format:check
 
+      # Audit production dependencies. --omit=dev so a HIGH-severity finding in
+      # eslint / prettier / playwright (which never ship to prod) doesn't block
+      # PRs; Dependabot still surfaces dev-only advisories.
+      - name: Audit production dependencies
+        run: npm audit --audit-level=high --omit=dev
+
       - name: Build frontend
         run: npm run build
 

@@ -1,0 +1,63 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      # Bundle dev-only upgrades into one PR per week so ESLint / Prettier /
+      # Playwright / etc. churn doesn't drown the queue.
+      dev-dependencies:
+        dependency-type: development
+      # Same for production minor/patch — only majors get their own PRs so
+      # they're easy to review one at a time.
+      prod-minor-and-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: pip
+    directory: '/ml'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - ml
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+
+  - package-ecosystem: docker
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    labels:
+      - dependencies
+      - docker
+
+  - package-ecosystem: docker
+    directory: '/ml'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    labels:
+      - dependencies
+      - docker
+      - ml

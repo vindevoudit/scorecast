@@ -67,7 +67,17 @@ export function useRequest() {
       const text = await response.text();
       const data = text ? JSON.parse(text) : null;
       if (!response.ok) {
-        const err = new Error((data && data.error) || 'Request failed');
+        // Two error envelopes coexist server-side:
+        //   - validation/middleware.js: { error: '<string>', issues: [...] }
+        //   - lib/errorMiddleware.js (AppError):  { error: { code, message } }
+        // Without this normalization, AppError responses become `new
+        // Error({…})` which stringifies to '[object Object]' in the toast.
+        const errField = data && data.error;
+        const msg =
+          typeof errField === 'string'
+            ? errField
+            : (errField && errField.message) || 'Request failed';
+        const err = new Error(msg);
         err.reqId = reqId;
         throw err;
       }

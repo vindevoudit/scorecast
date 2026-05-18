@@ -23,7 +23,14 @@ export async function apiFetch(path, options = {}) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    const err = new Error((data && data.error) || 'Request failed');
+    // Two error envelopes coexist server-side — validation middleware
+    // returns { error: '<string>' } and the AppError middleware returns
+    // { error: { code, message } }. Normalize both to a string so the
+    // caller's toast doesn't render '[object Object]'.
+    const errField = data && data.error;
+    const msg =
+      typeof errField === 'string' ? errField : (errField && errField.message) || 'Request failed';
+    const err = new Error(msg);
     err.reqId = reqId;
     err.status = response.status;
     throw err;

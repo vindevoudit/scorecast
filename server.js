@@ -120,13 +120,24 @@ app.use(
     crossOriginResourcePolicy: false,
   }),
 );
+// Helmet doesn't set Permissions-Policy. Deny camera / microphone / geolocation
+// / payment outright — the app uses none of these and an opt-out header keeps
+// any future embedded iframe or compromised dependency from prompting users.
+app.use((_req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  next();
+});
 app.use(
   cors({
     origin: corsOrigins.length ? corsOrigins : true,
     credentials: true,
   }),
 );
-app.use(bodyParser.json());
+// Cap inbound JSON at 32KB. Largest legitimate request is the client-error
+// report (~17KB worst case from clientErrorSchema); 32KB leaves headroom
+// while shrinking the oversized-payload DoS surface vs body-parser's
+// 100KB default.
+app.use(bodyParser.json({ limit: '32kb' }));
 app.use(cookieParser());
 app.use(csrfMiddleware);
 app.use(attachResponseHelpers);

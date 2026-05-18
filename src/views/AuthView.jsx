@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import LoginForm from '../components/LoginForm';
 import RegisterForm from '../components/RegisterForm';
 import ForgotPasswordForm from '../components/ForgotPasswordForm';
@@ -13,6 +13,24 @@ import { useData } from '../hooks/useData';
 // the post-login dashboard fetch — this view composes the two so the
 // happy path remains "submit → user appears → games + leaderboard
 // hydrate" without App.jsx mediating.
+
+// Register error → field mapper. Server returns `{error: "That username
+// is already taken"}` / `{error: "That email is already in use"}` from
+// routes/auth.js:54-67; surface those inline on the offending field via
+// the <Input error={...}> slot. Substring match (lowercase) so a future
+// copy tweak on the server keeps working as long as the keyword stays.
+function mapRegisterError(message) {
+  if (!message) return {};
+  const lower = message.toLowerCase();
+  if (lower.includes('username is already taken')) {
+    return { username: 'That username is already taken' };
+  }
+  if (lower.includes('email is already in use')) {
+    return { email: 'That email is already in use' };
+  }
+  return {};
+}
+
 function AuthView() {
   const {
     authData,
@@ -33,6 +51,15 @@ function AuthView() {
     initialAuthData,
   } = useAuth();
   const { loadDashboard } = useData();
+  const [registerErrors, setRegisterErrors] = useState({});
+  const clearRegisterError = useCallback((field) => {
+    setRegisterErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }, []);
 
   // showAuth + setShowAuth come from AuthContext now so the SignInModal can
   // flip them from outside AuthView. Default = `sc_visited === '1'` (set on
@@ -69,10 +96,20 @@ function AuthView() {
   };
 
   const handleRegister = async (event) => {
-    const result = await authRegister(event);
-    if (result?.user) {
-      markReturning();
-      await loadDashboard().catch(() => {});
+    try {
+      const result = await authRegister(event);
+      setRegisterErrors({});
+      if (result?.user) {
+        markReturning();
+        await loadDashboard().catch(() => {});
+      }
+    } catch (error) {
+      // Catch the rejection so it never bubbles as an unhandled promise
+      // rejection — otherwise clientErrorReporter would fire the generic
+      // "Something went wrong" toast and clobber the real message. The
+      // banner with the real text was already set inside
+      // AuthContext.handleRegister before it re-threw.
+      setRegisterErrors(mapRegisterError(error?.message));
     }
   };
 
@@ -167,7 +204,13 @@ function AuthView() {
               setAuthView('forgot');
             }}
           />
-          <RegisterForm authData={authData} setAuthData={setAuthData} onSubmit={handleRegister} />
+          <RegisterForm
+            authData={authData}
+            setAuthData={setAuthData}
+            onSubmit={handleRegister}
+            errors={registerErrors}
+            clearError={clearRegisterError}
+          />
         </div>
       </div>
     );

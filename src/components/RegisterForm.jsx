@@ -2,7 +2,7 @@
 
 import { Button, Card, Input, PasswordInput } from './ui';
 
-function RegisterForm({ authData, setAuthData, onSubmit }) {
+function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError }) {
   const mismatch =
     authData.registerPasswordConfirm.length > 0 &&
     authData.registerPassword !== authData.registerPasswordConfirm;
@@ -18,9 +18,11 @@ function RegisterForm({ authData, setAuthData, onSubmit }) {
           label="Username"
           autoComplete="username"
           value={authData.registerUsername}
-          onChange={(event) =>
-            setAuthData((prev) => ({ ...prev, registerUsername: event.target.value }))
-          }
+          onChange={(event) => {
+            setAuthData((prev) => ({ ...prev, registerUsername: event.target.value }));
+            clearError?.('username');
+          }}
+          error={errors.username}
         />
         <Input
           id="register-email"
@@ -31,9 +33,11 @@ function RegisterForm({ authData, setAuthData, onSubmit }) {
           required
           maxLength={254}
           value={authData.registerEmail}
-          onChange={(event) =>
-            setAuthData((prev) => ({ ...prev, registerEmail: event.target.value }))
-          }
+          onChange={(event) => {
+            setAuthData((prev) => ({ ...prev, registerEmail: event.target.value }));
+            clearError?.('email');
+          }}
+          error={errors.email}
         />
         <PasswordInput
           id="register-password"

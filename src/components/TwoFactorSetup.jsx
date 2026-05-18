@@ -1,7 +1,7 @@
 // Tier 11 Chunk 2 — TwoFactorSetup migrated onto Button + Input.
 
 import { useState } from 'react';
-import { Button, Input } from './ui';
+import { Button, Input, PasswordInput } from './ui';
 
 function downloadRecoveryCodes(codes) {
   const blob = new Blob([codes.join('\n') + '\n'], { type: 'text/plain' });
@@ -21,6 +21,7 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
   const [code, setCode] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [useRecovery, setUseRecovery] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [err, setErr] = useState('');
 
   const reset = () => {
@@ -29,15 +30,26 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
     setCode('');
     setRecoveryCode('');
     setUseRecovery(false);
+    setCurrentPassword('');
     setErr('');
   };
 
-  const startSetup = async () => {
+  // Clicking Enable opens the password gate instead of calling the API
+  // directly — the backend requires currentPassword to start setup so a
+  // stolen access JWT alone can't enable 2FA on the victim's account.
+  const startSetup = () => {
+    setErr('');
+    setMode('password-gate');
+  };
+
+  const submitPasswordGate = async (event) => {
+    event.preventDefault();
     setErr('');
     try {
-      const data = await onSetupRequest();
+      const data = await onSetupRequest(currentPassword);
       if (data) {
         setSetupData(data);
+        setCurrentPassword('');
         setMode('setup');
       }
     } catch (e) {
@@ -99,6 +111,34 @@ function TwoFactorSetup({ enabled, busy, onSetupRequest, onConfirm, onDisable })
           </Button>
         ) : null}
       </div>
+
+      {mode === 'password-gate' ? (
+        <form onSubmit={submitPasswordGate} className="mt-5 space-y-4">
+          <p className="text-sm text-fg-muted">
+            Confirm your password to enable two-factor authentication.
+          </p>
+          <PasswordInput
+            label="Current password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+          {err ? (
+            <p role="alert" className="text-sm text-danger">
+              {err}
+            </p>
+          ) : null}
+          <div className="flex gap-2">
+            <Button type="submit" disabled={busy || currentPassword.length === 0}>
+              Continue
+            </Button>
+            <Button variant="secondary" onClick={reset}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : null}
 
       {mode === 'setup' && setupData ? (
         <form onSubmit={submitSetup} className="mt-5 space-y-4">

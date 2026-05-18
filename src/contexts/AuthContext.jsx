@@ -224,7 +224,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   const handle2faSetup = useCallback(
-    async () => apiFetch('/api/me/2fa/setup', { method: 'POST', body: JSON.stringify({}) }),
+    async (currentPassword) =>
+      apiFetch('/api/me/2fa/setup', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword }),
+      }),
     [],
   );
 

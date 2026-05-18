@@ -11,6 +11,7 @@ const qrcode = require('qrcode');
 const { validate } = require('../validation/middleware');
 const {
   setEmailSchema,
+  totpSetupSchema,
   totpConfirmSchema,
   totpVerifySchema,
   editProfileSchema,
@@ -18,7 +19,8 @@ const {
 const { authMiddleware } = require('../middleware/auth');
 const { getUserById } = require('../lib/users');
 const { getJoinedGroupIds, getPendingInvites } = require('../lib/groups');
-const { sendVerificationEmail } = require('../lib/emailHelpers');
+const { sendVerificationEmail, PUBLIC_APP_URL } = require('../lib/emailHelpers');
+const email = require('../lib/email');
 const { User, sequelize } = require('../models');
 const LeaderboardService = require('../services/LeaderboardService');
 
@@ -106,7 +108,7 @@ router.put('/me', authMiddleware, validate(editProfileSchema), async (req, res) 
   }
 });
 
-router.post('/me/2fa/setup', authMiddleware, async (req, res) => {
+router.post('/me/2fa/setup', authMiddleware, validate(totpSetupSchema), async (req, res) => {
   try {
     const user = await getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -114,6 +116,12 @@ router.post('/me/2fa/setup', authMiddleware, async (req, res) => {
       return res
         .status(400)
         .json({ error: '2FA is already enabled — disable it first to regenerate' });
+    }
+    // Password re-auth so a stolen 15-min access JWT alone can't enable 2FA
+    // and lock the victim out of their own account.
+    const passwordValid = await bcrypt.compare(req.body.currentPassword, user.password);
+    if (!passwordValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
     }
     const secret = speakeasy.generateSecret({ name: `Bantryx:${user.username}`, length: 20 });
     const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
@@ -199,19 +207,45 @@ router.post('/me/2fa/disable', authMiddleware, validate(totpVerifySchema), async
 });
 
 router.patch('/me/email', authMiddleware, validate(setEmailSchema), async (req, res) => {
-  const { email: emailAddress } = req.body;
+  const { email: emailAddress, currentPassword } = req.body;
   try {
     const user = await getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    // Password re-auth so a stolen access JWT alone can't pivot a brief
+    // cookie compromise into permanent account takeover (change email →
+    // verify → forgot-password → reset).
+    const passwordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
     const existing = await User.findOne({
       where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
     });
     if (existing && existing.id !== user.id) {
       return res.status(400).json({ error: 'That email is already in use' });
     }
+    const oldEmail = user.email;
     user.email = emailAddress;
     user.emailVerifiedAt = null;
     await user.save({ hooks: false });
+    // Notify the OLD address before sending the verify-new-email so the
+    // victim has a window to detect an unauthorized change. Fire-and-forget
+    // — a failed notification must not block the legitimate request.
+    if (oldEmail) {
+      email
+        .send({
+          to: oldEmail,
+          subject: 'Your Bantryx email address was changed',
+          text: `The email address on your Bantryx account was just changed. If this was you, you can ignore this message.\n\nIf you did NOT make this change, reset your password immediately: ${PUBLIC_APP_URL}/\n\n— Bantryx`,
+          html: `<p>The email address on your Bantryx account was just changed. If this was you, you can ignore this message.</p><p>If you did <b>not</b> make this change, <a href="${PUBLIC_APP_URL}/">reset your password immediately</a>.</p><p>— Bantryx</p>`,
+        })
+        .catch((err) => {
+          req.log.warn(
+            { err: err.message, userId: user.id },
+            'failed to send email-change notification to old address',
+          );
+        });
+    }
     sendVerificationEmail(user).catch((err) => {
       req.log.warn({ err: err.message, userId: user.id }, 'failed to send verification email');
     });

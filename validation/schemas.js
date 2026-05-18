@@ -21,7 +21,13 @@ const forgotPasswordSchema = z.object({ email }).openapi('ForgotPasswordRequest'
 const resetPasswordSchema = z
   .object({ token: z.string().min(20).max(200), password })
   .openapi('ResetPasswordRequest');
-const setEmailSchema = z.object({ email }).openapi('SetEmailRequest');
+// currentPassword required on identity-changing endpoints (email change, 2FA
+// setup) so a stolen access JWT alone can't pivot into account takeover.
+const currentPassword = z.string().min(1).max(200);
+
+const setEmailSchema = z.object({ email, currentPassword }).openapi('SetEmailRequest');
+
+const totpSetupSchema = z.object({ currentPassword }).openapi('TotpSetupRequest');
 
 const totpConfirmSchema = z
   .object({ code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits') })
@@ -200,6 +206,7 @@ module.exports = {
   forgotPasswordSchema,
   resetPasswordSchema,
   setEmailSchema,
+  totpSetupSchema,
   totpConfirmSchema,
   totpVerifySchema,
   createGroupSchema,

@@ -50,6 +50,13 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 
+// Behind Cloudflare → Azure Container Apps. `1` trusts exactly one hop
+// (the Azure ingress) so req.ip resolves to the real client IP from
+// X-Forwarded-For and the per-IP rate limiters bucket per-client instead
+// of globally. Do NOT use `true` — that trusts X-Forwarded-For from any
+// upstream and would let an attacker spoof their IP.
+app.set('trust proxy', 1);
+
 // Order matters (CLAUDE.md): requestId → logger → compression → helmet → cors
 // → bodyParser → cookieParser → csrf → response helpers → routes → 404 → SPA.
 app.use(requestId);

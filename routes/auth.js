@@ -51,6 +51,13 @@ const {
 
 const router = express.Router();
 
+// Pre-computed bcrypt hash used as a dummy when the requested username
+// doesn't exist. Without this, bcrypt.compare would be skipped for unknown
+// users — making login response time enumerable (~5ms vs ~50ms for an
+// existing-but-wrong-password). Generated at boot from a random secret so
+// the hash itself is never of interest to attackers.
+const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10);
+
 router.post('/register', registerLimiter, validate(registerSchema), async (req, res) => {
   const { username, password, email: emailAddress } = req.body;
 
@@ -83,11 +90,16 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
   const { username, password } = req.body;
   const user = await getUserByUsername(username);
 
+  // Always run bcrypt.compare against either the real hash or LOGIN_DUMMY_HASH
+  // so response time is constant regardless of whether the username exists.
+  // Otherwise an attacker can enumerate the user base via timing.
+  const passwordValid = await bcrypt.compare(password, user?.password ?? LOGIN_DUMMY_HASH);
+
   if (user?.lockedUntil && user.lockedUntil > new Date()) {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
 
-  if (!user || !(await bcrypt.compare(password, user.password))) {
+  if (!user || !passwordValid) {
     if (user) {
       user.loginAttempts = (user.loginAttempts || 0) + 1;
       if (user.loginAttempts >= 5) {

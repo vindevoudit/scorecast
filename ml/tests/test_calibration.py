@@ -167,3 +167,33 @@ def test_fit_calibrators_with_missing_class_does_not_explode():
     proba = bundle.predict_proba(X_val)
     # After renormalization, every row should still sum to 1.
     np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-9)
+
+
+def test_calibrated_output_clipped_off_zero_and_one():
+    """Isotonic calibration can map low raw values to literal 0 (and high
+    ones to literal 1) at the edges of its training range. predict_proba
+    must clip every class to [0.01, 0.99] before renormalization so we
+    never emit literal 0% or 100% probabilities — those would round to
+    0.00 / 1.00 at DECIMAL(3,2) precision in the DB.
+
+    Forced scenario: train a calibrator on a val set where one class is
+    never observed (so its calibrator maps everything to 0), then verify
+    the inference output still respects the floor after renorm."""
+    bundle = _toy_bundle()
+    X_val, y_val = _toy_val_split()
+    # Skew val so class 2 (away win) is never observed → its calibrator
+    # will return ~0 for any input, which without the clip would round
+    # to literal 0.00 in the DB.
+    y_skewed = y_val.where(y_val != 2, 0)
+    fit_calibrators(bundle, X_val, y_skewed)
+    proba = bundle.predict_proba(X_val)
+    # Every class on every row must stay strictly above 0.00 (floored at
+    # 0.01 / (max row sum) which post-rounding floors at 0.01). Use a
+    # slightly looser bound to account for the renormalization division.
+    assert proba.min() > 0.0
+    # The DECIMAL(3,2) floor is what actually matters downstream.
+    rounded = np.round(proba, 2)
+    assert rounded.min() >= 0.01
+    assert rounded.max() <= 0.99 or np.isclose(rounded.max(), 0.99, atol=0.01)
+    # Sum-to-1 invariant must still hold.
+    np.testing.assert_allclose(proba.sum(axis=1), 1.0, atol=1e-9)

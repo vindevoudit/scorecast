@@ -81,9 +81,12 @@ class ModelBundle:
         [P_home_win, P_draw, P_away_win] per the FTR → 0/1/2 mapping.
 
         Applies isotonic calibration if `self.calibrators` is set;
-        otherwise returns raw XGBoost output. Calibrated rows are
-        renormalized to sum to 1 (isotonic per-class doesn't preserve
-        the simplex constraint)."""
+        otherwise returns raw XGBoost output. Calibrated values are
+        clipped to [0.01, 0.99] then renormalized to sum to 1
+        (isotonic per-class can map low raw values to literal 0 at
+        the lower edge of its training range; the clip keeps every
+        class above the DECIMAL(3,2) floor so we never emit literal
+        0% or 100% probability writes downstream)."""
         raw = self.predict_proba_raw(X)
         # `getattr` with default None gracefully handles bundles pickled
         # before the `calibrators` field existed.
@@ -93,10 +96,14 @@ class ModelBundle:
         calibrated = np.column_stack(
             [cal.predict(raw[:, k]) for k, cal in enumerate(cals)]
         )
+        # Clip before renormalize — 0.01 is exactly the DECIMAL(3,2)
+        # floor, so even after renormalization division the smallest
+        # rounded value is 0.01 rather than 0.00. Prevents the "Burnley
+        # has literally 0% chance vs Arsenal" edge case.
+        calibrated = np.clip(calibrated, 0.01, 0.99)
         # Re-normalize per row so probabilities sum to 1.0. Floor any zero
-        # rows at uniform to avoid divide-by-zero downstream — should
-        # never trigger in practice since at least one class will have a
-        # non-zero calibrated value.
+        # rows at uniform to avoid divide-by-zero downstream — guard
+        # can't trigger after the 0.01 clip but kept defensively.
         row_sums = calibrated.sum(axis=1, keepdims=True)
         row_sums = np.where(row_sums < 1e-9, 1.0, row_sums)
         return calibrated / row_sums

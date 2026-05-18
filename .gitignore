@@ -127,3 +127,8 @@ ml/data/elo/
 ml/data/models/
 ml/.env
 ml/*.egg-info/
+
+# Ad-hoc Container Apps Job override scratch (see ml/README.md →
+# Ad-hoc runs with custom args). Created in the repo root for each
+# manual override and removed after the run.
+body.json

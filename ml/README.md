@@ -214,6 +214,152 @@ az containerapp job start \
   --resource-group scorecast-prod
 ```
 
+That fires the job with its deployed default args
+(`predict-and-write --league PL --horizon-days 7` — sentinel-skip on; no
+overwrite). For anything else, see the next section.
+
+### Ad-hoc runs with custom args (`--overwrite-existing`, different league, etc.)
+
+The vanilla `az containerapp job start --args ...` flag **cannot** pass
+arguments that start with `--` (e.g. `--league`, `--overwrite-existing`)
+— the CLI parser greedily eats them as new `az` parameters and errors
+with "unrecognized arguments". Working around this requires hitting the
+REST API directly with `az rest`, sending a JSON body that overrides
+the container template for this one execution.
+
+Per-execution overrides **replace** the container fully — they do not
+merge with the deployed template. So the body must include `name`,
+`image`, `command`, `args`, `resources`, AND `env` (otherwise the
+container starts without `SCORECAST_DB_URL` / `SCORECAST_ML_PASSWORD`
+secret refs and dies immediately). The recipe below captures the
+current template values so the override only changes `args`.
+
+The whole flow as one PowerShell block — fill in the league / horizon
+/ flags you need in the `args` array:
+
+```powershell
+# 0. Subscription context
+$sub = az account show --query id -o tsv
+
+# 1. Capture the deployed container template (need name/image/resources/env)
+$existing = az containerapp job show `
+  --name scorecast-ml-job `
+  --resource-group scorecast-prod `
+  --query "properties.template.containers[0]" -o json | ConvertFrom-Json
+
+# Sanity-print — all four MUST be non-empty before continuing
+"name:   $($existing.name)"
+"image:  $($existing.image)"
+"cpu:    $($existing.resources.cpu)"
+"memory: $($existing.resources.memory)"
+
+# 2. Rebuild env as clean hashtables (PSCustomObject round-trip
+#    drops/mangles secretRef fields — the API rejects the result)
+$envRaw = az containerapp job show `
+  --name scorecast-ml-job `
+  --resource-group scorecast-prod `
+  --query "properties.template.containers[0].env" -o json | ConvertFrom-Json
+
+$envClean = @()
+foreach ($e in $envRaw) {
+    $entry = [ordered]@{ name = $e.name }
+    if ($e.value)     { $entry.value     = $e.value }
+    if ($e.secretRef) { $entry.secretRef = $e.secretRef }
+    $envClean += $entry
+}
+
+# 3. Build the override body. Edit the `args` array for what you need.
+$body = @{
+  containers = @(
+    @{
+      name      = "$($existing.name)"
+      image     = "$($existing.image)"
+      command   = @("python")
+      args      = @(
+        "-m","scorecast_ml","predict-and-write",
+        "--league","PL",
+        "--horizon-days","14",
+        "--overwrite-existing"
+      )
+      resources = @{
+        cpu    = [double]$existing.resources.cpu
+        memory = "$($existing.resources.memory)"
+      }
+      env       = $envClean
+    }
+  )
+} | ConvertTo-Json -Depth 10 -Compress
+
+# 4. Write to a file — passing $body via --body directly gets the inner
+#    quotes stripped by PowerShell's arg parser
+[System.IO.File]::WriteAllText("$PWD\body.json", $body)
+
+# 5. Sanity-check before posting — verify real values for name/image/cpu,
+#    clean env entries with secretRef intact
+Get-Content body.json | python -m json.tool | Select-Object -First 30
+
+# 6. Fire — Content-Type header is required, az rest doesn't add it
+az rest --method post `
+  --uri "https://management.azure.com/subscriptions/$sub/resourceGroups/scorecast-prod/providers/Microsoft.App/jobs/scorecast-ml-job/start?api-version=2024-03-01" `
+  --headers "Content-Type=application/json" `
+  --body "@body.json"
+
+# 7. Cleanup
+Remove-Item body.json
+```
+
+Watch the execution land:
+
+```powershell
+az containerapp job execution list `
+  --name scorecast-ml-job `
+  --resource-group scorecast-prod `
+  --query "[0].{name:name,status:properties.status,startTime:properties.startTime}" -o table
+```
+
+Status flips `Running` → `Succeeded` over ~30-60s. Then check the writer
+summary via Log Analytics:
+
+```powershell
+$workspace = az monitor log-analytics workspace list `
+  --resource-group scorecast-prod `
+  --query "[0].customerId" -o tsv
+
+az monitor log-analytics query `
+  --workspace $workspace `
+  --analytics-query "ContainerAppConsoleLogs_CL | where ContainerAppName_s == 'scorecast-ml-job' | where TimeGenerated > ago(15m) | where Log_s contains 'writer_summary' | project TimeGenerated, Log_s | order by TimeGenerated desc" `
+  -o table
+```
+
+Should read `written=N  skipped=0  failed=0` (or `skipped=N` if you ran
+without `--overwrite-existing` against already-written rows).
+
+**Gotchas that took us multiple round-trips to find** — keep these in
+mind when editing the recipe:
+
+1. `--args` greedy parsing — that's the whole reason for `az rest` over
+   `az containerapp job start --args ...`.
+2. PowerShell strips quotes inside `--body $jsonString` — always write
+   to a file and pass `--body "@filename"`.
+3. `az rest` doesn't set `Content-Type` by default — header is required.
+4. Body shape: `containers` is **top-level**, not nested under
+   `template`. (StartJobExecutionTemplate ≠ JobTemplate.)
+5. Override is a full replace, not a merge — `image`, `resources`, AND
+   `env` must all be carried over from the existing template.
+6. `ConvertFrom-Json` PSCustomObject env entries do **not** round-trip
+   cleanly through `ConvertTo-Json` — secretRef fields drop or change
+   case. Always rebuild env as fresh hashtables.
+7. The empty-string `ephemeralStorage: ""` field that comes back from
+   `az ... show` gets rejected if included — only pass `cpu` + `memory`.
+8. Sanity-print captured values before constructing the body. If
+   `$existing.name` / `.image` / `.resources.cpu` print as empty, the
+   `az` context lost the subscription — re-run `az account set
+--subscription <sub>`.
+9. Env var names in prod may differ from your local `ml/.env` (e.g.
+   prod uses `SCORECAST_DB_URL`, local uses `DATABASE_URL`). The
+   per-execution override uses whatever's already in the deployed
+   template — don't try to "fix" it from local.
+
 ### Initial deploy (one-time)
 
 The `ml_pipeline` admin user must already exist **in the running app**

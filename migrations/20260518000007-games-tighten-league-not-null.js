@@ -16,17 +16,21 @@ module.exports = {
   async up(queryInterface) {
     // 1. Ensure a "Legacy" league exists. Composite-unique on
     //    (sourceProvider, sourceLeagueId) means a re-run inserts nothing.
+    //    createdAt/updatedAt supplied explicitly so the INSERT works whether
+    //    the table was created by sequelize.sync (no DDL-level DEFAULTs) or
+    //    by the leagues migration (with DEFAULT NOW()).
     await queryInterface.sequelize.query(`
-      INSERT INTO leagues (id, name, "sourceProvider", "sourceLeagueId", country, active)
-      VALUES (gen_random_uuid(), 'Legacy / Imported', 'legacy', 'LEGACY', NULL, FALSE)
+      INSERT INTO leagues (id, name, "sourceProvider", "sourceLeagueId", country, active, "createdAt", "updatedAt")
+      VALUES (gen_random_uuid(), 'Legacy / Imported', 'legacy', 'LEGACY', NULL, FALSE, NOW(), NOW())
       ON CONFLICT ("sourceProvider", "sourceLeagueId") DO NOTHING
     `);
 
     // 2. Ensure a Legacy season for the current year exists. The
-    //    (leagueId, year) unique index keeps re-runs idempotent.
+    //    (leagueId, year) unique index keeps re-runs idempotent. Same
+    //    timestamp-defaults caveat as the leagues INSERT above.
     await queryInterface.sequelize.query(`
-      INSERT INTO seasons (id, "leagueId", year, current)
-      SELECT gen_random_uuid(), l.id, EXTRACT(YEAR FROM NOW())::INT, TRUE
+      INSERT INTO seasons (id, "leagueId", year, current, "createdAt", "updatedAt")
+      SELECT gen_random_uuid(), l.id, EXTRACT(YEAR FROM NOW())::INT, TRUE, NOW(), NOW()
       FROM leagues l
       WHERE l."sourceProvider" = 'legacy' AND l."sourceLeagueId" = 'LEGACY'
       ON CONFLICT ("leagueId", year) DO NOTHING

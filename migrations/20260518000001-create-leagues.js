@@ -25,14 +25,16 @@ module.exports = {
        ON leagues ("sourceProvider", "sourceLeagueId")`,
     );
     // Seed Premier League + World Cup. id is supplied via gen_random_uuid()
-    // so the INSERT works whether sequelize.sync() pre-created the table
-    // (no PK default) or this migration did (with a default). ON CONFLICT
-    // keeps the migration idempotent against re-runs.
+    // and createdAt/updatedAt via NOW() so the INSERT works whether
+    // sequelize.sync() pre-created the table (no DDL-level DEFAULTs because
+    // DataTypes.NOW only fills timestamps in JS at insert time) or this
+    // migration did (with DEFAULT NOW()). ON CONFLICT keeps the migration
+    // idempotent against re-runs.
     await queryInterface.sequelize.query(`
-      INSERT INTO leagues (id, name, "sourceProvider", "sourceLeagueId", country, active)
+      INSERT INTO leagues (id, name, "sourceProvider", "sourceLeagueId", country, active, "createdAt", "updatedAt")
       VALUES
-        (gen_random_uuid(), 'Premier League', 'football-data.org', 'PL', 'England', TRUE),
-        (gen_random_uuid(), 'FIFA World Cup', 'football-data.org', 'WC', 'World', FALSE)
+        (gen_random_uuid(), 'Premier League', 'football-data.org', 'PL', 'England', TRUE, NOW(), NOW()),
+        (gen_random_uuid(), 'FIFA World Cup', 'football-data.org', 'WC', 'World', FALSE, NOW(), NOW())
       ON CONFLICT ("sourceProvider", "sourceLeagueId") DO NOTHING
     `);
   },

@@ -11,6 +11,7 @@ const qrcode = require('qrcode');
 const { validate } = require('../validation/middleware');
 const {
   setEmailSchema,
+  setPasswordSchema,
   totpSetupSchema,
   totpConfirmSchema,
   totpVerifySchema,
@@ -20,6 +21,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { getUserById } = require('../lib/users');
 const { getJoinedGroupIds, getPendingInvites } = require('../lib/groups');
 const { sendVerificationEmail, PUBLIC_APP_URL } = require('../lib/emailHelpers');
+const { setAuthCookies, revokeAllUserRefreshTokens } = require('../lib/auth');
 const email = require('../lib/email');
 const { User, sequelize } = require('../models');
 const LeaderboardService = require('../services/LeaderboardService');
@@ -203,6 +205,35 @@ router.post('/me/2fa/disable', authMiddleware, validate(totpVerifySchema), async
   } catch (error) {
     req.log.error({ err: error.message }, '2fa disable failed');
     res.status(500).json({ error: '2FA disable failed' });
+  }
+});
+
+router.post('/me/password', authMiddleware, validate(setPasswordSchema), async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const passwordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    if (currentPassword === newPassword) {
+      return res
+        .status(400)
+        .json({ error: 'New password must be different from current password' });
+    }
+    user.password = newPassword;
+    // Save WITH hooks so beforeUpdate re-hashes — mirrors reset-password.
+    await user.save();
+    // Mirror reset-password's force-logout-everywhere semantics, then issue
+    // fresh cookies for the current session so the calling client stays
+    // signed in but every other refresh-token-bearing device is kicked out.
+    await revokeAllUserRefreshTokens(user.id);
+    await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
+    res.json({ ok: true });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'set-password failed');
+    res.status(500).json({ error: 'Failed to change password' });
   }
 });
 

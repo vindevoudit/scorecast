@@ -27,6 +27,10 @@ const currentPassword = z.string().min(1).max(200);
 
 const setEmailSchema = z.object({ email, currentPassword }).openapi('SetEmailRequest');
 
+const setPasswordSchema = z
+  .object({ currentPassword, newPassword: password })
+  .openapi('SetPasswordRequest');
+
 const totpSetupSchema = z.object({ currentPassword }).openapi('TotpSetupRequest');
 
 const totpConfirmSchema = z
@@ -206,6 +210,7 @@ module.exports = {
   forgotPasswordSchema,
   resetPasswordSchema,
   setEmailSchema,
+  setPasswordSchema,
   totpSetupSchema,
   totpConfirmSchema,
   totpVerifySchema,

@@ -232,6 +232,18 @@ export function AuthProvider({ children }) {
     [],
   );
 
+  const handleChangePassword = useCallback(
+    async ({ currentPassword, newPassword }) => {
+      await apiFetch('/api/me/password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      showStatus('Password updated. Other devices have been signed out.');
+      return true;
+    },
+    [showStatus],
+  );
+
   const handle2faConfirm = useCallback(
     async (code) => {
       await apiFetch('/api/me/2fa/confirm', { method: 'POST', body: JSON.stringify({ code }) });
@@ -297,6 +309,7 @@ export function AuthProvider({ children }) {
     handle2faSetup,
     handle2faConfirm,
     handle2faDisable,
+    handleChangePassword,
     performLogout,
     initialAuthData,
   };

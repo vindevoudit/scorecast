@@ -962,13 +962,13 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 
 #### `games`
 
-| Column                                | Type                         | Notes                                                   |
-| ------------------------------------- | ---------------------------- | ------------------------------------------------------- |
-| `id`                                  | UUID PK                      |                                                         |
-| `homeTeam` / `awayTeam`               | STRING NOT NULL              |                                                         |
-| `date`                                | TIMESTAMPTZ NOT NULL         | UTC; the kickoff time                                   |
-| `homeProbability` / `awayProbability` | DECIMAL(3,2) NOT NULL        | Float in `[0,1]`; admin form validates sum-to-1.0 ±0.01 |
-| `result`                              | ENUM('home','away') NULLABLE | `NULL` = not yet resolved                               |
+| Column                                                    | Type                                | Notes                                                                                                                         |
+| --------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                      | UUID PK                             |                                                                                                                               |
+| `homeTeam` / `awayTeam`                                   | STRING NOT NULL                     |                                                                                                                               |
+| `date`                                                    | TIMESTAMPTZ NOT NULL                | UTC; the kickoff time                                                                                                         |
+| `homeProbability` / `drawProbability` / `awayProbability` | DECIMAL(3,2) NOT NULL               | All three required; `drawProbability` defaults to 0 for backward compat. Validator enforces `home + draw + away = 1.0 ± 0.01` |
+| `result`                                                  | ENUM('home','away','draw') NULLABLE | `NULL` = not yet resolved; `'draw'` (post-draw-scoring tier) awards partial credit via `scorePick`'s draw branch              |
 
 #### `groups`
 
@@ -1120,6 +1120,12 @@ Same shape as `email_verification_tokens` — `id`, `userId` FK cascade, `tokenH
 ```
 function scorePick(pick, game):
   if not game.result or not pick: return 0
+  if game.result == 'draw':
+    # Partial credit per the draw-scoring tier. Picks remain winner-only;
+    # a 'draw' result just pays out by how "structurally close" the pick
+    # was to the actual outcome, weighted by the draw's modeled probability.
+    opposite = game.awayProbability if pick.choice == 'home' else game.homeProbability
+    return round((game.drawProbability * opposite / (game.homeProbability + game.awayProbability)) * 100)
   winning = (pick.choice == game.result)
   if not winning: return 0
   probability = game.homeProbability if pick.choice == 'home' else game.awayProbability
@@ -1128,8 +1134,8 @@ function scorePick(pick, game):
 
 **The formula is intentionally duplicated** in two places:
 
-- [server.js](server.js) — authoritative, used to compute leaderboards and the pre-result preview displayed inside notifications.
-- [src/utils/scoring.js](src/utils/scoring.js) — client-side, used by `GameCard` to render the outcome badge (`✓ Correct +N pts`) and by `PicksHistory` to display per-pick points.
+- [lib/scoring.js](lib/scoring.js) — authoritative, used by `lib/users.js` `buildUserSummary` + `lib/groups.js` `buildGroupLeaderboard` to compute leaderboards and by `services/GameService.js` `setResult` / `bulkSetResult` / `applyLiveUpdate` to compute per-user notification points.
+- [src/utils/scoring.js](src/utils/scoring.js) — client-side preview, used by `GameCard` to render the outcome badge (`✓ Correct +N pts` / `Drew +N pts`), by `PicksHistory` for per-pick points, and by `PayoutMatrix` (via `expectedWinPoints` + `expectedDrawPoints`) to show payout previews on upcoming game cards.
 
 **Why duplicated**: there is no shared module strategy (no monorepo, no bundle of server-shared code). The cost is small (10 lines) and a comment in [CLAUDE.md](CLAUDE.md) flags the sync requirement.
 
@@ -1512,7 +1518,7 @@ The free tier does NOT expose `minute` / `injuryTime`. The client surfaces what 
 Single source of truth for two derivations. **Both** the manual/daily sync path (`LeagueService.upsertFixture`) and the live-score path (`GameService.applyLiveUpdate`) import from here so they can never drift.
 
 - `mapUpstreamStatus(raw)` → local `games.status` enum. Upstream `LIVE`/`IN_PLAY`/`PAUSED`/`EXTRA_TIME`/`PENALTY_SHOOTOUT`/`SUSPENDED` all collapse to `'in-progress'`; `FINISHED`/`AWARDED` to `'finished'`; `POSTPONED` and `CANCELLED` stay distinct.
-- `deriveResultFromFixture(fixture, localStatus)` → `'home'` / `'away'` / `null`. Prefers upstream `winner` (handles penalty-shootout knockouts where fullTime is a draw but a winner exists); falls back to score comparison. Draws stay `null` because the existing `result` enum is `'home' | 'away'` only — the UI distinguishes them via `status='finished'`.
+- `deriveResultFromFixture(fixture, localStatus)` → `'home'` / `'away'` / `'draw'` / `null`. Prefers upstream `winner` (handles penalty-shootout knockouts where fullTime is a draw but a winner exists); falls back to score comparison. Post-draw-scoring tier, upstream `DRAW` (and the score-equality fallback) maps to `'draw'`; the `result` enum is now `('home', 'away', 'draw')`. Returns `null` only when the localStatus isn't `'finished'` or when scores are unknown — never as the "this was a draw" sentinel.
 
 **Jobs** ([lib/scheduler.js](lib/scheduler.js) + [lib/jobs/](lib/jobs/))
 
@@ -1658,14 +1664,14 @@ Manual ad-hoc runs work on a Schedule-triggered job: `az containerapp job start 
 
 Within-season adaptation happens via Elo + form (every Thursday); the XGBoost weights themselves are stable between annual rebuilds.
 
-**Schema additions: zero.** The pipeline writes to existing `games.homeProbability` / `games.awayProbability` columns. Audit-logged through the existing `audit_log` table via `auditMutation('admin.game.update', 'game')` already wrapping the route.
+**Schema additions** (post-draw-scoring tier): `games.drawProbability DECIMAL(3,2) NOT NULL DEFAULT 0` and the `games.result` enum extended to `('home', 'away', 'draw')`. The pipeline writes to all three probability columns via the `to_three_way` path. Audit-logged through the existing `audit_log` table via `auditMutation('admin.game.update', 'game')` already wrapping the route.
 
 **Known limits + forward path**:
 
 - **Isotonic calibration** ✅ shipped (Phase 2). Per-class `IsotonicRegression` fit on val, attached to `ModelBundle.calibrators`. Applied automatically inside `predict_proba`. Live production model trains 15 seasons (2009/10 → 2023/24), validates on 2024/25, calibration measured on the in-progress 25/26 season via `scripts/backtest_2526.py`. 70-80% bucket overconfidence pulled from -7pp to -2pp deviation; the model now reaches >80% confidence on top calls (didn't pre-calibration).
 - **Single-league models** — one model per league, no shared pool. La Liga / Bundesliga / etc. need their own training runs. The pipeline is league-agnostic by design; per-league work is mostly extending `teams.json` and `LEAGUE_CODE_MAP`.
 - **Automated cron** ✅ shipped (Phase 3). Container Apps Job runs Thursdays 02:30 UTC. See the "Production deployment" subsection above for the image / Job / cron triple. Manual local runs and ad-hoc `az containerapp job start` triggers remain available.
-- **Pick semantics still winner-only** — draws leave picks at 0 pts (per the existing `result` enum). The "draw partial credit" scoring change (the math is in `ml/scorecast_ml/inference/normalize.py`'s out-of-scope note) is a separate tier touching `PickService.scorePick` + both copies of the scoring formula.
+- **Pick semantics still winner-only, draws now award partial credit** ✅ (shipped 2026-05-17). `pick.choice` remains `'home' | 'away'` only; the `'draw'` result enum value awards partial credit via `pts = round(P_d × opposite_team_prob / (P_h + P_a) × 100)`. ML pipeline writes all 3 probabilities (`to_three_way` replaced `to_two_way` on the live write path). Picks on legacy `result=null + status='finished'` draws stay at 0 pts (no retroactive backfill). Strict `winRate` semantic preserved (only literal `choice === result` matches count as wins). See CLAUDE.md "Draw scoring — picks stay winner-only" critical-consideration entry for the full invariants list.
 
 ---
 

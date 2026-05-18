@@ -244,6 +244,22 @@ export function AuthProvider({ children }) {
     [showStatus],
   );
 
+  const handleChangeEmail = useCallback(
+    async ({ email, currentPassword }) => {
+      const data = await apiFetch('/api/me/email', {
+        method: 'PATCH',
+        body: JSON.stringify({ email, currentPassword }),
+      });
+      // Server clears emailVerifiedAt + queues a fresh verify email. Reflect
+      // both in user state so the panel re-renders with the new address +
+      // an "unverified" badge until the user clicks the link.
+      setUser((u) => (u ? { ...u, email: data?.email ?? email, emailVerifiedAt: null } : u));
+      showStatus('Email updated. Check your new inbox for a verification link.');
+      return true;
+    },
+    [showStatus],
+  );
+
   const handle2faConfirm = useCallback(
     async (code) => {
       await apiFetch('/api/me/2fa/confirm', { method: 'POST', body: JSON.stringify({ code }) });
@@ -310,6 +326,7 @@ export function AuthProvider({ children }) {
     handle2faConfirm,
     handle2faDisable,
     handleChangePassword,
+    handleChangeEmail,
     performLogout,
     initialAuthData,
   };

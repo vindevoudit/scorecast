@@ -7,6 +7,7 @@ import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
 import TwoFactorSetup from './TwoFactorSetup';
 import ChangePasswordPanel from './ChangePasswordPanel';
+import ChangeEmailPanel from './ChangeEmailPanel';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
@@ -60,8 +61,14 @@ function friendButtonProps(friendStatus) {
 }
 
 function ProfileView({ profile, onFriendAction, busy, editable }) {
-  const { user, handle2faSetup, handle2faConfirm, handle2faDisable, handleChangePassword } =
-    useAuth();
+  const {
+    user,
+    handle2faSetup,
+    handle2faConfirm,
+    handle2faDisable,
+    handleChangePassword,
+    handleChangeEmail,
+  } = useAuth();
   const { handleSaveProfile: onSaveProfile } = useData();
   const twoFactorEnabled = Boolean(user?.twoFactorEnabled);
   const on2faSetup = handle2faSetup;
@@ -204,6 +211,14 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
               : ''}
           </p>
         </div>
+      ) : null}
+
+      {showEdit ? (
+        <ChangeEmailPanel
+          currentEmail={user?.email}
+          verified={Boolean(user?.emailVerifiedAt)}
+          onChangeEmail={handleChangeEmail}
+        />
       ) : null}
 
       {showEdit ? <ChangePasswordPanel onChangePassword={handleChangePassword} /> : null}

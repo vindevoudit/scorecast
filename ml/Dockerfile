@@ -80,7 +80,12 @@ USER app
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command: predict probabilities for the next 7 days of PL fixtures
-# and write them through /api/admin/games/:id. Container Apps Job overrides
-# this command per-execution if needed (e.g. ad-hoc --overwrite-existing
-# rewrites).
-CMD ["python", "-m", "scorecast_ml", "predict-and-write", "--league", "PL", "--horizon-days", "7"]
+# and write them through /api/admin/games/:id. --overwrite-existing makes
+# the daily 02:30 UTC cron rewrite every upcoming row (not just sentinel-
+# valued ones) so probabilities track reality as results land. Safe because
+# the pick-time snapshot tier locks each user's payout at pick time —
+# downstream cron rewrites can't shift a committed pick's scoring. Local
+# dev (python -m scorecast_ml predict-and-write ...) defaults to the
+# skip-non-sentinel behavior so devs don't accidentally clobber prod-shaped
+# data while iterating.
+CMD ["python", "-m", "scorecast_ml", "predict-and-write", "--league", "PL", "--horizon-days", "7", "--overwrite-existing"]

@@ -233,63 +233,104 @@ async function bulkDelete(ids) {
 }
 
 // Tier 4b Chunk 2 — live-score job entrypoint. Called once per matched
-// upstream fixture by lib/jobs/syncLiveScores.js. Writes the new
-// status/scores/result inside a transaction; fires notify + badge + cache
-// invalidation AFTER commit so a rollback never leaves ghost messages
-// (CLAUDE.md Tier 5.3 invariant). No-ops when nothing changed so the
-// once-per-minute poll doesn't churn the DB.
+// upstream fixture by lib/jobs/syncLiveScores.js + lib/jobs/
+// reconcileInProgressGames.js. Writes the new status/scores/result inside
+// a transaction; fires notify + badge + cache invalidation AFTER commit so
+// a rollback never leaves ghost messages (CLAUDE.md Tier 5.3 invariant).
+// No-ops when nothing changed so the cron polls don't churn the DB.
+//
+// Concurrency: the 1-min syncLiveScores and 5-min reconcileInProgressGames
+// jobs can race on the same row (both fire at xx:00, xx:05, ...). We
+// re-fetch the game inside the transaction under `SELECT ... FOR UPDATE`
+// so a concurrent call serializes — the second caller observes the first's
+// committed writes via the lock + re-fetch, NOT the stale `localGame` the
+// caller loaded earlier. Without this, two concurrent saves with stale
+// snapshots could overwrite each other (e.g. 5-min sets FINISHED+result,
+// 1-min then sets in-progress+null on its stale view, wiping the result).
+//
+// Status flip-back guard: once `status='finished'` locally, ignore any
+// upstream snapshot that isn't itself FINISHED or AWARDED. Reason:
+// football-data.org's ?status=LIVE,IN_PLAY,PAUSED filter has been observed
+// to lag the canonical ?ids= endpoint by hours (incident 2026-05-19:
+// AFC Bournemouth vs Manchester City sourceId 538145 stuck at HT 1-0
+// in the LIVE filter long after upstream's ?ids= returned FINISHED+DRAW
+// 1-1). Without this guard, after the 5-min reconcile correctly finishes
+// the game, the 1-min job's stale snapshot would regress status / scores /
+// halfTimeReached on the very next tick.
 async function applyLiveUpdate(localGame, apiMatch) {
-  const newStatus = mapUpstreamStatus(apiMatch.status);
-  const newHomeScore = apiMatch.homeScore;
-  const newAwayScore = apiMatch.awayScore;
-  // halfTimeReached is monotonic — once true, never flips back even if
-  // upstream temporarily drops the halfTime block.
-  const newHalfTimeReached = localGame.halfTimeReached || Boolean(apiMatch.halfTimeReached);
-  const newPhase = apiMatch.phase ?? localGame.phase ?? null;
+  const tx = await sequelize.transaction(async (t) => {
+    // Use t.LOCK.UPDATE so a concurrent applyLiveUpdate on the same row
+    // blocks here until the other transaction commits. The reload sees
+    // the committed writes (not the caller's stale snapshot).
+    const fresh = await Game.findByPk(localGame.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!fresh) {
+      return { game: localGame, changed: false, transitionedToFinished: false, newResult: null };
+    }
 
-  // Only derive a new result if we don't already have one. We never
-  // overwrite an admin's manual entry, and we never flip a previously-set
-  // result to a different value automatically.
-  let newResult = localGame.result;
-  if (localGame.result === null) {
-    newResult = deriveResultFromFixture(apiMatch, newStatus);
-  }
+    if (
+      fresh.status === 'finished' &&
+      apiMatch.status !== 'FINISHED' &&
+      apiMatch.status !== 'AWARDED'
+    ) {
+      logger.info(
+        { gameId: fresh.id, sourceId: fresh.sourceId, upstreamStatus: apiMatch.status },
+        'applyLiveUpdate: ignored stale non-FINISHED upstream snapshot for already-finished game',
+      );
+      return { game: fresh, changed: false, transitionedToFinished: false, newResult: null };
+    }
 
-  const changed =
-    localGame.status !== newStatus ||
-    localGame.homeScore !== newHomeScore ||
-    localGame.awayScore !== newAwayScore ||
-    localGame.result !== newResult ||
-    localGame.halfTimeReached !== newHalfTimeReached ||
-    localGame.phase !== newPhase;
+    const newStatus = mapUpstreamStatus(apiMatch.status);
+    const newHomeScore = apiMatch.homeScore;
+    const newAwayScore = apiMatch.awayScore;
+    // halfTimeReached is monotonic — once true, never flips back even if
+    // upstream temporarily drops the halfTime block.
+    const newHalfTimeReached = fresh.halfTimeReached || Boolean(apiMatch.halfTimeReached);
+    const newPhase = apiMatch.phase ?? fresh.phase ?? null;
 
-  if (!changed) {
-    return { game: localGame, changed: false, transitionedToFinished: false };
-  }
+    // Only derive a new result if we don't already have one. We never
+    // overwrite an admin's manual entry, and we never flip a previously-set
+    // result to a different value automatically.
+    let newResult = fresh.result;
+    if (fresh.result === null) {
+      newResult = deriveResultFromFixture(apiMatch, newStatus);
+    }
 
-  // A "transition to finished" is when we are now setting a result for
-  // the first time. That's what triggers pick scoring + notifications.
-  const transitionedToFinished = localGame.result === null && newResult !== null;
+    const changed =
+      fresh.status !== newStatus ||
+      fresh.homeScore !== newHomeScore ||
+      fresh.awayScore !== newAwayScore ||
+      fresh.result !== newResult ||
+      fresh.halfTimeReached !== newHalfTimeReached ||
+      fresh.phase !== newPhase;
 
-  await sequelize.transaction(async (t) => {
-    localGame.status = newStatus;
-    localGame.homeScore = newHomeScore;
-    localGame.awayScore = newAwayScore;
-    localGame.result = newResult;
-    localGame.halfTimeReached = newHalfTimeReached;
-    localGame.phase = newPhase;
-    await localGame.save({ transaction: t });
+    if (!changed) {
+      return { game: fresh, changed: false, transitionedToFinished: false, newResult: null };
+    }
+
+    // A "transition to finished" is when we are now setting a result for
+    // the first time. That's what triggers pick scoring + notifications.
+    const transitionedToFinished = fresh.result === null && newResult !== null;
+
+    fresh.status = newStatus;
+    fresh.homeScore = newHomeScore;
+    fresh.awayScore = newAwayScore;
+    fresh.result = newResult;
+    fresh.halfTimeReached = newHalfTimeReached;
+    fresh.phase = newPhase;
+    await fresh.save({ transaction: t });
+
+    return { game: fresh, changed: true, transitionedToFinished, newResult };
   });
 
-  if (transitionedToFinished) {
+  if (tx.transitionedToFinished) {
     try {
-      const picksForGame = await Pick.findAll({ where: { gameId: localGame.id } });
+      const picksForGame = await Pick.findAll({ where: { gameId: tx.game.id } });
       for (const pick of picksForGame) {
-        const points = scorePick(pick, localGame);
+        const points = scorePick(pick, tx.game);
         NotificationService.notify(
           pick.userId,
           'pick-scored',
-          pickResultTitle(pick, localGame, newResult, points),
+          pickResultTitle(pick, tx.game, tx.newResult, points),
         ).catch(() => {});
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }
@@ -297,17 +338,18 @@ async function applyLiveUpdate(localGame, apiMatch) {
       // Notifications are best-effort. Surface the error but don't crash
       // the polling tick — the result is already committed.
       logger.error(
-        { err, gameId: localGame.id },
+        { err, gameId: tx.game.id },
         'applyLiveUpdate: failed to fan out pick notifications',
       );
     }
     LeaderboardService.invalidate('all');
-  } else if (localGame.status !== newStatus) {
-    // Status flipped (e.g. scheduled → in-progress) without a result
-    // transition — leaderboard cache is unaffected, no fan-out needed.
   }
 
-  return { game: localGame, changed: true, transitionedToFinished };
+  return {
+    game: tx.game,
+    changed: tx.changed,
+    transitionedToFinished: tx.transitionedToFinished,
+  };
 }
 
 module.exports = {

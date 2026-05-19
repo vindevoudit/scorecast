@@ -41,10 +41,20 @@ const { buildDocsRouter, mountSwagger } = require('./routes/docs');
 const scheduler = require('./lib/scheduler');
 const syncFixturesJob = require('./lib/jobs/syncFixtures');
 const syncLiveScoresJob = require('./lib/jobs/syncLiveScores');
+const reconcileInProgressGamesJob = require('./lib/jobs/reconcileInProgressGames');
 const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
 const LIVE_SCORE_SYNC_CRON = process.env.LIVE_SCORE_SYNC_CRON || '* * * * *'; // every minute
+// 5-min defensive reconcile via ?ids= for any in-progress game — closes the
+// gap when football-data.org's ?status= filter goes stale relative to the
+// canonical ?ids= endpoint. See lib/jobs/reconcileInProgressGames.js header.
+const IN_PROGRESS_RECONCILE_CRON = process.env.IN_PROGRESS_RECONCILE_CRON || '*/5 * * * *';
 scheduler.register('syncFixtures', FIXTURE_SYNC_CRON, syncFixturesJob.run);
 scheduler.register('syncLiveScores', LIVE_SCORE_SYNC_CRON, syncLiveScoresJob.run);
+scheduler.register(
+  'reconcileInProgressGames',
+  IN_PROGRESS_RECONCILE_CRON,
+  reconcileInProgressGamesJob.run,
+);
 
 const PORT = process.env.PORT || 3000;
 

@@ -49,6 +49,11 @@ const NOTIFICATION_TYPES = [
     label: 'Group activity',
     description: 'When someone joins or leaves a group you own.',
   },
+  {
+    key: 'friend-request',
+    label: 'Friend requests',
+    description: 'When someone sends you a friend request, or accepts one you sent.',
+  },
 ];
 
 function PushSettingsPanel() {

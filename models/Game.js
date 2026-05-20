@@ -83,6 +83,13 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(20),
         allowNull: true,
       },
+      // PWA Chunk 6 — set by lib/jobs/sendKickoffReminders.js after the
+      // 15-min-before-kickoff push fan-out lands. Null = no reminder sent yet
+      // (legacy rows + upcoming-but-not-yet-reached-window games).
+      kickoffReminderSentAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {
       tableName: 'games',

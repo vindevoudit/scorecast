@@ -79,6 +79,7 @@ const PUSH_NOTIFICATION_TYPES = [
   'group-join',
   'odds-shifted',
   'kickoff-reminder',
+  'friend-request',
 ];
 
 const pushPreferencesSchema = z

@@ -2687,6 +2687,107 @@ The flow that turns football-data.org events into ScoreCast UI updates. Already 
 
 **Operational signal**: if `applyLiveUpdate: ignored stale non-FINISHED upstream snapshot` starts firing repeatedly in prod logs for any sourceId, that's the upstream-filter-staleness signature. Cost per firing: ~1 transaction with a single PK lookup + 1 log line. Low. If it ever fires for many fixtures simultaneously and log volume becomes painful, options are to demote the log to `debug` or rate-limit per-game.
 
+### 8.23 PWA + Web Push (Tier 7 PWA chunks)
+
+Turns ScoreCast into a home-screen-installable app with native OS push notifications. Shipped as six chunks; see Critical Considerations in CLAUDE.md for the load-bearing invariants.
+
+**Frontend installability layer (chunks 1-3)**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ index.html                                                       │
+│   <link rel="manifest" href="/manifest.webmanifest"> ← auto      │
+│   <link rel="apple-touch-icon" href="/apple-touch-icon-180.png">│
+│   <meta name="theme-color" content="#020617" ...>                │
+│   viewport-fit=cover                                              │
+└─────────────────────────────────────────────────────────────────┘
+            │
+            ▼  on first page load
+┌─────────────────────────────────────────────────────────────────┐
+│ vite-plugin-pwa registerSW.js                                    │
+│   navigator.serviceWorker.register('/sw.js')                     │
+└─────────────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ dist/sw.js (built from src/sw.js via injectManifest)             │
+│   • workbox precache(self.__WB_MANIFEST)                         │
+│   • runtime caching: Google Fonts (SWR + CacheFirst),            │
+│     /api/{games,leaderboard,me,groups,leagues} (SWR 5min)        │
+│   • skipWaiting + clientsClaim                                   │
+│   • push handler → registration.showNotification()               │
+│   • notificationclick handler → focus or openWindow              │
+└─────────────────────────────────────────────────────────────────┘
+            │
+            ▼  user gesture: <InstallPrompt /> Install button (Chromium)
+                or Safari Share → Add to Home Screen (iOS)
+┌─────────────────────────────────────────────────────────────────┐
+│ Installed PWA — display: standalone, theme color status bar,     │
+│ launches from home-screen icon, no Safari/Chrome chrome.         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Icon set**: [public/logo.svg](public/logo.svg) is the single source. [scripts/generate-pwa-assets.mjs](scripts/generate-pwa-assets.mjs) uses `@resvg/resvg-js` + `png-to-ico` to produce `pwa-{64,192,512}.png`, `maskable-icon-512x512.png` (70% inner scale for Android Adaptive Icon safe zone), `apple-touch-icon-180x180.png`, and `favicon.ico`. Sidesteps the broken `sharp/libvips` win32-arm64 prebuild that breaks `@vite-pwa/assets-generator` on ARM Windows. Regenerate after editing logo.svg: `npm run generate-pwa-assets`.
+
+**InstallPrompt + iOS gating** ([src/components/InstallPrompt.jsx](src/components/InstallPrompt.jsx)): renders a banner with three branches:
+
+- Chromium with deferred `beforeinstallprompt` → "Install app" button calls native prompt.
+- iOS Safari (`/iPad|iPhone|iPod/.test(ua)` or `MacIntel` + `maxTouchPoints>1` for iPadOS 13+) → "Tap Share → Add to Home Screen" instructions with inline share-icon SVG.
+- Already-installed or dismissed → renders nothing. Dismissal persists via `localStorage.sc_install_dismissed`.
+
+Mounted unconditionally in DashboardView — visible to both signed-in and anonymous-browse visitors. The component self-suppresses; no caller gating needed.
+
+**Backend Web Push pipeline (chunks 4-6)**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ NotificationService.notify(userId, type, title, body, link)     │
+│   1. Notification.create({...}) → bell row                      │
+│   2. PushService.sendToUser(userId, type, {title,body,link})    │
+│      .catch(() => {}) ← fire-and-forget                          │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ services/PushService.js                                          │
+│   if !initialized: no-op (VAPID env not set)                     │
+│   user = User.findByPk(userId)                                   │
+│   if user.pushPreferences[type] === false: skip                  │
+│   subs = PushSubscription.findAll(...)                           │
+│   Promise.all(sendToSubscription(sub) for sub in subs)           │
+│     on 410/404 Gone → destroy sub                                │
+│     on other errors → failureCount++ ; destroy at 5              │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │
+                       ▼  webpush.sendNotification(sub, body, {TTL:24h})
+┌─────────────────────────────────────────────────────────────────┐
+│ Browser push provider (FCM / Apple WebPush / Mozilla autopush)   │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │
+                       ▼  delivered to the device's service worker
+┌─────────────────────────────────────────────────────────────────┐
+│ src/sw.js 'push' handler                                         │
+│   self.registration.showNotification(title, {body, icon, badge,  │
+│     tag: type, data: {link}})                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Subscription lifecycle**: [src/hooks/usePushSubscription.js](src/hooks/usePushSubscription.js) drives the W3C ceremony — `Notification.requestPermission()` → fetch `GET /api/push/vapid-public-key` → `pushManager.subscribe({userVisibleOnly: true, applicationServerKey})` → `POST /api/push/subscribe` with the `{endpoint, keys}` JSON. Unsubscribe walks the reverse path with rollback on server-side failure so the client+server never drift.
+
+**Per-type preferences**: `users.pushPreferences` is a JSONB column mapping notification-type → boolean. Absent key (or `true`) means "deliver"; only an explicit `false` opts out. `PUT /api/me/push-preferences` does a partial merge so a one-key update doesn't clobber the rest. The known types live in [validation/schemas.js](validation/schemas.js) `PUSH_NOTIFICATION_TYPES` — adding a new type requires updating that enum AND `NOTIFICATION_TYPES` in [src/components/PushSettingsPanel.jsx](src/components/PushSettingsPanel.jsx). Current types: `pick-scored`, `badge`, `invite`, `group-join`, `odds-shifted`, `kickoff-reminder`, `friend-request`.
+
+**Kickoff reminder cron** ([lib/jobs/sendKickoffReminders.js](lib/jobs/sendKickoffReminders.js)): every 15 min, finds `status='scheduled'` games kicking off in the next 15-30 min with `kickoffReminderSentAt IS NULL`, looks up every Pick on each game, fires `NotificationService.notify(userId, 'kickoff-reminder', ...)` per pick, stamps `games.kickoffReminderSentAt = NOW()`. Idempotent — duplicate ticks observing the same game skip via the stamp. Cron `KICKOFF_REMINDER_CRON` defaults to `*/15 * * * *`.
+
+**VAPID config**:
+
+- `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` env vars. Generate with `npx web-push generate-vapid-keys`.
+- In prod, the private key is a Key Vault secret `vapid-private-key` referenced by [infra/modules/app.bicep](infra/modules/app.bicep). Must be seeded by hand BEFORE the first Bicep reapply that wires push (same pattern as `jwt-secret` / `football-data-api-key`). The public key + subject are plain Bicep params (`vapidPublicKey` / `vapidSubject`), required on every Bicep reapply that intends push to be live.
+- Without VAPID configured, `PushService.init()` logs one warn at boot and `sendToUser` becomes a silent no-op. `GET /api/push/vapid-public-key` returns 503 so the frontend can branch the UI to "push not available" rather than mis-subscribing.
+
+**Notification poll throttle**: [src/components/NotificationBell.jsx](src/components/NotificationBell.jsx) polls `/api/notifications` every 30s by default. PWA Chunk 5 drops the interval to 5 min when `navigator.serviceWorker.controller != null` — push delivers freshness in real time, polling becomes a fallback. Cheap signal; user with SW but no push subscription gets 5-min lag (acceptable).
+
+**Critical iOS constraint**: iOS Safari only supports Web Push from an installed PWA, on iOS 16.4+. PushSettingsPanel renders an install-first gate (`isIos && !isStandalone`) that points users at the Share menu before the master toggle becomes available.
+
 ---
 
 ## 9. End-to-End Data Flows

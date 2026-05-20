@@ -165,6 +165,16 @@ async function clearNotifications(userIds) {
   await Notification.destroy({ where: { userId: userIds } });
 }
 
+// PWA Chunk 6 — wipe push_subscriptions + reset users.pushPreferences for
+// the supplied user(s). Used by tests/e2e/api/push.spec.js to keep specs
+// isolated when they create/delete subscriptions or flip prefs.
+async function clearPushSubscriptions(userIds) {
+  const { PushSubscription, User } = getModels();
+  const ids = Array.isArray(userIds) ? userIds : [userIds];
+  await PushSubscription.destroy({ where: { userId: ids } });
+  await User.update({ pushPreferences: {} }, { where: { id: ids }, hooks: false });
+}
+
 async function clearComments(gameId) {
   const { Comment } = getModels();
   await Comment.destroy({ where: { gameId } });
@@ -291,6 +301,7 @@ module.exports = {
   clearPicksAndBadges,
   clearGameResults,
   clearNotifications,
+  clearPushSubscriptions,
   clearComments,
   clearGroupsCreatedBy,
   clearLeaguesByName,

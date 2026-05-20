@@ -9,6 +9,7 @@ import TwoFactorSetup from './TwoFactorSetup';
 import ChangePasswordPanel from './ChangePasswordPanel';
 import ChangeEmailPanel from './ChangeEmailPanel';
 import ThemeToggle from './ThemeToggle';
+import PushSettingsPanel from './PushSettingsPanel';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
 import { displayTeamName } from '../utils/teamNames';
@@ -248,6 +249,11 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
           </div>
         </div>
       ) : null}
+
+      {/* PWA Chunk 5 — Web Push opt-in + per-type checkboxes. Renders the
+          iOS install-first gate, the "browser doesn't support" message, and
+          the permission-denied state on its own; no caller branching needed. */}
+      {showEdit ? <PushSettingsPanel /> : null}
 
       {/* Tier 8.6 — Privacy panel. Edits flush immediately via PUT /api/me
           (handleSaveProfile); the radio reflects the current value. */}

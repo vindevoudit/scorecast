@@ -6,10 +6,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // Chunk 1 ships the generateSW strategy so workbox writes the service
-      // worker for us; Chunk 5 will swap to `injectManifest` and supply a
-      // custom src/sw.js with push + notificationclick handlers.
-      strategies: 'generateSW',
+      // Chunk 5 — switched from generateSW to injectManifest so we own the
+      // service worker source (src/sw.js) and can layer push + notificationclick
+      // handlers. Workbox runtime-caching rules from Chunk 1 are re-declared
+      // inside the SW; behavior is unchanged for offline shell + /api reads.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'logo.svg'],
@@ -50,51 +53,11 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        // Precache the Vite output (HTML shell + JS/CSS chunks + icons).
+      // injectManifest precache budget — same 3MB cap as Chunk 1's
+      // generateSW config. Runtime-caching rules live inside src/sw.js now.
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        // Cap the precache budget so the SW install doesn't balloon if a
-        // future asset (e.g. a video) lands in dist/.
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
-        // SPA fallback so deep links work offline.
-        navigateFallback: '/index.html',
-        // Don't serve the fallback for /api/* — those should fail loudly
-        // when offline so the app can show "you're offline" toasts.
-        navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            // Google Fonts CSS — short-lived; the font files themselves are
-            // cached separately by the rule below.
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'google-fonts-stylesheets',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 7 },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-webfonts',
-              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            // API reads — stale-while-revalidate so the shell can render
-            // last-known data instantly while a fresh fetch lands in the
-            // background. Mutating verbs (POST/PUT/DELETE) bypass the cache
-            // because Workbox only caches GET by default.
-            urlPattern: /^\/api\/(games|leaderboard|me|groups|leagues)(\/|$|\?)/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'api-reads',
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 5 },
-              cacheableResponse: { statuses: [200] },
-            },
-          },
-        ],
       },
       devOptions: {
         // Keep the SW out of `vite dev` so HMR isn't disrupted. The plugin

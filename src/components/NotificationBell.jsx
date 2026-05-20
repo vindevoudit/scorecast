@@ -28,7 +28,15 @@ function NotificationBell() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 30 * 1000);
+    // PWA Chunk 5 — drop the poll cadence from 30s to 5 min when a service
+    // worker is active. Active SW => the user is on a build that wires Web
+    // Push, so real-time notifications arrive via push instead of polling.
+    // Worst case (user has SW but never subscribed): bell freshness lags by
+    // up to 5 min, which is unobtrusive and saves a lot of backend load.
+    const hasServiceWorker =
+      typeof navigator !== 'undefined' && navigator.serviceWorker?.controller != null;
+    const intervalMs = hasServiceWorker ? 5 * 60 * 1000 : 30 * 1000;
+    const id = setInterval(load, intervalMs);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

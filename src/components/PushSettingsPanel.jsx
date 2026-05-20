@@ -285,7 +285,7 @@ function PushSettingsPanel() {
         </div>
         <Switch
           checked={subscribed}
-          onCheckedChange={handleToggleMaster}
+          onChange={handleToggleMaster}
           disabled={busy || checking || permission === 'denied'}
           aria-label="Enable push notifications"
         />
@@ -313,7 +313,7 @@ function PushSettingsPanel() {
                 <Checkbox
                   id={`push-pref-${t.key}`}
                   checked={enabled}
-                  onCheckedChange={(checked) => handleTogglePref(t.key, Boolean(checked))}
+                  onChange={(e) => handleTogglePref(t.key, e.target.checked)}
                 />
                 <span className="flex flex-col gap-0.5">
                   <span className="text-sm font-medium text-fg">{t.label}</span>

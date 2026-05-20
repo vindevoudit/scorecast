@@ -110,6 +110,12 @@ const cspDirectives = {
   connectSrc: cspConnectSrc,
   // fonts.gstatic.com hosts the actual .woff2 binaries for the Google Fonts.
   fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+  // PWA chunk 1 — allow the service worker (workbox-generated /sw.js) and
+  // the web app manifest. Without workerSrc, helmet falls back to scriptSrc
+  // for SW registration, which works today but is brittle if scriptSrc ever
+  // tightens. manifestSrc is required by every browser that honors CSP-3.
+  workerSrc: ["'self'"],
+  manifestSrc: ["'self'"],
   frameAncestors: ["'none'"],
   objectSrc: ["'none'"],
 };

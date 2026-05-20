@@ -211,6 +211,14 @@ input {
     padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
   }
 
+  /* Tier 4b PWA — bottom safe-area utility for any element that docks to the
+   * bottom of the viewport (sticky toolbars, drawer footers). The 0.5rem
+   * floor preserves visual breathing room on non-notched devices where
+   * env(safe-area-inset-bottom) returns 0. */
+  .safe-bottom {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+
   .bg-radial-glow {
     background-image:
       radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 45%),

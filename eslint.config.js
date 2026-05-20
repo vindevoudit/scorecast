@@ -23,7 +23,12 @@ const nodeFileGlobs = [
   'tailwind.config.js',
   'postcss.config.js',
 ];
-const rootEsmFileGlobs = ['eslint.config.js', 'vite.config.js', 'playwright.config.js'];
+const rootEsmFileGlobs = [
+  'eslint.config.js',
+  'vite.config.js',
+  'playwright.config.js',
+  'scripts/**/*.{js,mjs}',
+];
 
 export default [
   {

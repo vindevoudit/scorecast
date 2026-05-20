@@ -12,6 +12,7 @@ import SearchBar from '../components/SearchBar';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
+import InstallPrompt from '../components/InstallPrompt';
 import GameFiltersBar from '../components/GameFiltersBar';
 import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
 import { Button, Input } from '../components/ui';
@@ -277,6 +278,11 @@ function DashboardView() {
             </>
           );
         })()}
+
+        {/* PWA install banner — visible to both signed-in and anonymous-browse
+            visitors. The component self-suppresses if already-installed, if
+            dismissed, or (on non-iOS) if Chromium hasn't handed us a prompt. */}
+        <InstallPrompt />
 
         <section className="space-y-6">
           {view === 'games' ? (

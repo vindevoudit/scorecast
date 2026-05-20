@@ -2,8 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Bantryx</title>
+    <meta
+      name="description"
+      content="Predict football match outcomes, climb the leaderboard, and earn badges with friends."
+    />
+
+    <!-- Theme color drives the mobile browser chrome + standalone status bar.
+         Dark default; light variant only fires when the OS asks for it. -->
+    <meta name="theme-color" content="#020617" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+
+    <!-- iOS PWA meta: makes the home-screen launch open in standalone mode
+         and gives the status bar a transparent dark look. apple-mobile-web-app-capable
+         is the legacy Safari spec; Apple kept honoring it after switching to
+         the manifest spec, so both paths cover us. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Bantryx" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

@@ -72,7 +72,7 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
         <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{comment.body}</p>
       )}
 
-      <div className="mt-2 flex flex-wrap items-center gap-1">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         {REACTION_EMOJIS.map((emoji) => {
           const count = comment.reactionCounts?.[emoji] || 0;
           const mine = (comment.yourReactions || []).includes(emoji);

@@ -24,6 +24,14 @@ const buttonStyles = cva(
     'transition duration-200',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
     'disabled:cursor-not-allowed disabled:opacity-50',
+    // Tier 4b PWA — touch-target floor. The `sm` and `md` sizes resolve to
+    // ~28px and ~36px tall from their padding alone, below the 44px WCAG
+    // 2.5.5 / iOS HIG / Material guidance on touch devices. `min-h` enforces
+    // 44px on mobile; `md:min-h-0` lets desktop fall back to the compact
+    // size dictated by padding (preserves the dense admin-table look).
+    // Vertical centering is already wired by `items-center`, so the extra
+    // height just pads symmetrically around the existing content.
+    'min-h-[44px] md:min-h-0',
   ].join(' '),
   {
     variants: {

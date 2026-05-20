@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bantryx">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#020617"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.6">
+      <stop offset="0" stop-color="#06b6d4" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#06b6d4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <path fill="url(#mark)" fill-rule="evenodd" d="
+    M 152 110
+    H 308
+    C 360 110, 396 144, 396 196
+    C 396 228, 378 252, 348 264
+    C 384 274, 410 302, 410 340
+    C 410 388, 372 416, 308 416
+    H 152
+    Z
+    M 220 162
+    V 240
+    H 292
+    C 318 240, 336 226, 336 202
+    C 336 178, 318 162, 292 162
+    Z
+    M 220 290
+    V 364
+    H 300
+    C 328 364, 348 350, 348 328
+    C 348 304, 328 290, 300 290
+    Z
+  "/>
+</svg>

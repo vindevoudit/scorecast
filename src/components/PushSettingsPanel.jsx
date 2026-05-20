@@ -56,6 +56,24 @@ const NOTIFICATION_TYPES = [
   },
 ];
 
+// TEMP DIAGNOSTIC — Push subscription state dump. Renders a collapsible
+// <details> block at the bottom of each panel branch so we can surface
+// internal state on devices without devtools (notably iOS installed PWAs).
+// Remove once the install/subscribe flow is fully verified in prod.
+function DiagnosticBlock({ data }) {
+  if (!data) return null;
+  return (
+    <details className="mt-4 rounded-2xl bg-overlay/70 p-3 text-xs text-fg-muted">
+      <summary className="cursor-pointer font-medium text-fg">
+        Push diagnostics (tap to expand)
+      </summary>
+      <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-fg">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </details>
+  );
+}
+
 function PushSettingsPanel() {
   const { user } = useAuth();
   const { showStatus } = useNotifications();
@@ -69,9 +87,105 @@ function PushSettingsPanel() {
   const [prefs, setPrefs] = useState(() => user?.pushPreferences || {});
   const [busy, setBusy] = useState(false);
 
+  // TEMP DIAGNOSTIC — collects internal state + SW registration status so
+  // we can debug the "greyed toggle" issue on iOS PWAs without web inspector.
+  const [diag, setDiag] = useState(null);
+
   useEffect(() => {
     setPrefs(user?.pushPreferences || {});
   }, [user?.pushPreferences]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const out = {
+        // Capability detection
+        hasServiceWorkerAPI: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
+        hasPushManager: typeof window !== 'undefined' && 'PushManager' in window,
+        hasNotification: typeof window !== 'undefined' && 'Notification' in window,
+        // Platform detection
+        isIos,
+        isStandalone,
+        navigatorStandalone:
+          typeof navigator !== 'undefined' && 'standalone' in navigator
+            ? navigator.standalone
+            : 'n/a',
+        displayModeStandalone:
+          typeof window !== 'undefined' && window.matchMedia
+            ? window.matchMedia('(display-mode: standalone)').matches
+            : null,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+        // Hook state
+        supported,
+        permission,
+        checking,
+        subscribed,
+        busy,
+        // SW runtime
+        controllerPresent:
+          typeof navigator !== 'undefined' && navigator.serviceWorker?.controller != null,
+      };
+
+      try {
+        const reg = navigator.serviceWorker
+          ? await navigator.serviceWorker.getRegistration()
+          : null;
+        if (reg) {
+          out.swScope = reg.scope;
+          out.swInstallingState = reg.installing?.state || null;
+          out.swWaitingState = reg.waiting?.state || null;
+          out.swActiveState = reg.active?.state || null;
+          out.swActiveScriptURL = reg.active?.scriptURL || null;
+        } else {
+          out.swRegistration = 'NONE';
+        }
+      } catch (e) {
+        out.swRegistrationError = e.message;
+      }
+
+      // Probe serviceWorker.ready with a 3-s timeout so we know whether it
+      // resolves (SW active) or hangs (SW never reached active).
+      try {
+        const readyPromise = navigator.serviceWorker?.ready;
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 3000),
+        );
+        if (readyPromise) {
+          await Promise.race([readyPromise, timeoutPromise]);
+          out.serviceWorkerReady = 'resolved';
+        } else {
+          out.serviceWorkerReady = 'no-api';
+        }
+      } catch (e) {
+        out.serviceWorkerReady =
+          e.message === 'timeout' ? 'TIMEOUT (hanging)' : `error: ${e.message}`;
+      }
+
+      // Try the push permission via the registration too — iOS sometimes
+      // reports a different state via pushManager.permissionState() than via
+      // Notification.permission.
+      try {
+        const reg = navigator.serviceWorker
+          ? await navigator.serviceWorker.getRegistration()
+          : null;
+        if (reg && reg.pushManager) {
+          out.pushManagerPermissionState = await reg.pushManager.permissionState({
+            userVisibleOnly: true,
+          });
+          const existingSub = await reg.pushManager.getSubscription();
+          out.existingSubscription = existingSub ? 'present' : 'none';
+        }
+      } catch (e) {
+        out.pushManagerProbeError = e.message;
+      }
+
+      out.timestamp = new Date().toISOString();
+      if (!cancelled) setDiag(out);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supported, isIos, isStandalone, permission, checking, subscribed, busy]);
 
   // iOS Safari can only register a service worker (and therefore can only
   // subscribe to push) inside an installed PWA. Show the install gate first.
@@ -87,6 +201,7 @@ function PushSettingsPanel() {
           in Safari, then <span className="font-medium text-fg">Add to Home Screen</span>. Open
           Bantryx from your home screen and come back here to enable push.
         </p>
+        <DiagnosticBlock data={diag} />
       </div>
     );
   }
@@ -102,6 +217,7 @@ function PushSettingsPanel() {
           Try the latest Chrome, Edge, Firefox, or Safari ≥ 16.4. The in-app notification bell
           continues to work regardless.
         </p>
+        <DiagnosticBlock data={diag} />
       </div>
     );
   }
@@ -208,6 +324,8 @@ function PushSettingsPanel() {
           })}
         </fieldset>
       ) : null}
+
+      <DiagnosticBlock data={diag} />
     </div>
   );
 }

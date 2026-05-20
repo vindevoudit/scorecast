@@ -49,6 +49,12 @@ param customDomain string
 @description('Resource id of the Azure-managed cert bound to customDomain. Empty when customDomain is empty. Discover via `az containerapp env certificate list`.')
 param customDomainCertId string = ''
 
+@description('VAPID public key for Web Push. Generate locally with `npx web-push generate-vapid-keys`; this half is safe to put in source/params (sent to every browser at /api/push/vapid-public-key). Leave empty until Web Push goes live — PushService gracefully no-ops without it.')
+param vapidPublicKey string = ''
+
+@description('mailto:/https: URL the push provider uses for abuse reports. No secret value.')
+param vapidSubject string = 'mailto:vindevoudit@gmail.com'
+
 var environmentName = '${appName}-env-${nameSuffix}'
 var containerAppName = '${appName}-app'
 
@@ -166,6 +172,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/football-data-api-key'
           identity: 'system'
         }
+        // PWA Chunk 4 — VAPID private key for Web Push. Seed the KV entry
+        // BEFORE the first Bicep reapply that picks this up (same pattern as
+        // jwt-secret / resend-api-key / football-data-api-key — see CLAUDE.md
+        // "always-populated registries/secrets/env" note). Without the KV
+        // value present, the deploy fails on the secretRef. Without the env
+        // value populated at runtime, PushService.init() logs a warn and
+        // every sendToUser call no-ops — push routes return 503 cleanly.
+        {
+          name: 'vapid-private-key'
+          keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/vapid-private-key'
+          identity: 'system'
+        }
       ]
     }
     template: {
@@ -193,6 +211,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'DATABASE_URL', secretRef: 'database-url' }
             { name: 'RESEND_API_KEY', secretRef: 'resend-api-key' }
             { name: 'FOOTBALL_DATA_API_KEY', secretRef: 'football-data-api-key' }
+            { name: 'VAPID_PUBLIC_KEY', value: vapidPublicKey }
+            { name: 'VAPID_PRIVATE_KEY', secretRef: 'vapid-private-key' }
+            { name: 'VAPID_SUBJECT', value: vapidSubject }
             { name: 'MIGRATE_ON_BOOT', value: 'false' }
           ]
           probes: [

@@ -54,6 +54,12 @@ param mlApiBaseUrl string = empty(customDomain) ? '' : 'https://${customDomain}'
 @description('Image tag for the scorecast-ml image. Default "placeholder" for the very first deploy. Subsequent reapplies should pass the live tag to avoid clobbering the running ml-job image to the helloworld bootstrap. Discoverable via: az containerapp job show --name scorecast-ml-job --resource-group scorecast-prod --query "properties.template.containers[0].image"')
 param mlImageTag string = 'placeholder'
 
+@description('VAPID public key for Web Push. Generate with `npx web-push generate-vapid-keys`. Leave empty until Web Push goes live — PushService gracefully no-ops without it. The matching private key MUST be seeded into Key Vault as `vapid-private-key` BEFORE the first Bicep reapply that wires push (same pattern as jwt-secret / resend-api-key / football-data-api-key).')
+param vapidPublicKey string = ''
+
+@description('Push provider abuse-report URL. mailto: works; defaults to the project owner.')
+param vapidSubject string = 'mailto:vindevoudit@gmail.com'
+
 // Stable suffix derived from the resource group id so naming is idempotent
 // across deployments but globally unique across Azure.
 var nameSuffix = toLower(uniqueString(resourceGroup().id))
@@ -134,6 +140,8 @@ module app 'modules/app.bicep' = {
     keyVaultName: secrets.outputs.keyVaultName
     customDomain: customDomain
     customDomainCertId: customDomainCertId
+    vapidPublicKey: vapidPublicKey
+    vapidSubject: vapidSubject
   }
 }
 

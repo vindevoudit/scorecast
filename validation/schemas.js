@@ -49,6 +49,44 @@ const totpVerifySchema = z
   })
   .openapi('TotpVerifyRequest');
 
+// PWA Chunk 4 — Web Push. The browser's PushSubscription.toJSON() output is
+// `{endpoint, keys: {p256dh, auth}}`. Endpoint URLs from FCM / Apple WebPush /
+// Mozilla autopush range up to ~500 chars; the upper bound here is loose
+// (2048) so a future provider doesn't break us. p256dh + auth are base64url
+// fixed-length blobs.
+const pushSubscribeSchema = z
+  .object({
+    endpoint: z.string().url().max(2048),
+    keys: z.object({
+      p256dh: z.string().min(64).max(200),
+      auth: z.string().min(16).max(100),
+    }),
+  })
+  .openapi('PushSubscribeRequest');
+
+const pushUnsubscribeSchema = z
+  .object({ endpoint: z.string().url().max(2048) })
+  .openapi('PushUnsubscribeRequest');
+
+// PWA Chunk 4 — known notification types that the per-type preferences UI
+// can toggle. New types should be added here AND in PushSettingsPanel.jsx
+// (Chunk 5). Absent type in pushPreferences = implicitly enabled; only
+// `false` opts out.
+const PUSH_NOTIFICATION_TYPES = [
+  'pick-scored',
+  'badge',
+  'invite',
+  'group-join',
+  'odds-shifted',
+  'kickoff-reminder',
+];
+
+const pushPreferencesSchema = z
+  .object({
+    prefs: z.record(z.enum(PUSH_NOTIFICATION_TYPES), z.boolean()),
+  })
+  .openapi('PushPreferencesRequest');
+
 const createGroupSchema = z
   .object({
     name: z.string().trim().min(1).max(60),
@@ -240,6 +278,10 @@ module.exports = {
   totpSetupSchema,
   totpConfirmSchema,
   totpVerifySchema,
+  pushSubscribeSchema,
+  pushUnsubscribeSchema,
+  pushPreferencesSchema,
+  PUSH_NOTIFICATION_TYPES,
   createGroupSchema,
   inviteSchema,
   pickSchema,

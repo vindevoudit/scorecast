@@ -16,6 +16,7 @@ const {
   totpConfirmSchema,
   totpVerifySchema,
   editProfileSchema,
+  pushPreferencesSchema,
 } = require('../validation/schemas');
 const { authMiddleware } = require('../middleware/auth');
 const { getUserById } = require('../lib/users');
@@ -25,6 +26,7 @@ const { setAuthCookies, revokeAllUserRefreshTokens } = require('../lib/auth');
 const email = require('../lib/email');
 const { User, sequelize } = require('../models');
 const LeaderboardService = require('../services/LeaderboardService');
+const PushService = require('../services/PushService');
 
 const router = express.Router();
 
@@ -49,10 +51,34 @@ router.get('/me', authMiddleware, async (req, res) => {
     onboardingCompletedAt: user.onboardingCompletedAt || null,
     // Tier 8.6 — Settings tab renders a radio bound to this value.
     profileVisibility: user.profileVisibility,
+    // PWA Chunk 4 — JSONB map of notification-type → boolean. Absent or
+    // true = deliver; only false opts out. PushSettingsPanel (Chunk 5)
+    // renders one checkbox per known type seeded against this object.
+    pushPreferences: user.pushPreferences || {},
     joinedGroups,
     pendingInvites,
   });
 });
+
+// PWA Chunk 4 — partial update to users.pushPreferences. The PushService
+// merges with existing JSONB rather than replacing, so a PUT { prefs:
+// { 'odds-shifted': false } } only flips that one type without clobbering
+// the others.
+router.put(
+  '/me/push-preferences',
+  authMiddleware,
+  validate(pushPreferencesSchema),
+  async (req, res) => {
+    try {
+      const next = await PushService.updatePreferences(req.user.id, req.body.prefs);
+      if (!next) return res.status(404).json({ error: 'User not found' });
+      res.json({ pushPreferences: next });
+    } catch (error) {
+      req.log.error({ err: error.message }, 'push-preferences update failed');
+      res.status(500).json({ error: 'Failed to update push preferences' });
+    }
+  },
+);
 
 // Tier 11 Chunk 4 — Marks the onboarding tour as completed (either finished
 // or skipped). Idempotent: if already set, the existing timestamp is

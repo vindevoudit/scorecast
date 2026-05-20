@@ -22,6 +22,7 @@ const {
   EmailVerificationToken,
   PasswordResetToken,
   RefreshToken,
+  PushSubscription,
   sequelize,
 } = require('../models');
 const errors = require('../lib/errors');
@@ -188,6 +189,12 @@ async function cascadeDelete(target, { transaction } = {}) {
   await EmailVerificationToken.destroy({ where: { userId: target.id }, ...opts });
   await PasswordResetToken.destroy({ where: { userId: target.id }, ...opts });
   await RefreshToken.destroy({ where: { userId: target.id }, ...opts });
+  // PWA Chunk 4 — push_subscriptions table was created via a real migration
+  // with ON DELETE CASCADE, so this destroy is belt-and-suspenders. Keeping
+  // the explicit destroy keeps the cascade path symmetrical with the rest of
+  // the user-owned rows and survives any future sync()-vs-migration ordering
+  // changes.
+  await PushSubscription.destroy({ where: { userId: target.id }, ...opts });
 
   await target.destroy(opts);
 }

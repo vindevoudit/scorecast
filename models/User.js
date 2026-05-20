@@ -87,6 +87,16 @@ module.exports = (sequelize) => {
         allowNull: false,
         defaultValue: 'public',
       },
+      pushPreferences: {
+        // PWA Chunk 4 — JSONB map of notification-type → boolean. Absent or
+        // true means "deliver"; only an explicit `false` opts out. Empty
+        // object {} is the implicit "deliver everything" default a user gets
+        // when they first subscribe; the per-type toggles in PushSettingsPanel
+        // (Chunk 5) populate explicit keys here.
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: {},
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,

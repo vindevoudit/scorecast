@@ -33,6 +33,7 @@ const commentsRoutes = require('./routes/comments');
 const notificationsRoutes = require('./routes/notifications');
 const adminRoutes = require('./routes/admin');
 const leaguesRoutes = require('./routes/leagues');
+const pushRoutes = require('./routes/push');
 const { buildDocsRouter, mountSwagger } = require('./routes/docs');
 
 // Tier 4b Chunk 2 — register cron jobs at module load. scheduler.start()
@@ -186,6 +187,7 @@ app.use('/api', usersRoutes);
 app.use('/api', commentsRoutes);
 app.use('/api', notificationsRoutes);
 app.use('/api', leaguesRoutes);
+app.use('/api', pushRoutes);
 app.use('/api', adminRoutes);
 
 // Unmatched /api/* requests get a JSON 404 rather than falling through to the SPA shell.

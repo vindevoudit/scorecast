@@ -46,6 +46,7 @@ const RefreshToken = require('./RefreshToken')(sequelize);
 const League = require('./League')(sequelize);
 const Season = require('./Season')(sequelize);
 const AuditLog = require('./AuditLog')(sequelize);
+const PushSubscription = require('./PushSubscription')(sequelize);
 
 // Define associations.
 //
@@ -104,6 +105,13 @@ User.hasMany(PasswordResetToken, {
 
 RefreshToken.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(RefreshToken, { foreignKey: 'userId', as: 'refreshTokens', onDelete: 'CASCADE' });
+
+PushSubscription.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(PushSubscription, {
+  foreignKey: 'userId',
+  as: 'pushSubscriptions',
+  onDelete: 'CASCADE',
+});
 
 // Tier 4b Chunk 1 — League / Season / Game wiring. Deleting a league
 // CASCADEs to its seasons; orphaning games is intentional (ON DELETE SET
@@ -268,6 +276,7 @@ module.exports = {
   League,
   Season,
   AuditLog,
+  PushSubscription,
   initDatabase,
   runMigrations,
 };

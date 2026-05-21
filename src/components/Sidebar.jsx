@@ -1,8 +1,12 @@
 // Tier 11 Chunk 2 — Sidebar tokenized. Preserves the Playwright role="tab"
 // + accessible-name contract (kicker + label) so the existing E2E selectors
 // keep resolving.
+// Fluid UI tier — mobile drawer migrated to Radix Dialog (via low-level
+// primitives so the overlay can be md:hidden and the content can anchor
+// to the left edge as a slide-in sheet). Desktop sidebar untouched.
 
-import { useEffect, useRef } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { Dialog } from './ui';
 
 const ICONS = {
   games: (props) => (
@@ -185,27 +189,6 @@ function Sidebar({
   mobileOpen,
   onMobileClose,
 }) {
-  const drawerRef = useRef(null);
-
-  useEffect(() => {
-    if (!mobileOpen) return undefined;
-    const handleKey = (event) => {
-      if (event.key !== 'Escape') return;
-      // Tier 11 Chunk 3 — if a modal (ConfirmModal, SignInModal, etc.)
-      // opened on top of the drawer, focus is captured inside that modal.
-      // Let Escape close the modal first; the drawer stays open until a
-      // subsequent Escape after focus returns into the drawer.
-      if (drawerRef.current && !drawerRef.current.contains(document.activeElement)) {
-        return;
-      }
-      onMobileClose?.();
-    };
-    window.addEventListener('keydown', handleKey);
-    const focusTarget = drawerRef.current?.querySelector('button');
-    focusTarget?.focus();
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [mobileOpen, onMobileClose]);
-
   return (
     <>
       <aside
@@ -223,20 +206,19 @@ function Sidebar({
         />
       </aside>
 
-      {mobileOpen ? (
-        <div className="fixed inset-0 z-40 md:hidden" role="presentation">
-          <div
-            onClick={onMobileClose}
-            className="absolute inset-0 bg-base/70 backdrop-blur-sm"
-            aria-hidden="true"
-          />
-          <aside
-            ref={drawerRef}
-            role="dialog"
-            aria-modal="true"
+      <Dialog
+        open={mobileOpen}
+        onOpenChange={(next) => {
+          if (!next) onMobileClose?.();
+        }}
+      >
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-base/70 backdrop-blur-sm duration-150 ease-out-expo data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 md:hidden" />
+          <DialogPrimitive.Content
             aria-label="Dashboard navigation"
-            className="absolute inset-y-0 left-0 w-72 max-w-[85vw] border-r border-default bg-elevated shadow-glow"
+            className="fixed inset-y-0 left-0 z-50 h-full w-72 max-w-[85vw] border-r border-default bg-elevated shadow-glow duration-220 ease-out-expo focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left md:hidden"
           >
+            <DialogPrimitive.Title className="sr-only">Dashboard navigation</DialogPrimitive.Title>
             <SidebarBody
               tabs={tabs}
               activeView={activeView}
@@ -245,9 +227,9 @@ function Sidebar({
               isMobile
               onMobileClose={onMobileClose}
             />
-          </aside>
-        </div>
-      ) : null}
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </Dialog>
     </>
   );
 }

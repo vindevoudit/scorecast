@@ -1,9 +1,13 @@
 // Tier 11 Chunk 2 — NotificationBell tokenized.
+// Fluid UI tier — migrated to Radix Popover so the dropdown gains real
+// entrance/exit motion (zoom-in + slide-down-from-top) and inherits the
+// outside-click / Escape handling that was previously hand-rolled.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { timeAgo } from '../utils/time';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
+import { Popover, PopoverTrigger, PopoverContent } from './ui';
 
 function NotificationBell() {
   const request = useRequest();
@@ -14,7 +18,6 @@ function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const containerRef = useRef(null);
 
   const load = async () => {
     try {
@@ -49,24 +52,6 @@ function NotificationBell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const handleClick = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-    const handleKey = (event) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', handleClick);
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      window.removeEventListener('mousedown', handleClick);
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [open]);
-
   const markRead = async (id) => {
     try {
       await request(`/api/notifications/${id}/read`, { method: 'POST' });
@@ -88,28 +73,32 @@ function NotificationBell() {
   };
 
   return (
-    <div ref={containerRef} className="relative w-full md:w-auto">
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-        className="relative flex h-12 w-full items-center justify-between gap-2 rounded-3xl bg-overlay px-4 text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:w-12 md:justify-center md:px-0"
-      >
-        {/* Mobile: full-width pill with "Notifications" label on the left
-            and the bell emoji on the right. Desktop: icon-only square. */}
-        <span className="text-sm font-semibold md:hidden">Notifications</span>
-        <span aria-hidden="true" className="text-xl">
-          🔔
-        </span>
-        {unreadCount > 0 ? (
-          <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-accent-fg">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        ) : null}
-      </button>
-
-      {open ? (
-        <div className="absolute right-0 z-40 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-3xl border border-default bg-elevated p-4 shadow-glow">
+    <Popover open={open} onOpenChange={setOpen}>
+      <div className="relative w-full md:w-auto">
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+            className="relative flex h-12 w-full items-center justify-between gap-2 rounded-3xl bg-overlay px-4 text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:w-12 md:justify-center md:px-0"
+          >
+            {/* Mobile: full-width pill with "Notifications" label on the left
+                and the bell emoji on the right. Desktop: icon-only square. */}
+            <span className="text-sm font-semibold md:hidden">Notifications</span>
+            <span aria-hidden="true" className="text-xl">
+              🔔
+            </span>
+            {unreadCount > 0 ? (
+              <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-accent-fg">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            ) : null}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          sideOffset={8}
+          className="z-40 w-80 max-w-[calc(100vw-1.5rem)] rounded-3xl border border-default bg-elevated p-4 shadow-glow duration-150 ease-out-expo data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-top-2"
+        >
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-fg">Notifications</p>
             {unreadCount > 0 ? (
@@ -146,9 +135,9 @@ function NotificationBell() {
               ))
             )}
           </div>
-        </div>
-      ) : null}
-    </div>
+        </PopoverContent>
+      </div>
+    </Popover>
   );
 }
 

@@ -4,6 +4,7 @@
 // outside-click / Escape handling that was previously hand-rolled.
 
 import { useEffect, useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { timeAgo } from '../utils/time';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
@@ -18,6 +19,7 @@ function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
 
   const load = async () => {
     try {
@@ -111,7 +113,7 @@ function NotificationBell() {
               </button>
             ) : null}
           </div>
-          <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+          <div ref={listRef} className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
             {items.length === 0 ? (
               <p className="text-xs text-fg-subtle">No notifications yet.</p>
             ) : (

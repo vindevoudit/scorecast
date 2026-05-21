@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import GameCard from '../components/GameCard';
 import LeaderboardCard, { LeaderboardRow } from '../components/LeaderboardCard';
 import GroupCard from '../components/GroupCard';
@@ -103,6 +104,7 @@ function DashboardView() {
     window.localStorage.setItem('sc_sidebar_collapsed', collapsed ? '1' : '0');
   }, [collapsed]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [invitesRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
 
   const onCreateGroupSubmit = async (event) => {
     event.preventDefault();
@@ -515,7 +517,7 @@ function DashboardView() {
                       You have {pendingInvites.length} pending group invitation
                       {pendingInvites.length !== 1 ? 's' : ''}.
                     </p>
-                    <div className="mt-4 space-y-3">
+                    <div ref={invitesRef} className="mt-4 space-y-3">
                       {pendingInvites.map((invite) => (
                         <div
                           key={invite.id}

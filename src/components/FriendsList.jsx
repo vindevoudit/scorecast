@@ -2,6 +2,7 @@
 // null for anon visitors (after all hooks run, per rules-of-hooks).
 
 import { useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import EmptyState from './EmptyState';
 import { useFriends } from '../hooks/useFriends';
 import { useAuth } from '../hooks/useAuth';
@@ -22,6 +23,10 @@ function FriendsList() {
   const onUnfriend = handleUnfriend;
   const { openProfile: onSelectUser } = useData();
   const [username, setUsername] = useState('');
+  const animateOpts = { duration: 180, easing: 'ease-out' };
+  const [incomingRef] = useAutoAnimate(animateOpts);
+  const [outgoingRef] = useAutoAnimate(animateOpts);
+  const [friendsRef] = useAutoAnimate(animateOpts);
 
   if (!user) return null;
 
@@ -75,7 +80,7 @@ function FriendsList() {
           <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-fg-muted">
             Incoming requests
           </h3>
-          <div className="mt-3 space-y-2">
+          <div ref={incomingRef} className="mt-3 space-y-2">
             {incoming.map((entry) =>
               renderRow(entry, [
                 <Button key="accept" size="sm" onClick={() => onAccept(entry.id)}>
@@ -100,7 +105,7 @@ function FriendsList() {
           <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-fg-muted">
             Outgoing requests
           </h3>
-          <div className="mt-3 space-y-2">
+          <div ref={outgoingRef} className="mt-3 space-y-2">
             {outgoing.map((entry) =>
               renderRow(entry, [
                 <Button
@@ -119,7 +124,7 @@ function FriendsList() {
 
       <div className="mt-6">
         <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-fg-muted">Friends</h3>
-        <div className="mt-3 space-y-2">
+        <div ref={friendsRef} className="mt-3 space-y-2">
           {friends.length === 0 ? (
             <EmptyState title="No friends yet" description="Send a request above to get started." />
           ) : (

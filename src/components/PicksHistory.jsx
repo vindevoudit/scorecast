@@ -6,6 +6,7 @@
 // the top of this view so a single dropdown change scopes both surfaces.
 
 import { useMemo, useState } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import EmptyState from './EmptyState';
 import { Badge } from './ui';
 import LeaderboardFiltersBar from './LeaderboardFiltersBar';
@@ -36,6 +37,7 @@ function PicksHistory({ picks, games }) {
   const [filter, setFilter] = useState('all');
   const { leaderboardFilters } = useData();
   const isScoped = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
+  const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
 
   const rows = useMemo(() => {
     const gameById = new Map(games.map((g) => [g.id, g]));
@@ -112,7 +114,7 @@ function PicksHistory({ picks, games }) {
         <LeaderboardFiltersBar label="Filter by" />
       </div>
 
-      <div className="mt-6 space-y-3">
+      <div ref={listRef} className="mt-6 space-y-3">
         {rows.length === 0 ? (
           <EmptyState
             title="No picks yet"

@@ -5,6 +5,11 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { installClientErrorReporter } from './lib/clientErrorReporter';
 import { initSentry } from './lib/sentry';
 import { applyTheme, getStoredTheme } from './lib/theme';
+// PWA install — capture `beforeinstallprompt` at module-import time, before
+// React mounts. Chromium fires the event soon after first paint; if we wait
+// until useStandalone mounts (inside DashboardView -> InstallPrompt) the
+// event has already fired and been dropped. See src/lib/installCapture.js.
+import './lib/installCapture';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { AuthProvider } from './contexts/AuthContext';
 import { AuthGateProvider } from './contexts/AuthGateContext';

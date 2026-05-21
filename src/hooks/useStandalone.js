@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
+import {
+  consumeCapturedInstallPrompt,
+  getCapturedInstallPrompt,
+  subscribe as subscribeToInstallCapture,
+} from '../lib/installCapture';
 
 // Detects whether the app is already running as an installed PWA, whether the
 // device is iOS (where the install path is "Share > Add to Home Screen" rather
@@ -14,6 +19,13 @@ import { useCallback, useEffect, useState } from 'react';
 //   - Firefox desktop: no install prompt event, no PWA install (yet); both
 //     `isIos` and `canPrompt` are false — the calling component should render
 //     nothing in this case.
+//
+// `beforeinstallprompt` race: Chromium fires the event ~500 ms after first
+// paint, BEFORE this hook mounts (the hook lives under InstallPrompt /
+// PushSettingsPanel which only render after auth + DashboardView). To avoid
+// dropping the event, src/lib/installCapture.js attaches a window-level
+// listener at module-import time (imported by main.jsx before React renders).
+// The hook reads the cached event on mount + also subscribes to late events.
 function detectIos() {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
@@ -36,14 +48,19 @@ function detectStandalone() {
 
 export function useStandalone() {
   const [isStandalone, setIsStandalone] = useState(detectStandalone);
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  // Initialize from the early-capture cache so we don't miss a
+  // `beforeinstallprompt` that already fired before React mounted.
+  const [deferredPrompt, setDeferredPrompt] = useState(() => getCapturedInstallPrompt());
   const isIos = detectIos();
 
   useEffect(() => {
+    // Subscribe to late-firing events via the early-capture module so we
+    // remain consistent whether the event fires before OR after this hook
+    // mounts. Direct window listener also kept as a belt-and-suspenders.
+    const unsubscribe = subscribeToInstallCapture((event) => {
+      setDeferredPrompt(event);
+    });
     const onBeforeInstallPrompt = (event) => {
-      // Chromium fires this when install is available. Stash the event so a
-      // user-initiated click can call `.prompt()` later — calling it without
-      // a user gesture throws.
       event.preventDefault();
       setDeferredPrompt(event);
     };
@@ -52,6 +69,7 @@ export function useStandalone() {
       // flip standalone optimistically — the matchMedia listener below also
       // catches this but only after the next paint.
       setDeferredPrompt(null);
+      consumeCapturedInstallPrompt();
       setIsStandalone(true);
     };
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
@@ -64,6 +82,7 @@ export function useStandalone() {
     mql?.addEventListener?.('change', onChange);
 
     return () => {
+      unsubscribe();
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
       window.removeEventListener('appinstalled', onAppInstalled);
       mql?.removeEventListener?.('change', onChange);
@@ -71,11 +90,16 @@ export function useStandalone() {
   }, []);
 
   const promptInstall = useCallback(async () => {
-    if (!deferredPrompt) return { outcome: 'unavailable' };
-    deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
+    // Prefer state, but fall back to the module cache in case the event
+    // arrived after this hook's state was last set — keeps the click handler
+    // robust against the race.
+    const prompt = deferredPrompt || consumeCapturedInstallPrompt();
+    if (!prompt) return { outcome: 'unavailable' };
+    prompt.prompt();
+    const choice = await prompt.userChoice;
     // The event is single-use — null it out so a second click no-ops cleanly.
     setDeferredPrompt(null);
+    consumeCapturedInstallPrompt();
     return choice;
   }, [deferredPrompt]);
 

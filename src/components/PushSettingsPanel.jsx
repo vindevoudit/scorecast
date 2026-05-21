@@ -78,7 +78,7 @@ function PushSettingsPanel() {
   const { user } = useAuth();
   const { showStatus } = useNotifications();
   const request = useRequest();
-  const { isIos, isStandalone } = useStandalone();
+  const { isIos, isStandalone, canPrompt } = useStandalone();
   const { supported, permission, subscribed, checking, subscribe, unsubscribe } =
     usePushSubscription();
 
@@ -121,6 +121,7 @@ function PushSettingsPanel() {
         checking,
         subscribed,
         busy,
+        canPrompt,
         // SW runtime
         controllerPresent:
           typeof navigator !== 'undefined' && navigator.serviceWorker?.controller != null,

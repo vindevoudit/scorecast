@@ -61,7 +61,16 @@ function App() {
       >
         Skip to main content
       </a>
-      <div className="mx-auto max-w-7xl space-y-4">{body}</div>
+      {/* Fluid UI tier — keyed mount triggers a fade-in whenever the view
+          switches (Skeleton → Dashboard on boot, Dashboard ↔ Auth on
+          login/logout). motion-safe: drops the animation entirely for
+          reduced-motion users. */}
+      <div
+        key={body.type.name || 'view'}
+        className="mx-auto max-w-7xl space-y-4 motion-safe:duration-220 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0"
+      >
+        {body}
+      </div>
       <SignInModal />
       {showOnboarding ? <OnboardingTour /> : null}
     </div>

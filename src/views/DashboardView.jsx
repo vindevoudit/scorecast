@@ -292,7 +292,10 @@ function DashboardView() {
             // GameCards + leaderboard side-panel collapse to viewport width
             // instead of sizing to their min-content (which overflows at
             // 320px / iPhone SE).
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+            // Fluid UI tier — animate-in on first paint after the conditional
+            // remounts (i.e. every tab switch). 4px slide-from-bottom adds
+            // subtle directionality without slowing the swap.
+            <div className="grid grid-cols-1 gap-4 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
               <div className="space-y-6">
                 <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
                   <h2 className="text-2xl font-semibold text-fg">Games</h2>
@@ -402,13 +405,15 @@ function DashboardView() {
           ) : null}
 
           {view === 'mypicks' ? (
-            <Suspense fallback={<LazyFallback label="Loading your picks…" />}>
-              <PicksHistory picks={picks} games={games} />
-            </Suspense>
+            <div className="motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
+              <Suspense fallback={<LazyFallback label="Loading your picks…" />}>
+                <PicksHistory picks={picks} games={games} />
+              </Suspense>
+            </div>
           ) : null}
 
           {view === 'groups' ? (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
+            <div className="grid grid-cols-1 gap-6 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
               <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
                 {user ? (
                   <>
@@ -569,7 +574,7 @@ function DashboardView() {
           ) : null}
 
           {view === 'profile' ? (
-            <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
+            <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
               {!ownProfile ? (
                 <p className="text-sm text-fg-muted">Loading your profile…</p>
               ) : (
@@ -581,7 +586,7 @@ function DashboardView() {
           ) : null}
 
           {view === 'leaderboard' ? (
-            <div className="space-y-4">
+            <div className="space-y-4 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
               <LeaderboardFiltersBar />
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <LeaderboardCard
@@ -611,9 +616,11 @@ function DashboardView() {
           ) : null}
 
           {view === 'admin' && user?.role === 'admin' ? (
-            <Suspense fallback={<LazyFallback label="Loading admin panel…" />}>
-              <AdminPanel />
-            </Suspense>
+            <div className="motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
+              <Suspense fallback={<LazyFallback label="Loading admin panel…" />}>
+                <AdminPanel />
+              </Suspense>
+            </div>
           ) : null}
         </section>
       </main>

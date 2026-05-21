@@ -21,9 +21,16 @@ import { cva } from 'class-variance-authority';
 const buttonStyles = cva(
   [
     'inline-flex items-center justify-center gap-2 rounded-2xl font-semibold',
-    'transition duration-200',
+    'transition duration-200 ease-out-expo',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
     'disabled:cursor-not-allowed disabled:opacity-50',
+    // Fluid UI tier — iOS-style tactile press feedback. 2% scale recoil on
+    // mousedown/touchdown reverses on release. motion-safe: prefix keeps
+    // reduced-motion users out of the transform entirely. The 200ms timing
+    // from the row above governs the spring-back; in practice it reads as
+    // a snappy press because Tailwind's `transition` covers all visual
+    // properties including transform.
+    'motion-safe:active:scale-[0.98]',
     // Tier 4b PWA — touch-target floor. The `sm` and `md` sizes resolve to
     // ~28px and ~36px tall from their padding alone, below the 44px WCAG
     // 2.5.5 / iOS HIG / Material guidance on touch devices. `min-h` enforces

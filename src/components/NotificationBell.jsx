@@ -37,7 +37,15 @@ function NotificationBell() {
       typeof navigator !== 'undefined' && navigator.serviceWorker?.controller != null;
     const intervalMs = hasServiceWorker ? 5 * 60 * 1000 : 30 * 1000;
     const id = setInterval(load, intervalMs);
-    return () => clearInterval(id);
+    // DataContext fires `scorecast:revalidate` on tab visibility + SW push.
+    // Reload the bell immediately so the unread badge updates in lockstep
+    // with the rest of the dashboard instead of waiting for the poll tick.
+    const onRevalidate = () => load();
+    window.addEventListener('scorecast:revalidate', onRevalidate);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('scorecast:revalidate', onRevalidate);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

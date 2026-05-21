@@ -112,7 +112,20 @@ self.addEventListener('push', (event) => {
     // iOS ignores actions on the lock screen but Android shows them.
     requireInteraction: false,
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  // Show the OS notification AND notify any open app windows so they can
+  // revalidate their in-memory state (friends list, pending invites, picks,
+  // leaderboard) without waiting for the next visibilitychange/poll. Without
+  // this, a foregrounded tab keeps showing stale data even though the SW
+  // received the push.
+  event.waitUntil(
+    (async () => {
+      await self.registration.showNotification(title, options);
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of all) {
+        client.postMessage({ type: 'scorecast:push', notificationType: payload.type });
+      }
+    })(),
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

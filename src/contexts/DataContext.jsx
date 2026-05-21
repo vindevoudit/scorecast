@@ -7,7 +7,7 @@
 // Triggers loadDashboard when `user` flips from null → set; clears its own
 // slots when `user` flips back to null (so logout / session-expired tear
 // down the cached data without needing AuthContext to know about it).
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 import { useNotifications } from './NotificationContext';
 import { useRequest } from '../hooks/useRequest';
@@ -272,6 +272,88 @@ export function DataProvider({ children }) {
         if (error.message !== 'Session expired') showStatus(error.message);
       });
   }, [view, user?.username, picks, games, request, showStatus]);
+
+  // Background revalidation. The app used to be a one-shot snapshot at boot —
+  // friend requests, group invites, scored picks, and live game state stayed
+  // frozen until the user logged out/in. Now we re-fetch the user-scoped slots
+  // when (a) the tab/PWA becomes visible (user returns from another app) and
+  // (b) the service worker tells us a push just landed. Both signals are
+  // debounced to once per 30s and skipped during anon browse to avoid 401s.
+  const lastRevalidateRef = useRef(Date.now());
+  const revalidatingRef = useRef(false);
+
+  const revalidate = useCallback(async () => {
+    if (!user) return;
+    if (revalidatingRef.current) return;
+    revalidatingRef.current = true;
+    lastRevalidateRef.current = Date.now();
+    try {
+      const me = await request('/api/me');
+      const { pendingInvites: invites, ...userData } = me;
+      setUser(userData);
+      setPendingInvites(invites || []);
+      await Promise.all([
+        refreshGames(),
+        refreshGroups(),
+        refreshPicks(),
+        refreshLeaderboard(),
+        refreshFriends(),
+        refreshDiscover(),
+      ]);
+      // Tell the bell (and any other DOM-event listeners) to reload their
+      // own state. Keeps the bell's poll lifecycle decoupled from this hook.
+      window.dispatchEvent(new CustomEvent('scorecast:revalidate'));
+    } catch (error) {
+      if (error.message !== 'Session expired' && error.status !== 401) {
+        console.warn('revalidate failed:', error.message);
+      }
+    } finally {
+      revalidatingRef.current = false;
+    }
+  }, [
+    user,
+    request,
+    setUser,
+    refreshGames,
+    refreshGroups,
+    refreshPicks,
+    refreshLeaderboard,
+    refreshFriends,
+    refreshDiscover,
+  ]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+
+    const REVALIDATE_DEBOUNCE_MS = 30 * 1000;
+    const maybeRevalidate = () => {
+      if (Date.now() - lastRevalidateRef.current < REVALIDATE_DEBOUNCE_MS) return;
+      revalidate();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') maybeRevalidate();
+    };
+    // SW push messages bypass the debounce — a push is a strong signal that
+    // something the user cares about just changed; latency matters more than
+    // a possible duplicate refresh against the visibilitychange handler.
+    const onSwMessage = (event) => {
+      if (event.data?.type === 'scorecast:push') {
+        lastRevalidateRef.current = 0;
+        revalidate();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', maybeRevalidate);
+    navigator.serviceWorker?.addEventListener?.('message', onSwMessage);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', maybeRevalidate);
+      navigator.serviceWorker?.removeEventListener?.('message', onSwMessage);
+    };
+  }, [user, revalidate]);
 
   // --- Pick mutations ----------------------------------------------------
 

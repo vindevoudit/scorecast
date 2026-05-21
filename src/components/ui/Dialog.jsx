@@ -31,7 +31,8 @@ const DialogOverlay = forwardRef(function DialogOverlay({ className, ...props },
       className={cn(
         'fixed inset-0 z-50 bg-base/70 backdrop-blur-sm',
         'data-[state=open]:animate-in data-[state=closed]:animate-out',
-        'data-[state=open]:fade-in data-[state=closed]:fade-out',
+        'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        'duration-150 ease-out-expo',
         className,
       )}
       {...props}
@@ -49,6 +50,10 @@ const DialogContent = forwardRef(function DialogContent({ className, children, .
           'fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2',
           'rounded-3xl border border-default bg-elevated p-6 shadow-glow',
           'focus:outline-none',
+          'data-[state=open]:animate-in data-[state=closed]:animate-out',
+          'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+          'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
+          'duration-180 ease-out-expo',
           className,
         )}
         {...props}

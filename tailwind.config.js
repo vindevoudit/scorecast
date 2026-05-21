@@ -65,7 +65,21 @@ module.exports = {
         default: withAlpha('border-default'),
         strong: withAlpha('border-strong'),
       }),
+
+      // Fluid UI tier — motion token vocabulary. `out-expo` is Radix's
+      // standard decelerator (matches shadcn/ui patterns); `in-out-soft` is
+      // the Material-Design easing used for layout transitions like the
+      // sidebar collapse. Adding `180`/`220` fills the gap between
+      // Tailwind's built-in 150/200/300.
+      transitionTimingFunction: {
+        'out-expo': 'cubic-bezier(0.16, 1, 0.3, 1)',
+        'in-out-soft': 'cubic-bezier(0.4, 0, 0.2, 1)',
+      },
+      transitionDuration: {
+        180: '180ms',
+        220: '220ms',
+      },
     },
   },
-  plugins: [],
+  plugins: [require('tailwindcss-animate')],
 };

@@ -29,6 +29,9 @@ const toastStyles = cva(
   [
     'pointer-events-auto relative flex w-full items-start gap-3 rounded-2xl border p-4 shadow-glow',
     'data-[state=open]:animate-in data-[state=closed]:animate-out',
+    'data-[state=open]:slide-in-from-bottom-4 data-[state=closed]:slide-out-to-right-full',
+    'data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0',
+    'duration-220 ease-out-expo',
   ].join(' '),
   {
     variants: {

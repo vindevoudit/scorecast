@@ -52,19 +52,35 @@ registerRoute(
 
 // API reads — last-known data renders instantly while a fresh fetch lands in
 // the background. Workbox only caches GET by default so mutating verbs bypass.
+//
+// CRITICAL: only cache endpoints whose response is identical for every viewer.
+// Workbox keys by URL, not by Cookie — so caching anything user-scoped (/api/me,
+// /api/groups, /api/leaderboard with its viewer-aware masking, /api/picks,
+// /api/friends, /api/notifications) would let user A's cached response be
+// served to user B after a logout/login swap on the same browser. Games and
+// leagues are anon-safe public reads (viewer's picks live on /api/picks, which
+// is NOT cached here), so they're the only safe entries.
 registerRoute(
   ({ url, request }) =>
     request.method === 'GET' &&
     url.pathname.startsWith('/api/') &&
-    /^\/api\/(games|leaderboard|me|groups|leagues)(\/|$)/.test(url.pathname),
+    /^\/api\/(games|leagues)(\/|$)/.test(url.pathname),
   new StaleWhileRevalidate({
-    cacheName: 'api-reads',
+    cacheName: 'api-reads-v2',
     plugins: [
       new CacheableResponsePlugin({ statuses: [200] }),
       new ExpirationPlugin({ maxEntries: 50, maxAgeSeconds: 60 * 5 }),
     ],
   }),
 );
+
+// Flush the pre-fix `api-reads` cache on activation. Existing installs from
+// before the cache-scope fix may have user-scoped responses (/api/me, etc.)
+// poisoned into 'api-reads'; deleting it forces a fresh fetch and prevents
+// cross-user data leaks on the first navigation after the SW upgrade.
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.delete('api-reads'));
+});
 
 // SPA fallback: a hard-refresh on a deep link while offline should still
 // hand back the cached app shell (index.html) instead of erroring.

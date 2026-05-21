@@ -19,6 +19,12 @@ function authMiddleware(req, res, next) {
     // hypothetical confusion if JWT_SECRET resembled a public key.
     const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     req.user = payload;
+    // Defense in depth against the cross-user SW cache leak fixed in src/sw.js.
+    // Marks every authenticated response uncacheable by service workers, HTTP
+    // proxies, and the browser's own HTTP cache — so even if a future runtime
+    // route in workbox forgets to exclude a user-scoped endpoint, the response
+    // can't be reused for a different viewer.
+    res.set('Cache-Control', 'private, no-store, max-age=0');
     next();
   } catch (error) {
     res.status(401).json({ error: 'Invalid token' });

@@ -357,8 +357,22 @@ export function DataProvider({ children }) {
 
   // --- Pick mutations ----------------------------------------------------
 
+  // Optimistic pick mutations — the pick UI updates the instant the user
+  // taps, so the GameCard reflects the new state in <16 ms instead of
+  // waiting ~500 ms for POST + refreshPicks. The background refetch still
+  // runs and replaces the temp pick with the real one (matching gameId);
+  // on server error we restore the snapshot.
   const submitPick = useCallback(
     async (gameId, choice) => {
+      const snapshot = picks;
+      const optimistic = {
+        id: `temp-${gameId}`,
+        userId: user?.id,
+        gameId,
+        choice,
+        createdAt: new Date().toISOString(),
+      };
+      setPicks((prev) => [...prev.filter((p) => p.gameId !== gameId), optimistic]);
       try {
         await request('/api/picks', {
           method: 'POST',
@@ -367,23 +381,30 @@ export function DataProvider({ children }) {
         await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
         await showStatus('Pick saved successfully');
       } catch (error) {
+        setPicks(snapshot);
         if (error.message !== 'Session expired') showStatus(error.message);
       }
     },
-    [request, refreshGames, refreshPicks, refreshLeaderboard, showStatus],
+    [picks, user?.id, request, refreshGames, refreshPicks, refreshLeaderboard, showStatus],
   );
 
   const removePick = useCallback(
     async (pickId) => {
+      const snapshot = picks;
+      setPicks((prev) => prev.filter((p) => p.id !== pickId));
+      // A still-in-flight optimistic pick has no server row yet — just drop
+      // it locally; the parent submitPick's refreshPicks will reconcile.
+      if (String(pickId).startsWith('temp-')) return;
       try {
         await request(`/api/picks/${pickId}`, { method: 'DELETE' });
         await Promise.all([refreshPicks(), refreshLeaderboard()]);
         await showStatus('Pick removed');
       } catch (error) {
+        setPicks(snapshot);
         if (error.message !== 'Session expired') showStatus(error.message);
       }
     },
-    [request, refreshPicks, refreshLeaderboard, showStatus],
+    [picks, request, refreshPicks, refreshLeaderboard, showStatus],
   );
 
   // --- Group mutations ---------------------------------------------------

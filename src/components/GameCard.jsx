@@ -43,8 +43,13 @@ function hasScores(game) {
 }
 
 function pickButtonClass(active) {
+  // No CSS transition on the active/inactive swap — combined with the
+  // optimistic update in DataContext.submitPick, the button flips state
+  // the instant the user taps. The hover styles still get Tailwind's
+  // default 150 ms ease on desktop because they're applied through
+  // `hover:` variants (CSS native), not through this state class swap.
   const base =
-    'rounded-3xl border px-4 py-3.5 text-sm font-semibold transition duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50';
+    'rounded-3xl border px-4 py-3.5 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50';
   if (active) return `${base} border-accent-soft bg-accent/30 text-fg`;
   return `${base} border-accent/20 bg-accent/10 text-accent-soft hover:border-accent-soft hover:bg-accent/20`;
 }

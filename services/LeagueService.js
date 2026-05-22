@@ -16,6 +16,7 @@ const errors = require('../lib/errors');
 const logger = require('../lib/logger');
 const footballApi = require('../lib/footballApi');
 const { mapUpstreamStatus, deriveResultFromFixture } = require('../lib/fixtureStatus');
+const { INITIAL_RATING } = require('../lib/ml/eloMath');
 
 async function listLeagues() {
   return League.findAll({ order: [['name', 'ASC']] });
@@ -75,6 +76,28 @@ async function ensureSeason({ leagueId, year, transaction }) {
   return season;
 }
 
+// Tier 17 — ensure a team row exists for (name, leagueId). Insert at the
+// current league's min(elo) if missing, falling back to INITIAL_RATING=1500
+// when the league has zero teams (first-fixture-of-a-new-league bootstrap).
+// Mirrors the Python promoted_team_strategy='min_rating' behavior at the
+// fixture-sync boundary so PredictionService.onResultCaptured never has to
+// silently skip a missing team after a result lands. ON CONFLICT DO NOTHING
+// keeps this idempotent — repeated syncs of the same fixture don't churn
+// existing rows or reset accumulated Elo.
+async function ensureTeamExists({ name, leagueId, transaction }) {
+  await sequelize.query(
+    `INSERT INTO teams (id, name, "leagueId", elo, "gamesPlayed", "createdAt", "updatedAt")
+     SELECT gen_random_uuid(), :name, :leagueId,
+            COALESCE((SELECT MIN(elo) FROM teams WHERE "leagueId" = :leagueId), :initialRating),
+            0, NOW(), NOW()
+     ON CONFLICT (name, "leagueId") DO NOTHING`,
+    {
+      replacements: { name, leagueId, initialRating: INITIAL_RATING },
+      transaction,
+    },
+  );
+}
+
 async function upsertFixture({ league, fixture, transaction }) {
   const localStatus = mapUpstreamStatus(fixture.status);
   const year = Number.parseInt(fixture.season, 10) || new Date(fixture.utcDate).getUTCFullYear();
@@ -116,6 +139,11 @@ async function upsertFixture({ league, fixture, transaction }) {
       existing.result = derivedResult;
     }
     await existing.save({ transaction });
+    // Tier 17 — team rows may have been added since the fixture was first
+    // synced (e.g. a team was renamed upstream). Re-ensure on every update
+    // path, not just the create path.
+    await ensureTeamExists({ name: fixture.homeTeam, leagueId: league.id, transaction });
+    await ensureTeamExists({ name: fixture.awayTeam, leagueId: league.id, transaction });
     return { game: existing, created: false };
   }
 
@@ -132,6 +160,12 @@ async function upsertFixture({ league, fixture, transaction }) {
     },
     { transaction },
   );
+  // Tier 17 — make sure both teams exist in the teams table after every
+  // upsert. Done unconditionally (existing rows are a no-op via ON
+  // CONFLICT) so the runtime cascade always has Elo to read for any
+  // synced fixture, including a brand-new club's first appearance.
+  await ensureTeamExists({ name: fixture.homeTeam, leagueId: league.id, transaction });
+  await ensureTeamExists({ name: fixture.awayTeam, leagueId: league.id, transaction });
   return { game: created, created: true };
 }
 

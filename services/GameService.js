@@ -14,6 +14,7 @@ const { mapUpstreamStatus, deriveResultFromFixture } = require('../lib/fixtureSt
 const NotificationService = require('./NotificationService');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
+const PredictionService = require('./PredictionService');
 
 // Two-layer noise gate threshold. DECIMAL(3,2) stores at 0.01 resolution;
 // anything below 0.005 rounds to the same value (and so the same rounded
@@ -152,16 +153,27 @@ async function deleteGame(gameId) {
 }
 
 async function setResult(gameId, result) {
-  const game = await Game.findByPk(gameId);
-  if (!game) throw errors.notFound('Game not found');
-
-  game.result = result;
-  // Tier 4b — keep status in sync with the manual result. A set result
-  // implies the match is over; clearing it sends the game back to
-  // scheduled. Without this, the useGames bucketing would still classify
-  // the row by `result` only — fine for wins/losses, broken for draws.
-  game.status = result ? 'finished' : 'scheduled';
-  await game.save();
+  // Tier 17 — transactional. The Elo update via
+  // PredictionService.onResultCaptured MUST be atomic with game.save()
+  // (Critical invariant #3) so a rolled-back result rolls back the Elo
+  // update too. The notify/badge fan-out and leaderboard cache
+  // invalidation stay OUTSIDE the transaction per Tier 5.3 — a side-effect
+  // failure must not undo the result commit, and ghost notifications must
+  // not appear on rollback. The reactive cascade
+  // (rePredictFutureFixtures) also fires AFTER commit so a model-load
+  // error in one fixture's rewrite never breaks the result-capture flow.
+  let cascadeInput = null;
+  const game = await sequelize.transaction(async (t) => {
+    const g = await Game.findByPk(gameId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!g) throw errors.notFound('Game not found');
+    g.result = result;
+    g.status = result ? 'finished' : 'scheduled';
+    await g.save({ transaction: t });
+    if (result && g.leagueId) {
+      cascadeInput = await PredictionService.onResultCaptured(g, { transaction: t });
+    }
+    return g;
+  });
 
   if (result) {
     const picksForGame = await Pick.findAll({ where: { gameId } });
@@ -177,6 +189,11 @@ async function setResult(gameId, result) {
   }
 
   LeaderboardService.invalidate('all');
+  if (cascadeInput) {
+    PredictionService.rePredictFutureFixtures(cascadeInput).catch((err) =>
+      logger.error({ err, gameId }, 'setResult: rePredictFutureFixtures failed'),
+    );
+  }
   return game;
 }
 
@@ -186,10 +203,41 @@ async function bulkSetResult(ids, result) {
   }
   const games = await Game.findAll({ where: { id: ids } });
   const affected = [];
+  // Coalesce affected teams per league across the entire bulk so the
+  // cascade runs once per league at the end — not once per game. A full
+  // PL matchday (10 games × 2 teams = 20 entries) becomes ONE cascade
+  // call with 20 affected team names, hitting all in-scope upcoming
+  // fixtures in a single sweep.
+  const affectedByLeague = new Map(); // leagueId → Set<teamName>
+
+  // Tier 17 — each game gets its OWN transaction (Tier 5.3 invariant —
+  // one transaction per entity, so a single bad row doesn't undo the
+  // rest of the batch). The Elo update inside is atomic with the game
+  // save; notify/badge + cache invalidate + cascade run AFTER the
+  // batch loop so they can never roll back the commits above them.
   for (const game of games) {
-    game.result = result;
-    game.status = result ? 'finished' : 'scheduled';
-    await game.save();
+    let cascadeInput = null;
+    await sequelize.transaction(async (t) => {
+      const g = await Game.findByPk(game.id, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!g) return;
+      g.result = result;
+      g.status = result ? 'finished' : 'scheduled';
+      await g.save({ transaction: t });
+      if (result && g.leagueId) {
+        cascadeInput = await PredictionService.onResultCaptured(g, { transaction: t });
+      }
+      // Reload the in-memory `game` so the post-tx notify/score uses the
+      // committed values (mostly defensive — result + status are already
+      // what we set, but g.result might differ if a hook munged it).
+      game.result = g.result;
+      game.status = g.status;
+    });
+
+    if (cascadeInput) {
+      const set = affectedByLeague.get(cascadeInput.leagueId) || new Set();
+      for (const name of cascadeInput.affectedTeams) set.add(name);
+      affectedByLeague.set(cascadeInput.leagueId, set);
+    }
     if (result) {
       const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
       for (const pick of picksForGame) {
@@ -205,6 +253,14 @@ async function bulkSetResult(ids, result) {
     affected.push(game.id);
   }
   if (affected.length > 0) LeaderboardService.invalidate('all');
+  for (const [leagueId, teamSet] of affectedByLeague) {
+    PredictionService.rePredictFutureFixtures({
+      leagueId,
+      affectedTeams: [...teamSet],
+    }).catch((err) =>
+      logger.error({ err, leagueId }, 'bulkSetResult: rePredictFutureFixtures failed'),
+    );
+  }
   return affected;
 }
 
@@ -264,7 +320,13 @@ async function applyLiveUpdate(localGame, apiMatch) {
     // the committed writes (not the caller's stale snapshot).
     const fresh = await Game.findByPk(localGame.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!fresh) {
-      return { game: localGame, changed: false, transitionedToFinished: false, newResult: null };
+      return {
+        game: localGame,
+        changed: false,
+        transitionedToFinished: false,
+        newResult: null,
+        cascadeInput: null,
+      };
     }
 
     if (
@@ -276,7 +338,13 @@ async function applyLiveUpdate(localGame, apiMatch) {
         { gameId: fresh.id, sourceId: fresh.sourceId, upstreamStatus: apiMatch.status },
         'applyLiveUpdate: ignored stale non-FINISHED upstream snapshot for already-finished game',
       );
-      return { game: fresh, changed: false, transitionedToFinished: false, newResult: null };
+      return {
+        game: fresh,
+        changed: false,
+        transitionedToFinished: false,
+        newResult: null,
+        cascadeInput: null,
+      };
     }
 
     const newStatus = mapUpstreamStatus(apiMatch.status);
@@ -304,7 +372,13 @@ async function applyLiveUpdate(localGame, apiMatch) {
       fresh.phase !== newPhase;
 
     if (!changed) {
-      return { game: fresh, changed: false, transitionedToFinished: false, newResult: null };
+      return {
+        game: fresh,
+        changed: false,
+        transitionedToFinished: false,
+        newResult: null,
+        cascadeInput: null,
+      };
     }
 
     // A "transition to finished" is when we are now setting a result for
@@ -319,7 +393,16 @@ async function applyLiveUpdate(localGame, apiMatch) {
     fresh.phase = newPhase;
     await fresh.save({ transaction: t });
 
-    return { game: fresh, changed: true, transitionedToFinished, newResult };
+    // Tier 17 — atomic Elo update on the transition-to-finished moment.
+    // Same invariant as setResult: the Elo write must roll back with the
+    // game row if the transaction aborts. cascadeInput captured here is
+    // fired AFTER commit (post-transaction below) so a model load issue
+    // never breaks the live-score commit.
+    let cascadeInput = null;
+    if (transitionedToFinished && newResult && fresh.leagueId) {
+      cascadeInput = await PredictionService.onResultCaptured(fresh, { transaction: t });
+    }
+    return { game: fresh, changed: true, transitionedToFinished, newResult, cascadeInput };
   });
 
   if (tx.transitionedToFinished) {
@@ -343,6 +426,18 @@ async function applyLiveUpdate(localGame, apiMatch) {
       );
     }
     LeaderboardService.invalidate('all');
+    // Tier 17 — cascade probabilities for upcoming fixtures involving
+    // either team. Best-effort: a model-load failure must NEVER undo the
+    // result commit above. tx.cascadeInput is null when either team is
+    // missing (logged warn inside onResultCaptured) — silently skip.
+    if (tx.cascadeInput) {
+      PredictionService.rePredictFutureFixtures(tx.cascadeInput).catch((err) =>
+        logger.error(
+          { err, gameId: tx.game.id },
+          'applyLiveUpdate: rePredictFutureFixtures failed',
+        ),
+      );
+    }
   }
 
   return {

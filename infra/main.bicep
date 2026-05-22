@@ -43,16 +43,11 @@ param customDomainCertId string = ''
 @description('Provision an Azure DNS zone for customDomain. Default false because DNS is managed in Cloudflare today. Flip to true only if migrating DNS to Azure.')
 param useAzureDns bool = false
 
-@description('Password for the ml_pipeline service-account admin user. Required on every reapply (same pattern as pgAdminPassword). Stored in Key Vault as ml-pipeline-password and consumed by the ML Container Apps Job.')
-@secure()
-@minLength(8)
-param mlPipelinePassword string
-
-@description('Public URL of the running ScoreCast app, used by the ML pipeline to log in and PUT probabilities. Defaults to https://{customDomain} when customDomain is set, else falls back to the Container App FQDN at runtime via the env wired in app.bicep.')
-param mlApiBaseUrl string = empty(customDomain) ? '' : 'https://${customDomain}'
-
-@description('Image tag for the scorecast-ml image. Default "placeholder" for the very first deploy. Subsequent reapplies should pass the live tag to avoid clobbering the running ml-job image to the helloworld bootstrap. Discoverable via: az containerapp job show --name scorecast-ml-job --resource-group scorecast-prod --query "properties.template.containers[0].image"')
-param mlImageTag string = 'placeholder'
+// Tier 17 dropped mlPipelinePassword / mlApiBaseUrl / mlImageTag params
+// — the Python ML pipeline + its Container Apps Job were retired and
+// inference moved to in-process JS (services/PredictionService.js +
+// lib/ml/). Reapply param count went from 7 → 5: pgAdminPassword,
+// customDomain, customDomainCertId, vapidPublicKey, imageTag.
 
 @description('VAPID public key for Web Push. Generate with `npx web-push generate-vapid-keys`. Leave empty until Web Push goes live — PushService gracefully no-ops without it. The matching private key MUST be seeded into Key Vault as `vapid-private-key` BEFORE the first Bicep reapply that wires push (same pattern as jwt-secret / resend-api-key / football-data-api-key).')
 param vapidPublicKey string = ''
@@ -159,30 +154,6 @@ module migrateJob 'modules/migrate-job.bicep' = {
   }
 }
 
-// scorecast-ml weekly probability pipeline. Uses its OWN imageTag param
-// because the ML image is built + pushed by a separate workflow
-// (.github/workflows/ml-deploy.yml) against a different ACR repo
-// (`scorecast-ml`). Default 'placeholder' for first deploy; on subsequent
-// reapplies the operator passes the live ML image tag so Bicep doesn't
-// clobber the running ml-job image back to the helloworld bootstrap.
-module mlJob 'modules/ml-job.bicep' = {
-  name: 'mlJob'
-  params: {
-    location: location
-    appName: appName
-    tags: tags
-    imageTag: mlImageTag
-    containerAppsEnvId: app.outputs.environmentId
-    acrLoginServer: registry.outputs.loginServer
-    acrName: registry.outputs.name
-    keyVaultName: secrets.outputs.keyVaultName
-    mlPipelinePassword: mlPipelinePassword
-    // Fall back to the Container App FQDN when customDomain isn't set —
-    // first-deploy / pre-DNS-cutover scenarios.
-    apiBaseUrl: !empty(mlApiBaseUrl) ? mlApiBaseUrl : 'https://${app.outputs.containerAppFqdn}'
-  }
-}
-
 // ============================================================================
 // Outputs — handy for CD pipelines + manual inspection
 // ============================================================================
@@ -194,8 +165,6 @@ output keyVaultName string = secrets.outputs.keyVaultName
 output containerAppName string = app.outputs.containerAppName
 output containerAppFqdn string = app.outputs.containerAppFqdn
 output migrateJobName string = migrateJob.outputs.jobName
-output mlJobName string = mlJob.outputs.jobName
-output mlImageRepoName string = mlJob.outputs.imageRepoName
 output postgresServerName string = db.outputs.serverName
 output dnsZoneName string = dns.?outputs.zoneName ?? ''
 output dnsNameServers array = dns.?outputs.nameServers ?? []

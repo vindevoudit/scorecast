@@ -45,6 +45,7 @@ const PasswordResetToken = require('./PasswordResetToken')(sequelize);
 const RefreshToken = require('./RefreshToken')(sequelize);
 const League = require('./League')(sequelize);
 const Season = require('./Season')(sequelize);
+const Team = require('./Team')(sequelize);
 const AuditLog = require('./AuditLog')(sequelize);
 const PushSubscription = require('./PushSubscription')(sequelize);
 
@@ -124,6 +125,13 @@ Game.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
 
 Season.hasMany(Game, { foreignKey: 'seasonId', as: 'games' });
 Game.belongsTo(Season, { foreignKey: 'seasonId', as: 'season' });
+
+// Tier 17 — League → Team. CASCADE on delete so removing a league doesn't
+// strand orphan team rows that the reactive Elo cascade would then look
+// up forever and find missing. The seeder 20260522000001 + LeagueService's
+// upsertFixture auto-insert both populate this table.
+League.hasMany(Team, { foreignKey: 'leagueId', as: 'teams', onDelete: 'CASCADE' });
+Team.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
 
 // Tier 4b Chunk 3 — audit log writes survive admin deletion via SET NULL
 // on actorUserId. AuditLog deliberately has no hasMany hooked from User
@@ -275,6 +283,7 @@ module.exports = {
   RefreshToken,
   League,
   Season,
+  Team,
   AuditLog,
   PushSubscription,
   initDatabase,

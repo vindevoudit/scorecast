@@ -18,6 +18,7 @@
     "db:migrate:status": "sequelize-cli db:migrate:status",
     "db:seed": "sequelize-cli db:seed:all",
     "db:seed:undo": "sequelize-cli db:seed:undo:all",
+    "test:unit": "node --test --test-reporter=spec tests/*.test.js",
     "test:e2e": "playwright test --project=chromium",
     "test:e2e:ui": "playwright test --project=chromium --ui",
     "test:e2e:seed": "node tests/e2e/fixtures/seed.js",

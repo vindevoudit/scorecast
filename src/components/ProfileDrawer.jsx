@@ -4,12 +4,13 @@
 // can override the centered-by-default positioning into a sheet layout).
 // Gains slide entrance/exit, focus trap, and return-focus-on-close for free.
 
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useData } from '../hooks/useData';
+import { lazyWithReload } from '../lib/lazyWithReload';
 import { Button, Dialog } from './ui';
 
-const ProfileView = lazy(() => import('./ProfileView'));
+const ProfileView = lazyWithReload(() => import('./ProfileView'));
 
 function ProfileDrawer() {
   const {

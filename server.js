@@ -201,6 +201,16 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
+// Static-asset 404 — anything that LOOKS like a built asset (JS/CSS/img/font)
+// must NOT fall through to the SPA shell, or the browser parses HTML as a JS
+// module and throws "is not a valid JavaScript MIME type" on chunk imports.
+// Triggers when a stale client requests a chunk hash that no longer exists.
+// express.static above already serves these when they exist; this route only
+// runs when the file is genuinely absent.
+app.get(/\.(?:js|mjs|css|map|png|jpg|jpeg|gif|svg|webp|ico|woff2?|webmanifest)$/i, (req, res) => {
+  res.status(404).type('text/plain').send('Not found');
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

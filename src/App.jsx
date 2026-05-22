@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useData } from './hooks/useData';
 import { useGames } from './hooks/useGames';
+import { clearChunkReloadFlag } from './lib/lazyWithReload';
 import DashboardView from './views/DashboardView';
 import AuthView from './views/AuthView';
 import SkeletonView from './views/SkeletonView';
@@ -16,6 +18,13 @@ function App() {
   const { user, browseAsGuest, showAuth } = useAuth();
   const { bootDone, loading, view } = useData();
   const { games } = useGames();
+
+  // Once the boot resolves cleanly with the current bundle, clear the
+  // chunk-reload sentinel so the NEXT stale-deploy gets a fresh single
+  // reload attempt. Guards against reload loops on truly broken builds.
+  useEffect(() => {
+    if (bootDone) clearChunkReloadFlag();
+  }, [bootDone]);
 
   // View precedence:
   //   1. authed → Dashboard

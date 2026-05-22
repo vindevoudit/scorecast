@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
+import { lazyWithReload } from '../lib/lazyWithReload';
 import GameCard from '../components/GameCard';
 import LeaderboardCard, { LeaderboardRow } from '../components/LeaderboardCard';
 import GroupCard from '../components/GroupCard';
@@ -22,9 +23,9 @@ import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
 import { useGames } from '../hooks/useGames';
 
-const PicksHistory = lazy(() => import('../components/PicksHistory'));
-const ProfileView = lazy(() => import('../components/ProfileView'));
-const AdminPanel = lazy(() => import('../components/admin/AdminPanel'));
+const PicksHistory = lazyWithReload(() => import('../components/PicksHistory'));
+const ProfileView = lazyWithReload(() => import('../components/ProfileView'));
+const AdminPanel = lazyWithReload(() => import('../components/admin/AdminPanel'));
 
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-fg-muted">{label}</p>;

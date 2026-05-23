@@ -174,6 +174,64 @@ test('predict: end-to-end on hand-built 3-class model with one tree per class', 
   assert.ok(probs[2] > probs[0] && probs[0] > probs[1]);
 });
 
+test('buildModel: hex-encoded base_score (XGBoost 2.x emits "5E-1F") defaults to 0', () => {
+  // XGBoost 2.x serializes base_score as a C99 hex-float string. JS's
+  // Number() can't parse that and returns NaN. Pre-fix this poisoned every
+  // logit and produced [NaN, NaN, NaN] out of softmax. parseBaseScore now
+  // falls back to 0 when Number() fails, which is correct for
+  // multi:softprob since base_score broadcasts equally and cancels under
+  // softmax. Caught live in prod during Tier 17 PR C verification.
+  const constTree = (w) => ({
+    left_children: [-1],
+    right_children: [-1],
+    split_indices: [0],
+    split_conditions: [0],
+    default_left: [0],
+    base_weights: [w],
+  });
+  const json = {
+    learner: {
+      learner_model_param: { num_class: '3', base_score: '5E-1F' },
+      gradient_booster: {
+        model: {
+          trees: [constTree(1.0), constTree(0.0), constTree(2.0)],
+          tree_info: [0, 1, 2],
+        },
+      },
+    },
+  };
+  const model = buildModel(json, { numFeatures: 2 });
+  assert.equal(model.baseScore, 0);
+  const probs = predict(model, [1500, 1500]);
+  // Sum to 1, all finite, ordering preserved (class 2 weight=2.0 wins).
+  assert.ok(probs.every(Number.isFinite));
+  assert.ok(Math.abs(probs.reduce((a, b) => a + b) - 1.0) < 1e-9);
+  assert.ok(probs[2] > probs[0] && probs[0] > probs[1]);
+});
+
+test('predict: throws loud if logits go non-finite (defensive NaN guard)', () => {
+  // A tree with a NaN leaf weight produces NaN logits → NaN probs. Pre-fix
+  // these silently propagated to normalize.toThreeWay where the error
+  // message was less actionable. The guard now surfaces the root cause
+  // (logits + baseScore) in the message.
+  const nanTree = {
+    left_children: [-1],
+    right_children: [-1],
+    split_indices: [0],
+    split_conditions: [0],
+    default_left: [0],
+    base_weights: [NaN],
+  };
+  const json = {
+    learner: {
+      learner_model_param: { num_class: '1', base_score: '0' },
+      gradient_booster: { model: { trees: [nanTree], tree_info: [0] } },
+    },
+  };
+  const model = buildModel(json, { numFeatures: 2 });
+  assert.throws(() => predict(model, [1500, 1500]), /non-finite probabilities/);
+});
+
 test('predict: throws on feature-length mismatch', () => {
   const model = buildModel(
     {

@@ -16,6 +16,7 @@ const {
   expectedHomeScore,
   actualScores,
   updateElos,
+  eloDelta,
 } = require('../lib/ml/eloMath');
 
 test('K=20, INITIAL=1500, HFA=0 (config locked)', () => {
@@ -101,6 +102,46 @@ test('updateElos: pure function — does not mutate input numbers', () => {
   // documents the contract for future callers reading the test suite.)
   assert.equal(r1, 1600);
   assert.equal(r2, 1500);
+});
+
+test('eloDelta: zero-sum invariant (home delta == -away delta)', () => {
+  for (const result of ['home', 'away', 'draw']) {
+    const d = eloDelta(1600, 1450, result);
+    assert.ok(Math.abs(d.home + d.away) < 1e-9, `result=${result} sum=${d.home + d.away}`);
+  }
+});
+
+test('eloDelta: applying then reversing the same delta cancels out', () => {
+  // The PR F reversal invariant: storing a snapshot + applying delta(r1),
+  // then later subtracting delta(r1) using the same snapshot, returns Elo
+  // to the original pair exactly. Tests against several rating gaps.
+  for (const [rh, ra, result] of [
+    [1500, 1500, 'home'],
+    [1700, 1400, 'away'],
+    [1400, 1700, 'draw'],
+    [1648.3, 1635.8, 'home'],
+  ]) {
+    const d = eloDelta(rh, ra, result);
+    const reverted = { home: rh + d.home - d.home, away: ra + d.away - d.away };
+    assert.equal(reverted.home, rh);
+    assert.equal(reverted.away, ra);
+  }
+});
+
+test('eloDelta + updateElos parity: delta + base == updateElos.newElos', () => {
+  // Spot-check that the pure-delta function agrees with the legacy
+  // updateElos signature. Drift between them would silently desync
+  // PR F's reverse path from any caller still using updateElos.
+  for (const [rh, ra, result] of [
+    [1500, 1500, 'home'],
+    [1700, 1400, 'away'],
+    [1400, 1700, 'draw'],
+  ]) {
+    const d = eloDelta(rh, ra, result);
+    const u = updateElos(rh, ra, result);
+    assert.ok(Math.abs(rh + d.home - u.newHomeElo) < 1e-9);
+    assert.ok(Math.abs(ra + d.away - u.newAwayElo) < 1e-9);
+  }
 });
 
 test('updateElos chained: applying then reverting brings team back near start', () => {

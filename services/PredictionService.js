@@ -70,21 +70,45 @@ function _resetModelCache() {
   modelCache.clear();
 }
 
-// Update both teams' Elo INSIDE the caller's transaction. Returns the
-// information the caller needs to fire the post-commit cascade. Null
-// when either team is missing (logged warn).
-async function onResultCaptured(game, { transaction }) {
-  if (!game || !game.result || !game.leagueId) {
-    logger.warn(
-      {
-        gameId: game && game.id,
-        hasResult: Boolean(game && game.result),
-        leagueId: game && game.leagueId,
-      },
-      'onResultCaptured: missing required game fields; skipping Elo update',
-    );
+// Tier 17 PR F — idempotent + reversible Elo update for a captured result.
+// Runs INSIDE the caller's transaction; returns { affectedTeams, leagueId }
+// when the cascade should re-predict downstream fixtures, or null when the
+// call was a no-op (idempotent re-capture, missing team row, etc.).
+//
+// Behavior matrix (game.appliedResult is the value previously Elo-applied;
+// game.result is the new value the caller just wrote):
+//   - result === appliedResult  → no-op (idempotent; re-saving the same
+//                                  result must NOT shift Elo again)
+//   - appliedResult === null
+//     and result !== null       → first capture. Snapshot current team Elo
+//                                  onto game.homeEloPre + awayEloPre,
+//                                  apply delta, stamp appliedResult
+//   - appliedResult !== null
+//     and result !== null       → change. Reverse prior delta against the
+//                                  stored snapshot, apply new delta
+//                                  against the SAME snapshot, update
+//                                  appliedResult
+//   - appliedResult !== null
+//     and result === null       → clear. Reverse prior delta against the
+//                                  snapshot, drop snapshot + appliedResult
+//
+// Snapshot is immutable for the life of the game once first stored — it
+// represents pre-match strength, not post-revision strength, so reverse
+// then re-apply always uses the same reference Elo pair regardless of
+// what other games have shifted the team's live Elo in between. Net
+// gamesPlayed change across reverse + reapply is 0 in the change case.
+async function onResultUpdated(game, { transaction }) {
+  if (!game || !game.leagueId) {
     return null;
   }
+  const previous = game.appliedResult ?? null;
+  const next = game.result ?? null;
+
+  // Idempotent: same result re-captured. Nothing to do (no Elo shift, no
+  // downstream cascade — probabilities already reflect this game's
+  // contribution to the teams' Elo).
+  if (previous === next) return null;
+
   const homeTeam = await Team.findOne({
     where: { name: game.homeTeam, leagueId: game.leagueId },
     transaction,
@@ -105,53 +129,104 @@ async function onResultCaptured(game, { transaction }) {
         homeTeamMissing: !homeTeam,
         awayTeamMissing: !awayTeam,
       },
-      'onResultCaptured: team not in teams table; skipping Elo update. LeagueService.upsertFixture auto-insert should close this gap on next sync.',
+      'onResultUpdated: team not in teams table; skipping Elo update. LeagueService.upsertFixture auto-insert should close this gap on next sync.',
     );
     return null;
   }
-  // teams.elo is DECIMAL(8,2) which Sequelize returns as a STRING.
-  // parseFloat before any math — load-bearing precision invariant.
-  const homeEloBefore = parseFloat(homeTeam.elo);
-  const awayEloBefore = parseFloat(awayTeam.elo);
-  const { newHomeElo, newAwayElo } = eloMath.updateElos(homeEloBefore, awayEloBefore, game.result);
 
-  // Round the persisted value to DECIMAL(3,2). Math stays in JS floats
-  // until persistence so the next cascade reads back the rounded value.
-  const homeEloAfter = Math.round(newHomeElo * 100) / 100;
-  const awayEloAfter = Math.round(newAwayElo * 100) / 100;
-  // game.date can be either a Date (Sequelize returns) or a string; coerce
-  // to YYYY-MM-DD for the DATEONLY column.
+  // Sequelize returns DECIMAL as STRING — parseFloat for all math. The
+  // snapshot fields go through the same conversion when present.
+  let homeEloLive = parseFloat(homeTeam.elo);
+  let awayEloLive = parseFloat(awayTeam.elo);
+
+  // Resolve / establish the pre-match snapshot. If we've applied a result
+  // before, the snapshot is locked in — reuse it for both reverse + new
+  // delta so we never use a contaminated live-Elo as the reference.
+  let homeEloPre = game.homeEloPre != null ? parseFloat(game.homeEloPre) : null;
+  let awayEloPre = game.awayEloPre != null ? parseFloat(game.awayEloPre) : null;
+
+  // Reverse prior delta (against the locked snapshot) if there's one to
+  // reverse. After this block, team Elo is "as if this game had never
+  // contributed."
+  let reversed = null;
+  if (previous != null && homeEloPre != null && awayEloPre != null) {
+    const revertDelta = eloMath.eloDelta(homeEloPre, awayEloPre, previous);
+    homeEloLive -= revertDelta.home;
+    awayEloLive -= revertDelta.away;
+    reversed = { previous, deltaHome: revertDelta.home, deltaAway: revertDelta.away };
+  }
+
+  // Apply the new delta (if any) against the snapshot, then persist.
+  let applied = null;
+  if (next != null) {
+    // First-ever capture: take the snapshot off CURRENT team Elo (post-
+    // reverse, which is a no-op here since previous was null).
+    if (homeEloPre == null || awayEloPre == null) {
+      homeEloPre = homeEloLive;
+      awayEloPre = awayEloLive;
+    }
+    const newDelta = eloMath.eloDelta(homeEloPre, awayEloPre, next);
+    homeEloLive += newDelta.home;
+    awayEloLive += newDelta.away;
+    applied = { next, deltaHome: newDelta.home, deltaAway: newDelta.away };
+  } else {
+    // Result cleared — drop the snapshot so a future re-set takes a fresh one.
+    homeEloPre = null;
+    awayEloPre = null;
+  }
+
+  // Round to DECIMAL(8,2) for storage; next read will see the rounded value.
+  const homeEloAfter = Math.round(homeEloLive * 100) / 100;
+  const awayEloAfter = Math.round(awayEloLive * 100) / 100;
+
+  // gamesPlayed accounting: +1 on first apply, 0 on change (reverse -1
+  // + apply +1), -1 on clear, 0 on idempotent (already short-circuited).
+  let gamesPlayedDelta = 0;
+  if (previous == null && next != null) gamesPlayedDelta = 1;
+  else if (previous != null && next == null) gamesPlayedDelta = -1;
+
+  // game.date → DATEONLY-friendly string for lastMatchDate. Only stamp
+  // it when we're applying a new result; on clear, leave existing value
+  // (it might still be the most recent match the team played in another
+  // game's capture).
   const matchDate = game.date instanceof Date ? game.date : new Date(game.date);
-  const lastMatchDate = Number.isNaN(matchDate.getTime())
-    ? null
-    : matchDate.toISOString().slice(0, 10);
+  const lastMatchDate =
+    next != null && !Number.isNaN(matchDate.getTime())
+      ? matchDate.toISOString().slice(0, 10)
+      : undefined;
 
-  await homeTeam.update(
-    {
-      elo: homeEloAfter,
-      gamesPlayed: homeTeam.gamesPlayed + 1,
-      lastMatchDate,
-    },
-    { transaction },
-  );
-  await awayTeam.update(
-    {
-      elo: awayEloAfter,
-      gamesPlayed: awayTeam.gamesPlayed + 1,
-      lastMatchDate,
-    },
-    { transaction },
-  );
+  const homePatch = { elo: homeEloAfter };
+  const awayPatch = { elo: awayEloAfter };
+  if (gamesPlayedDelta !== 0) {
+    homePatch.gamesPlayed = Math.max(0, homeTeam.gamesPlayed + gamesPlayedDelta);
+    awayPatch.gamesPlayed = Math.max(0, awayTeam.gamesPlayed + gamesPlayedDelta);
+  }
+  if (lastMatchDate !== undefined) {
+    homePatch.lastMatchDate = lastMatchDate;
+    awayPatch.lastMatchDate = lastMatchDate;
+  }
+  await homeTeam.update(homePatch, { transaction });
+  await awayTeam.update(awayPatch, { transaction });
+
+  // Persist snapshot + appliedResult on the game row inside the same tx.
+  game.homeEloPre = homeEloPre;
+  game.awayEloPre = awayEloPre;
+  game.appliedResult = next;
+  await game.save({ transaction });
 
   logger.info(
     {
       gameId: game.id,
       leagueId: game.leagueId,
-      result: game.result,
-      home: { team: game.homeTeam, before: homeEloBefore, after: homeEloAfter },
-      away: { team: game.awayTeam, before: awayEloBefore, after: awayEloAfter },
+      previous,
+      next,
+      reversed,
+      applied,
+      snapshot: { home: homeEloPre, away: awayEloPre },
+      home: { team: game.homeTeam, after: homeEloAfter },
+      away: { team: game.awayTeam, after: awayEloAfter },
     },
-    'onResultCaptured: Elo updated',
+    'onResultUpdated: Elo cascade applied',
   );
 
   return { affectedTeams: [game.homeTeam, game.awayTeam], leagueId: game.leagueId };
@@ -258,7 +333,11 @@ async function rePredictFutureFixtures({ affectedTeams, leagueId }) {
 }
 
 module.exports = {
-  onResultCaptured,
+  onResultUpdated,
+  // Back-compat alias for the prior name. Existing callers (GameService)
+  // will migrate to onResultUpdated in the same PR; the alias is left
+  // here so any out-of-band callers (tests, debug scripts) keep working.
+  onResultCaptured: onResultUpdated,
   rePredictFutureFixtures,
   // Test seam — production code paths don't call this.
   _resetModelCache,

@@ -38,6 +38,24 @@ module.exports = (sequelize) => {
         type: DataTypes.ENUM('home', 'away', 'draw'),
         allowNull: true,
       },
+      // Tier 17 PR F — per-game Elo snapshot (taken at first capture, immutable
+      // for the life of the game) + record of which result value has been
+      // Elo-applied. PredictionService.onResultUpdated uses these to make
+      // the cascade idempotent (re-capturing the same result no-ops) and
+      // reversible (changing a captured result reverses the prior delta
+      // against the snapshot then applies the new delta).
+      homeEloPre: {
+        type: DataTypes.DECIMAL(8, 2),
+        allowNull: true,
+      },
+      awayEloPre: {
+        type: DataTypes.DECIMAL(8, 2),
+        allowNull: true,
+      },
+      appliedResult: {
+        type: DataTypes.STRING(10),
+        allowNull: true,
+      },
       // Tier 4b Chunk 1 — league/season/source attribution. leagueId stays
       // nullable until Chunk 3 backfills legacy rows and tightens it.
       leagueId: {

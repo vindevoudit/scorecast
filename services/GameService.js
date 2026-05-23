@@ -154,7 +154,7 @@ async function deleteGame(gameId) {
 
 async function setResult(gameId, result) {
   // Tier 17 — transactional. The Elo update via
-  // PredictionService.onResultCaptured MUST be atomic with game.save()
+  // PredictionService.onResultUpdated MUST be atomic with game.save()
   // (Critical invariant #3) so a rolled-back result rolls back the Elo
   // update too. The notify/badge fan-out and leaderboard cache
   // invalidation stay OUTSIDE the transaction per Tier 5.3 — a side-effect
@@ -162,6 +162,11 @@ async function setResult(gameId, result) {
   // not appear on rollback. The reactive cascade
   // (rePredictFutureFixtures) also fires AFTER commit so a model-load
   // error in one fixture's rewrite never breaks the result-capture flow.
+  //
+  // PR F — onResultUpdated runs on EVERY result transition (set / change /
+  // clear) including idempotent re-saves. It internally short-circuits
+  // when result === appliedResult, reverses any prior delta against the
+  // game's locked-in pre-match Elo snapshot, then applies the new delta.
   let cascadeInput = null;
   const game = await sequelize.transaction(async (t) => {
     const g = await Game.findByPk(gameId, { transaction: t, lock: t.LOCK.UPDATE });
@@ -169,8 +174,8 @@ async function setResult(gameId, result) {
     g.result = result;
     g.status = result ? 'finished' : 'scheduled';
     await g.save({ transaction: t });
-    if (result && g.leagueId) {
-      cascadeInput = await PredictionService.onResultCaptured(g, { transaction: t });
+    if (g.leagueId) {
+      cascadeInput = await PredictionService.onResultUpdated(g, { transaction: t });
     }
     return g;
   });
@@ -223,8 +228,8 @@ async function bulkSetResult(ids, result) {
       g.result = result;
       g.status = result ? 'finished' : 'scheduled';
       await g.save({ transaction: t });
-      if (result && g.leagueId) {
-        cascadeInput = await PredictionService.onResultCaptured(g, { transaction: t });
+      if (g.leagueId) {
+        cascadeInput = await PredictionService.onResultUpdated(g, { transaction: t });
       }
       // Reload the in-memory `game` so the post-tx notify/score uses the
       // committed values (mostly defensive — result + status are already
@@ -397,10 +402,14 @@ async function applyLiveUpdate(localGame, apiMatch) {
     // Same invariant as setResult: the Elo write must roll back with the
     // game row if the transaction aborts. cascadeInput captured here is
     // fired AFTER commit (post-transaction below) so a model load issue
-    // never breaks the live-score commit.
+    // never breaks the live-score commit. PR F: applyLiveUpdate never
+    // changes a previously-set result (see the result-derivation guard
+    // above), so onResultUpdated only ever sees the null→non-null path
+    // here. Still call the unified entry point so the snapshot + applied-
+    // result columns stay populated.
     let cascadeInput = null;
     if (transitionedToFinished && newResult && fresh.leagueId) {
-      cascadeInput = await PredictionService.onResultCaptured(fresh, { transaction: t });
+      cascadeInput = await PredictionService.onResultUpdated(fresh, { transaction: t });
     }
     return { game: fresh, changed: true, transitionedToFinished, newResult, cascadeInput };
   });

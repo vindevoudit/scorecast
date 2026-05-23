@@ -35,6 +35,17 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
+# Typer collapses to single-command mode when only one @app.command() is
+# registered. The empty callback forces multi-subcommand dispatch so
+# `python -m scorecast_ml train --league PL` parses correctly. Without
+# this Typer interprets `train` as an unexpected positional argument.
+@app.callback()
+def _root() -> None:
+    """ScoreCast ML — train an XGBoost elo-only model and emit the
+    native JSON dump the JS runtime consumes."""
+
+
 log = get_logger("cli")
 
 

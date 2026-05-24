@@ -45,11 +45,15 @@ const syncLiveScoresJob = require('./lib/jobs/syncLiveScores');
 const reconcileInProgressGamesJob = require('./lib/jobs/reconcileInProgressGames');
 const sendKickoffRemindersJob = require('./lib/jobs/sendKickoffReminders');
 const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
-const LIVE_SCORE_SYNC_CRON = process.env.LIVE_SCORE_SYNC_CRON || '* * * * *'; // every minute
-// 5-min defensive reconcile via ?ids= for any in-progress game — closes the
-// gap when football-data.org's ?status= filter goes stale relative to the
-// canonical ?ids= endpoint. See lib/jobs/reconcileInProgressGames.js header.
-const IN_PROGRESS_RECONCILE_CRON = process.env.IN_PROGRESS_RECONCILE_CRON || '*/5 * * * *';
+// Tier 18 Chunk 2 — 30 s live poll (was every minute). Sits comfortably in
+// the 20 req/min TIER_ONE budget (~2 req/min steady state for the global
+// LIVE poll). node-cron 4.x supports the 6-field syntax with seconds.
+const LIVE_SCORE_SYNC_CRON = process.env.LIVE_SCORE_SYNC_CRON || '*/30 * * * * *';
+// Tier 18 Chunk 2 — 3-min defensive reconcile (was 5 min) via ?ids= for
+// any in-progress game — closes the gap when football-data.org's ?status=
+// filter goes stale relative to the canonical ?ids= endpoint. See
+// lib/jobs/reconcileInProgressGames.js header.
+const IN_PROGRESS_RECONCILE_CRON = process.env.IN_PROGRESS_RECONCILE_CRON || '*/3 * * * *';
 // PWA Chunk 6 — kickoff reminders, every 15 min. Each fire pushes a
 // 'kickoff-reminder' to every user with a pick on a game kicking off in the
 // next 15-30 min. games.kickoffReminderSentAt dedups across ticks.

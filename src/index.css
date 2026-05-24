@@ -219,6 +219,14 @@ input {
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
   }
 
+  /* Tier 18 Chunk 1 — top safe-area utility, mirror of `.safe-bottom`.
+   * Used by the mobile sidebar drawer so the nav header sits below the
+   * iPhone notch / Dynamic Island instead of being eaten by it. 0.5rem
+   * floor matches `.safe-bottom`. */
+  .pt-safe {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+
   .bg-radial-glow {
     background-image:
       radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 45%),

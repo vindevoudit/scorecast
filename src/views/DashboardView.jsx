@@ -52,6 +52,7 @@ function DashboardView() {
     setConfirmingLogout,
     confirmingLogout,
     performLogout,
+    browseAsGuest,
     setBrowseAsGuest,
     setShowAuth,
   } = useAuth();
@@ -167,14 +168,29 @@ function DashboardView() {
               </svg>
             </button>
           );
-          const brand = (
-            <h2
-              aria-hidden="true"
-              className="text-shadow-brand-glow select-none text-sm font-normal uppercase tracking-[0.35em] text-accent/80"
-            >
-              BANTRYX
-            </h2>
-          );
+          // Tier 18 Chunk 1 — when authed (and not browsing as guest), the
+          // wordmark doubles as a Home link back to the games view. Anon
+          // visitors get the static `<h2>` and rely on the explicit
+          // `homePill` for back-to-landing nav. On the games view itself
+          // the wordmark drops its hover state since clicking it would
+          // be a no-op refresh.
+          const brandClass =
+            'text-shadow-brand-glow select-none rounded text-sm font-normal uppercase tracking-[0.35em] text-accent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+          const brand =
+            user && !browseAsGuest ? (
+              <button
+                type="button"
+                onClick={() => setView('games')}
+                aria-label="Go to games"
+                className={`${brandClass} ${view === 'games' ? '' : 'hover:text-white'}`}
+              >
+                BANTRYX
+              </button>
+            ) : (
+              <h2 aria-hidden="true" className={brandClass}>
+                BANTRYX
+              </h2>
+            );
           const homePill = (
             <button
               type="button"
@@ -239,12 +255,16 @@ function DashboardView() {
 
           return (
             <>
-              {/* Mobile (< md:): 3 stacked rows */}
+              {/* Mobile (< md:): 3 stacked rows. Tier 18 Chunk 1 —
+                  three-slot flex with the brand in a centered `flex-1`
+                  middle so the wordmark sits true-center regardless of
+                  whether the right slot is the (narrow) homePill or the
+                  (wider) UserMenu. */}
               <div className="flex flex-col gap-3 md:hidden">
-                <div className="flex items-center justify-between gap-3">
-                  {hamburger}
-                  {brand}
-                  {user ? <UserMenu /> : homePill}
+                <div className="flex items-center gap-3">
+                  <div className="flex-none">{hamburger}</div>
+                  <div className="flex flex-1 justify-center">{brand}</div>
+                  <div className="flex-none">{user ? <UserMenu /> : homePill}</div>
                 </div>
                 <div className="flex items-center justify-end gap-3">
                   {user ? (

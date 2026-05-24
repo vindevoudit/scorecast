@@ -17,7 +17,7 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'logo.svg'],
       manifest: {
-        name: 'Bantryx — ScoreCast',
+        name: 'Bantryx',
         short_name: 'Bantryx',
         description:
           'Predict football match outcomes, climb the leaderboard, and earn badges with friends.',

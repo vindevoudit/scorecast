@@ -216,7 +216,7 @@ function Sidebar({
           <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-base/70 backdrop-blur-sm duration-150 ease-out-expo data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 md:hidden" />
           <DialogPrimitive.Content
             aria-label="Dashboard navigation"
-            className="fixed inset-y-0 left-0 z-50 h-full w-72 max-w-[85vw] border-r border-default bg-elevated shadow-glow duration-220 ease-out-expo focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left md:hidden"
+            className="pt-safe safe-bottom fixed inset-y-0 left-0 z-50 h-full w-72 max-w-[85vw] border-r border-default bg-elevated shadow-glow duration-220 ease-out-expo focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left md:hidden"
           >
             <DialogPrimitive.Title className="sr-only">Dashboard navigation</DialogPrimitive.Title>
             <SidebarBody

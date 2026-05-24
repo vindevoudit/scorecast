@@ -10,10 +10,12 @@ A social football-prediction web app. Pick winners, join groups with friends, se
 
 ### Predict & compete
 
-- **Probability-based scoring** — `points = round((1 − probability) × 100)` on correct picks, so backing the underdog pays more
+- **Probability-based scoring** — `points = round((1 − probability) × 100)` on correct picks, so backing the underdog pays more. Probabilities come from an in-process JS-native XGBoost model ([lib/ml/](lib/ml/)) that reactively updates whenever a result lands — every captured result triggers an Elo update and a probability rewrite for every upcoming fixture involving either team
+- **Pick-time probability snapshots** — when a pick is submitted, the current probabilities are frozen onto the pick row so daily model drift can't retroactively change payouts (`pickedHomeProbability`/`pickedDrawProbability`/`pickedAwayProbability`)
+- **Draw scoring** — picks remain home-or-away, but drawn matches now award partial credit weighted by `drawProbability × opposite_team_prob / (home_prob + away_prob)`
 - **Live / Upcoming / Completed** game sections with a per-game live countdown chip (`Picks lock in 2d 4h`)
 - **My Picks** history with `All / Wins / Losses / Pending` filters
-- **Overall + group leaderboards** with full scrollable rankings and a "you are here" highlight
+- **Overall + group leaderboards** with full scrollable rankings and a "you are here" highlight, scoped by league + season
 
 ### Social
 
@@ -62,9 +64,11 @@ Awarded automatically by server hooks:
 
 ### Application
 
-- **Frontend**: React 18, Vite 5, Tailwind CSS 3. Code-split via `React.lazy` for Admin / Profile / Picks-history routes.
+- **Frontend**: React 18, Vite 5, Tailwind CSS 3 + tokenized design system (Tier 11). Code-split via `React.lazy` for Admin / Profile / Picks-history routes. Installable PWA with Web Push (Android Chromium + iOS Safari ≥16.4)
 - **Backend**: Node.js 20, Express 4
 - **Database**: PostgreSQL 16 with Sequelize 6 ORM; migrations via `sequelize-cli` + `umzug`
+- **ML inference**: JS-native, in-process via [lib/ml/](lib/ml/) — zero-dep XGBoost native JSON tree walker + pure Elo math (parity-tested against [ml/scorecast_ml/elo/engine.py](ml/scorecast_ml/elo/engine.py)) + DECIMAL(3,2) normalize. [services/PredictionService.js](services/PredictionService.js) drives the reactive cascade. Training is a separate offline Python tool — see [ml/README.md](ml/README.md)
+- **External data**: [football-data.org v4](https://www.football-data.org/) free tier (10 req/min) via [lib/footballApi.js](lib/footballApi.js); daily fixture sync + 60-s live-score poll + 5-min reconcile sweep managed by [lib/scheduler.js](lib/scheduler.js)
 - **Auth**: HttpOnly cookie auth — 15-min access JWT + 30-day rotating refresh token, hashed in DB. `bcryptjs` for passwords; `speakeasy` + `qrcode` for TOTP 2FA
 - **CSRF**: double-submit cookie pattern (`sc_csrf` cookie + `X-CSRF-Token` header)
 - **Security headers**: `helmet` (CSP tuned for Vite + Tailwind + Sentry; HSTS; `X-Frame-Options: DENY`)
@@ -188,18 +192,26 @@ Cloud target is Azure. CD auto-runs on push to `main`.
 
 ### Full IaC reapply
 
-`deploy.yml` (CD) only runs `az containerapp update --image`, which preserves the custom domain binding + env vars regardless. For a full IaC reapply via `az deployment group create -f infra/main.bicep`, pass three params so the deployment stays idempotent:
+`deploy.yml` (CD) only runs `az containerapp update --image`, which preserves the custom domain binding + env vars regardless. For a full IaC reapply via `az deployment group create -f infra/main.bicep`, pass five params so the deployment stays idempotent against the live state (post-Tier-17 dropped from 7):
 
 ```powershell
+$kv     = az keyvault list -g scorecast-prod --query "[0].name" -o tsv
 $certId = az containerapp env certificate list `
-  --name scorecast-env-p3aaelev7xp52 `
+  --name (az containerapp env list -g scorecast-prod --query "[0].name" -o tsv) `
   --resource-group scorecast-prod `
   --query "[?properties.subjectName=='bantryx.com'].id" -o tsv
+$imageTag  = az containerapp show -n scorecast-app -g scorecast-prod `
+  --query "properties.template.containers[0].image" -o tsv | Split-Path -Leaf
+$pgPw      = az keyvault secret show --vault-name $kv --name postgres-admin-password --query value -o tsv
+$vapidPub  = az containerapp show -n scorecast-app -g scorecast-prod `
+  --query "properties.template.containers[0].env[?name=='VAPID_PUBLIC_KEY'].value | [0]" -o tsv
 
 az deployment group create -g scorecast-prod -f infra/main.bicep `
-  -p customDomain=bantryx.com `
+  -p imageTag=$imageTag `
+     pgAdminPassword=$pgPw `
+     customDomain=bantryx.com `
      customDomainCertId=$certId `
-     pgAdminPassword=<the-live-pw>
+     vapidPublicKey=$vapidPub
 ```
 
 The cert binding lives in `infra/modules/app.bicep` via the `customDomains` array; `CORS_ORIGINS` + `PUBLIC_APP_URL` env vars pivot on `customDomain`. DNS is on Cloudflare — the `dns.bicep` module is gated behind a `useAzureDns=false` default.
@@ -247,8 +259,7 @@ Highlights:
 - **[DATABASE_SETUP.md](DATABASE_SETUP.md)** — local Postgres setup walkthrough
 - **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** — how to add a new database migration
 - **[MIGRATIONS_PRIMER.md](MIGRATIONS_PRIMER.md)** — plain-language explainer of the migrations framework
-- **[ml/README.md](ml/README.md)** — Python ML pipeline (Elo + XGBoost) that produces match probabilities for upcoming fixtures
-- **[ml/ONBOARDING.md](ml/ONBOARDING.md)** — end-to-end ML walkthrough + per-league onboarding playbook (Spain, Germany, Italy, France, etc.)
+- **[ml/README.md](ml/README.md)** — training-only Python pipeline. Fits an Elo + XGBoost model on the committed PL CSV corpus and emits the native JSON dump consumed by [lib/ml/xgboostInference.js](lib/ml/xgboostInference.js). Runtime inference lives in-process in [services/PredictionService.js](services/PredictionService.js) (post Tier 17)
 
 ---
 
@@ -289,17 +300,26 @@ Highlights:
 
 - **Tiers 1–3** — auth hardening, UX completions, social features
 - **Tier 4a** — Admin UI for game CRUD + user moderation
+- **Tier 4b** — external football data (football-data.org v4 client), leagues / seasons, daily fixture sync + 60-s live-score poll + 5-min reconcile sweep, audit log
 - **Tier 5 (core) + 5.4b** — migrations framework, leaderboard cache, transactional cascades, structured logging, N+1 elimination, gzip, frontend error boundary + `/api/client-errors` + Sentry opt-in
+- **Tier 5.5 + 5.5b + per-endpoint API suite** — Playwright E2E (270 tests across 22 specs)
 - **Tier 6** — security hardening: CORS allowlist, helmet headers, account lockout, per-route rate limits, email service abstraction, email verification on register, password reset, HttpOnly cookie auth + rotating refresh tokens, CSRF double-submit, TOTP 2FA
-- **Tier 9 (less 9.10 TS + 9.11 Storybook)** — ESLint/Prettier/Husky baseline, frontend code-splitting, OpenAPI docs (dev), Dockerfile + docker-compose, GitHub Actions CI, Bicep IaC for Azure, GitHub Actions CD with OIDC, custom domain `bantryx.com` + Azure managed TLS. **App is live at https://bantryx.com.**
+- **Tier 8.6** — profile privacy (public/friends/private)
+- **Tier 9 (less 9.10 TS + 9.11 Storybook) + 9-followup** — ESLint/Prettier/Husky baseline, frontend code-splitting, OpenAPI docs (dev), Dockerfile + docker-compose, GitHub Actions CI, Bicep IaC for Azure, GitHub Actions CD with OIDC, custom domain `bantryx.com` + Azure managed TLS. **App is live at https://bantryx.com.**
+- **Tier 11 (chunks 1–4)** — design tokens + Radix primitives + sidebar nav + marketing landing + anonymous browse mode + iOS mobile zoom fix + onboarding tour + foundational a11y
+- **Tier 13** — codebase cleanup (server.js 2262 → 157 LOC, App.jsx 1308 → 71 LOC; routes/services/contexts/hooks split)
+- **Tier 17** — JS-native XGBoost inference + reactive Elo cascade + retire Python pipeline (6 PRs A–F; see [ARCHITECTURE.md §8.17](ARCHITECTURE.md))
+- **PWA + Web Push** (Tier 7 partial) — installable home-screen app, native OS push notifications, kickoff-reminder cron, per-user prefs
+- **Draw scoring** — three-class probability schema + partial credit on drawn matches
+- **Security hardening batch** — constant-time login, HS256-pinned JWTs, M5 in-session password change, L3-L6 hardening
+- **Realtime revalidation** — visibility-change + SW-message-driven refresh (replaces 30-s polling on focus/return)
 
 **Pending:**
 
-- **Tier 4b** — external football API, live scores, leagues / seasons, additional pick types, audit log (deferred — needs API key)
-- **Tier 5.5** — Playwright E2E (Docker is now available; unblocked)
-- **Tier 7** — real-time push, scheduler-driven notifications, web push, email digests
-- **Tier 8.6** — profile privacy (parked)
+- **Tier 7 remainder** — SSE for sub-second live-score fanout, email digests, unified notification prefs UI
 - **Tier 9.10 / 9.11** — TypeScript migration + Storybook (parked at end of roadmap)
 - **Tier 10** — health probes (`/readyz`), Prometheus metrics, managed Redis, graceful SIGTERM shutdown, cloud log shipping
+- **Tier 12** — monetization (Pro tier + ads)
+- **Tier 14 / 15 / 16** — SEO landing variants, marketing infra, i18n + high-contrast theme
 
 Detailed planning docs are referenced from [CLAUDE.md](CLAUDE.md).

@@ -210,10 +210,16 @@ ScoreCast/
 │   ├── footballApi.js                   # Tier 4b: football-data.org v4 client. getCompetitions / getFixtures / getLiveMatches / getMatchesByIds. Sliding-window rate-limit (10 req/min). Provider-agnostic surface — swap by replacing this file
 │   ├── fixtureStatus.js                 # Tier 4b: STATUS_MAP + mapUpstreamStatus(raw) → 'scheduled'/'in-progress'/'finished'/'postponed'/'cancelled'; deriveResultFromFixture(fixture, localStatus) → 'home'/'away'/'draw'/null. Single source of truth shared by manual sync + live-score job
 │   ├── scheduler.js                     # Tier 4b Chunk 2: node-cron wrapper. register(name, cron, handler) → wraps handler in pg_try_advisory_lock(crc32(jobName)). start() is a no-op when NODE_ENV=test
-│   └── jobs/                            # Scheduled job handlers, each exporting {run}
-│       ├── syncFixtures.js              # Daily 03:00 UTC. Iterates active leagues → LeagueService.syncFixtures(leagueId). Early-returns when FOOTBALL_DATA_API_KEY unset
-│       ├── syncLiveScores.js            # Every 60 s. Global ?status=LIVE,IN_PLAY,PAUSED call → GameService.applyLiveUpdate per match. Reconcile pass via ?ids= catches IN_PLAY → FINISHED transition + SCHEDULED → IN_PLAY missed kickoffs
-│       └── reconcileInProgressGames.js  # Every 5 min (added 2026-05-19, §8.22). Defensive ?ids= sweep over every local status='in-progress' game, regardless of LIVE-filter membership. Closes the upstream-?status=-filter-staleness gap. Idempotent — no-op when local state matches canonical
+│   ├── jobs/                            # Scheduled job handlers, each exporting {run}
+│   │   ├── syncFixtures.js              # Daily 03:00 UTC. Iterates active leagues → LeagueService.syncFixtures(leagueId). Early-returns when FOOTBALL_DATA_API_KEY unset
+│   │   ├── syncLiveScores.js            # Every 60 s. Global ?status=LIVE,IN_PLAY,PAUSED call → GameService.applyLiveUpdate per match. Reconcile pass via ?ids= catches IN_PLAY → FINISHED transition + SCHEDULED → IN_PLAY missed kickoffs
+│   │   └── reconcileInProgressGames.js  # Every 5 min (added 2026-05-19, §8.22). Defensive ?ids= sweep over every local status='in-progress' game, regardless of LIVE-filter membership. Closes the upstream-?status=-filter-staleness gap. Idempotent — no-op when local state matches canonical
+│   └── ml/                              # Tier 17: in-process ML inference. Replaces the Python Container Apps Job
+│       ├── eloMath.js                   # Pure Elo math (K=20, INITIAL=1500, HFA=0). expectedHomeScore / actualScores / updateElos / eloDelta. JS port of ml/scorecast_ml/elo/engine.py (parity-tested)
+│       ├── xgboostInference.js          # XGBoost native JSON tree walker + softmax. Zero deps. Handles multi:softprob via tree_info accumulation. parseBaseScore defaults to 0 (XGBoost 2.x hex-encoded base_score). Defensive non-finite probabilities guard
+│       ├── normalize.js                 # toThreeWay(p_h, p_d, p_a) → DECIMAL(3,2) trio summing to 1.0. Clip [0.01, 0.99] → round → rebalance against largest-RAW class → nudge off (0.50, 0.00, 0.50) sentinel
+│       └── models/                      # Trained model JSON dumps committed to git; consumed by xgboostInference.loadModel
+│           └── PL_elo.json              # XGBoost native dump (615 trees, ~1.5 MB). Produced by `python -m scorecast_ml train --league PL`
 │
 ├── middleware/
 │   ├── requestId.js                     # Tier 5.4: assigns req.id + req.log child; echoes X-Request-Id header
@@ -250,7 +256,8 @@ ScoreCast/
 │   ├── GameService.js                   # CRUD + setResult/bulkSetResult/cascadeDelete/applyLiveUpdate (notify + badge eval + cache invalidate on result transitions). status ↔ result sync (set 'home/away/draw' → status='finished'; clear → status='scheduled')
 │   ├── GroupService.js                  # CRUD + invite/accept/decline/join/leave/transfer/visibility + cascadeDelete + maskMembersForAnon (Tier 8.6) + discoverPublic/getVisible accept viewer=null for anon
 │   ├── UserService.js                   # cascadeDelete + admin list/role/delete + bulkAction (filters self id → skipped[]) + getProfileByUsername (Tier 8.6 visibility gate)
-│   ├── LeagueService.js                 # Tier 4b: CRUD + ensureSeason(leagueId, year) + upsertFixture(league, season, apiMatch) + syncFixtures(leagueId) — idempotent upsert by (leagueId, sourceId)
+│   ├── LeagueService.js                 # Tier 4b + Tier 17: CRUD + ensureSeason + upsertFixture (calls ensureTeamExists on both teams every upsert — newly-promoted clubs land in `teams` at MIN(elo)) + syncFixtures + ensureTeamExists helper
+│   ├── PredictionService.js             # Tier 17: reactive ML cascade. onResultUpdated (idempotent + reversible via per-game snapshot) runs INSIDE the result-capture transaction; rePredictFutureFixtures runs AFTER commit and rewrites probabilities for upcoming fixtures involving either team. Per-league model cache. See §8.17
 │   └── AuditLogService.js               # Tier 4b Chunk 3: record({action, entityType, entityId, actorUserId, before, after, requestId, statusCode}) with 4KB payload truncation (replaces oversize payloads with {_truncated, _bytes, preview}) + listPaginated(limit, offset)
 │
 ├── models/                              # Sequelize models — one file per table
@@ -271,6 +278,7 @@ ScoreCast/
 │   ├── RefreshToken.js                  # Tier 6.8: userId FK ON DELETE CASCADE, tokenHash unique, expiresAt, revokedAt, userAgent
 │   ├── League.js                        # Tier 4b: id, name, sourceProvider, sourceLeagueId, country, logoUrl, active, timestamps. Unique on (sourceProvider, sourceLeagueId)
 │   ├── Season.js                        # Tier 4b: id, leagueId FK, year, startsAt, endsAt, current. Unique on (leagueId, year)
+│   ├── Team.js                          # Tier 17: id, name (canonical football-data.org form), leagueId FK CASCADE, elo NUMERIC(8,2) DEFAULT 1500, gamesPlayed, lastMatchDate. Unique on (name, leagueId). Bootstrapped by seeders/20260522000001-seed-teams-from-elo-history.js; maintained by PredictionService.onResultUpdated + LeagueService.ensureTeamExists auto-insert at MIN(elo)
 │   └── AuditLog.js                      # Tier 4b Chunk 3: actorUserId (SET NULL on user delete), action (e.g. 'admin.game.delete'), entityType, entityId, before JSONB, after JSONB, requestId, statusCode
 │
 ├── badges/
@@ -378,12 +386,35 @@ ScoreCast/
 │   │   └── apiAssertions.js             # assertOk/assertUnauthorized/assertForbiddenWithoutAdmin/assertCsrfRejected/assertValidationError/assertNotFound/assertNoContent/expectShape one-call helpers
 │   └── fixtures/                        # data.js (USERS + GAMES constants), env.js (DB URL), seed.js (deterministic seed users + games + onboardingCompletedAt pre-set), global-setup.js (migrate + truncate + reseed)
 │
-├── ml/                                  # Standalone Python ML pipeline (Tier 4b post-launch). Separate Docker image, scheduled daily 02:30 UTC. See §8.17
-│   ├── Dockerfile                       # 3-stage: base → train (runs `python -m scorecast_ml train` against committed CSV corpus, seed=42 → PL_<date>.joblib) → runtime (non-root uid 1001, tini, CMD predict-and-write)
-│   ├── README.md, ONBOARDING.md         # per-league playbook (PL → La Liga / Bundesliga / Serie A / Ligue 1)
-│   ├── data/raw/PL_*.csv                # Public-domain Football-Data.co.uk corpus, ~3 MB, committed to git via .gitignore negation `!ml/data/raw/*.csv`
-│   ├── scorecast_ml/                    # ingest/, reconcile/, elo/, features/, train/, inference/, db/
-│   └── tests/                           # pytest (~48 tests: Elo determinism, normalize sum-to-1, calibrator clip, reconcile aliasing)
+├── ml/                                  # Tier 17 trim: training-only Python (deleted: Dockerfile + ml-job.bicep + ml-deploy.yml + Container Apps Job + ACR repo + inference/ + db/ + features/ + scripts/ subpackages). Runtime inference moved to lib/ml/ (in-process JS). See §8.17
+│   ├── README.md                        # 1-page "how to retrain" doc. `cd ml && python -m scorecast_ml train --league PL` → ml/data/models/PL_elo_<date>.json → cp to lib/ml/models/PL_elo.json → commit
+│   ├── requirements.txt                 # Slimmed: pandas, numpy, xgboost, scikit-learn, typer, pydantic-settings, structlog, python-dateutil (+ pytest, ruff). Dropped: httpx, tenacity, psycopg, rapidfuzz, joblib, pyarrow
+│   ├── data/raw/PL_*.csv                # Public-domain Football-Data.co.uk corpus, ~3 MB, 32 seasons, committed via .gitignore negation `!ml/data/raw/*.csv`
+│   ├── data/models/                     # Train output (gitignored). The production model lives at lib/ml/models/, committed by hand after each retrain
+│   ├── scorecast_ml/
+│   │   ├── cli.py                       # Single `train` subcommand. Inlines strict reconcile + 2-feature build + season split
+│   │   ├── train/model.py               # XGBoost wrapper + save_as_json (native JSON export, no joblib)
+│   │   ├── elo/engine.py                # Source of truth for Elo math. lib/ml/eloMath.js parity-tests against this
+│   │   ├── ingest/football_data_uk.py   # FDCO CSV parser (tolerates ragged trailing columns)
+│   │   └── reconcile/teams.json         # Per-league alias map. Mirrored to seeders/reconcileMap.json for the JS seeder
+│   └── tests/test_elo_engine.py         # Python Elo determinism + min_rating strategy. Mirror of tests/eloMath.test.js
+│
+├── scripts/                             # Operator tools (committed to repo for ops reuse)
+│   ├── query-teams.mjs                  # Tier 17: prod-safe Sequelize query helper. SSL-aware. Prints top 10 by Elo (no args) or specific teams by name
+│   ├── find-game.mjs                    # Tier 17: look up a game by home + away team names; surfaces id + result + snapshot/appliedResult state
+│   ├── repair-test-game-elo.mjs         # Tier 17: atomic transaction that clears a game's result + Elo snapshot + appliedResult AND deletes the involved team rows so the seeder restores at canonical Elo on next run
+│   └── backfill-probabilities.mjs       # Tier 17: drives PredictionService's predict + toThreeWay flow over every upcoming fixture in a league (CLI version of the reactive cascade). Supports --dry-run + --league. Functionally identical to rePredictFutureFixtures; useful after retrain
+│
+├── seeders/                             # sequelize-cli seeders. Idempotent via ON CONFLICT
+│   ├── 20260513000001-seed-password-backfill.js  # Tier 6: bcrypt-hash any plaintext passwords in users table
+│   ├── 20260522000001-seed-teams-from-elo-history.js  # Tier 17: walks 32-season PL CSV history chronologically, applies seeder's identical-to-Python Elo math, upserts 51 teams (ON CONFLICT DO NOTHING preserves live Elo built by cascade)
+│   └── reconcileMap.json                # Tier 17: alias map (CSV name → canonical football-data.org name). Mirror of ml/scorecast_ml/reconcile/teams.json
+│
+├── tests/                               # Tier 17: node:test unit tests (in addition to e2e under tests/e2e/)
+│   ├── eloMath.test.js                  # 16 tests — symmetry, sum-to-1, zero-sum, monotonicity, draw split, delta+update parity
+│   ├── normalize.test.js                # 10 tests — clip floor, sentinel nudge, residual on largest raw, sum-to-1
+│   ├── xgboostInference.test.js         # 13 tests — tree walk, NaN default-left, malformed-tree throw, softmax stability, hex base_score, NaN guard
+│   └── e2e/                             # Playwright (~270 tests)
 │
 └── dist/                                # `npm run build` output, served as static by server.js
 ```
@@ -1286,23 +1317,32 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 
 #### `games`
 
-| Column                                                    | Type                                                                        | Notes                                                                                                                                                                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                      | UUID PK                                                                     |                                                                                                                                                                                                                                   |
-| `homeTeam` / `awayTeam`                                   | STRING NOT NULL                                                             |                                                                                                                                                                                                                                   |
-| `date`                                                    | TIMESTAMPTZ NOT NULL                                                        | UTC; the kickoff time                                                                                                                                                                                                             |
-| `homeProbability` / `drawProbability` / `awayProbability` | DECIMAL(3,2) NOT NULL                                                       | All three required; `drawProbability` defaults to 0 for backward compat. Validator enforces `home + draw + away = 1.0 ± 0.01`. Default for fresh fixtures: `(0.50, 0.00, 0.50)` (ML pipeline sentinel)                            |
-| `result`                                                  | ENUM('home','away','draw') NULLABLE                                         | `NULL` = not yet resolved; `'draw'` (post-draw-scoring tier) awards partial credit via `scorePick`'s draw branch                                                                                                                  |
-| `leagueId`                                                | UUID NOT NULL → `leagues(id)` (Tier 4b Chunk 1; tightened NOT NULL Chunk 3) | Backfilled to a synthetic `Legacy / Imported` league for pre-tier rows                                                                                                                                                            |
-| `seasonId`                                                | UUID NULLABLE → `seasons(id)`                                               | Tier 4b Chunk 1. Created on demand by `LeagueService.ensureSeason` during sync                                                                                                                                                    |
-| `sourceId`                                                | VARCHAR NULLABLE                                                            | Tier 4b Chunk 1. football-data.org's internal match id. Used by `applyLiveUpdate` to look up local rows. Partial unique index `(leagueId, sourceId) WHERE sourceId IS NOT NULL` — hand-entered rows skip the constraint           |
-| `status`                                                  | ENUM('scheduled','in-progress','finished','postponed','cancelled') NOT NULL | Tier 4b Chunk 1. Set by `LeagueService.upsertFixture` (manual + daily sync) and `GameService.applyLiveUpdate` (60-s live poll). `GameService.setResult` flips `status` alongside `result` so manual admin entries stay consistent |
-| `homeScore` / `awayScore`                                 | INTEGER NULLABLE                                                            | Tier 4b Chunk 1. Final score on `status='finished'`; live score on `status='in-progress'`                                                                                                                                         |
-| `kickoffTz`                                               | VARCHAR(64) NULLABLE                                                        | Tier 4b Chunk 1. Stadium-local timezone string (informational only; UI renders in user's local TZ)                                                                                                                                |
-| `halfTimeReached`                                         | BOOLEAN NOT NULL DEFAULT false                                              | Tier 4b Chunk 2. Flips to true once upstream populates `score.halfTime`. **Monotonic** in `applyLiveUpdate` (never reverts on upstream blip)                                                                                      |
-| `phase`                                                   | VARCHAR(20) NULLABLE                                                        | Tier 4b Chunk 2. `regular` / `extra-time` / `penalty-shootout` (from upstream `score.duration`). Drives `matchMinute`'s ET/PEN display branches                                                                                   |
+| Column                                                    | Type                                                                        | Notes                                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                      | UUID PK                                                                     |                                                                                                                                                                                                                                       |
+| `homeTeam` / `awayTeam`                                   | STRING NOT NULL                                                             |                                                                                                                                                                                                                                       |
+| `date`                                                    | TIMESTAMPTZ NOT NULL                                                        | UTC; the kickoff time                                                                                                                                                                                                                 |
+| `homeProbability` / `drawProbability` / `awayProbability` | DECIMAL(3,2) NOT NULL                                                       | All three required; `drawProbability` defaults to 0 for backward compat. Validator enforces `home + draw + away = 1.0 ± 0.01`. Default for fresh fixtures: `(0.50, 0.00, 0.50)` (ML pipeline sentinel)                                |
+| `result`                                                  | ENUM('home','away','draw') NULLABLE                                         | `NULL` = not yet resolved; `'draw'` (post-draw-scoring tier) awards partial credit via `scorePick`'s draw branch                                                                                                                      |
+| `leagueId`                                                | UUID NOT NULL → `leagues(id)` (Tier 4b Chunk 1; tightened NOT NULL Chunk 3) | Backfilled to a synthetic `Legacy / Imported` league for pre-tier rows                                                                                                                                                                |
+| `seasonId`                                                | UUID NULLABLE → `seasons(id)`                                               | Tier 4b Chunk 1. Created on demand by `LeagueService.ensureSeason` during sync                                                                                                                                                        |
+| `sourceId`                                                | VARCHAR NULLABLE                                                            | Tier 4b Chunk 1. football-data.org's internal match id. Used by `applyLiveUpdate` to look up local rows. Partial unique index `(leagueId, sourceId) WHERE sourceId IS NOT NULL` — hand-entered rows skip the constraint               |
+| `status`                                                  | ENUM('scheduled','in-progress','finished','postponed','cancelled') NOT NULL | Tier 4b Chunk 1. Set by `LeagueService.upsertFixture` (manual + daily sync) and `GameService.applyLiveUpdate` (60-s live poll). `GameService.setResult` flips `status` alongside `result` so manual admin entries stay consistent     |
+| `homeScore` / `awayScore`                                 | INTEGER NULLABLE                                                            | Tier 4b Chunk 1. Final score on `status='finished'`; live score on `status='in-progress'`                                                                                                                                             |
+| `kickoffTz`                                               | VARCHAR(64) NULLABLE                                                        | Tier 4b Chunk 1. Stadium-local timezone string (informational only; UI renders in user's local TZ)                                                                                                                                    |
+| `halfTimeReached`                                         | BOOLEAN NOT NULL DEFAULT false                                              | Tier 4b Chunk 2. Flips to true once upstream populates `score.halfTime`. **Monotonic** in `applyLiveUpdate` (never reverts on upstream blip)                                                                                          |
+| `phase`                                                   | VARCHAR(20) NULLABLE                                                        | Tier 4b Chunk 2. `regular` / `extra-time` / `penalty-shootout` (from upstream `score.duration`). Drives `matchMinute`'s ET/PEN display branches                                                                                       |
+| `homeEloPre`                                              | NUMERIC(8,2) NULLABLE                                                       | Tier 17 PR F. Home team's Elo at FIRST result capture. Immutable after first store — reverse + reapply on result change uses this as the reference snapshot                                                                           |
+| `awayEloPre`                                              | NUMERIC(8,2) NULLABLE                                                       | Tier 17 PR F. Away team's Elo at first result capture. Same immutability contract as `homeEloPre`                                                                                                                                     |
+| `appliedResult`                                           | VARCHAR(10) NULLABLE                                                        | Tier 17 PR F. The result value the cascade has Elo-applied. Mirrors the `result` enum. When `result === appliedResult` the cascade short-circuits as a no-op; when they differ, the cascade reverses + reapplies against the snapshot |
 
 **Result derivation invariant**: `result` is only set automatically (by `applyLiveUpdate` or `upsertFixture`) when `localGame.result === null`. Admin-entered results are never clobbered by upstream updates. See `lib/fixtureStatus.js deriveResultFromFixture` for the upstream → local mapping (prefers `score.winner` over score comparison so penalty-shootout knockouts resolve correctly).
+
+**Tier 17 cascade invariants** (see §8.17 for the full mechanism):
+
+- `appliedResult` starts NULL on every fresh `games` row. The cascade's first call stamps it. Idempotent re-saves with the same `result` short-circuit on the equality check.
+- `homeEloPre` + `awayEloPre` snapshot at first apply only — they're the pre-match Elo reference for reverse + reapply, never refreshed from live team Elo.
+- On result clear (NULL): cascade reverses the prior delta against the snapshot, nulls all three columns. A subsequent re-set re-snapshots from then-current live Elo.
 
 #### `groups`
 
@@ -1463,6 +1503,27 @@ Same shape as `email_verification_tokens` — `id`, `userId` FK cascade, `tokenH
 
 **Unique index**: `seasons_league_year_unique (leagueId, year)`. Created on demand by `LeagueService.ensureSeason(leagueId, year)`.
 
+#### `teams` (Tier 17)
+
+| Column                    | Type                                            | Notes                                                                                                                                                      |
+| ------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | UUID PK                                         | `gen_random_uuid()` default                                                                                                                                |
+| `name`                    | VARCHAR(128) NOT NULL                           | Canonical football-data.org form (e.g. `Manchester City FC`, NOT `Man City`). The seeder + `LeagueService.ensureTeamExists` both write this canonical form |
+| `leagueId`                | UUID NOT NULL → `leagues(id)` ON DELETE CASCADE | Per-league Elo space. Same canonical name may appear in multiple leagues (e.g. a club in CL + PL) without collision                                        |
+| `elo`                     | NUMERIC(8, 2) NOT NULL DEFAULT 1500             | Sequelize returns DECIMAL as STRING — services parseFloat before math. NUMERIC (not FLOAT) avoids drift over years of K=20 updates                         |
+| `gamesPlayed`             | INTEGER NOT NULL DEFAULT 0                      | Increments on first result capture per game; decrements on result clear (PR F); unchanged on result change (net 0 across reverse + reapply)                |
+| `lastMatchDate`           | DATE NULLABLE                                   | Date of the most recent match the team's Elo was updated for. Stamped by `PredictionService.onResultUpdated` on apply (not on reverse/clear)               |
+| `createdAt` / `updatedAt` | TIMESTAMPTZ NOT NULL DEFAULT NOW                |                                                                                                                                                            |
+
+**Indexes**: `teams_name_league_unique (name, "leagueId")` UNIQUE — load-bearing for the seeder's `ON CONFLICT DO NOTHING` + the runtime cascade's per-team lookup. `teams_league_idx ("leagueId")` non-unique for league-wide queries (e.g. backfill script's per-league fetch).
+
+**Two write paths populate this table**:
+
+- **Initial seed** — [seeders/20260522000001-seed-teams-from-elo-history.js](seeders/20260522000001-seed-teams-from-elo-history.js) walks the committed PL CSV history and writes every team's post-history Elo. Idempotent (re-runs preserve live Elo via ON CONFLICT). NOT auto-run by CD — operator invokes once after first prod deploy.
+- **Runtime auto-insert** — [services/LeagueService.js](services/LeagueService.js) `ensureTeamExists` inserts new teams at the league's current `MIN(elo)` (falling back to 1500 when the league is empty). Fires on every `upsertFixture` call so newly-promoted clubs land in the table before their first cascade.
+
+**Cascade write path**: `PredictionService.onResultUpdated` updates `elo` + `gamesPlayed` (+`lastMatchDate` on apply) under `SELECT ... FOR UPDATE` row locks. Concurrent result captures involving the same team serialize cleanly via the row locks.
+
 #### `audit_log` (Tier 4b Chunk 3)
 
 | Column        | Type                                               | Notes                                                                                                                                                                                          |
@@ -1492,7 +1553,9 @@ Same shape as `email_verification_tokens` — `id`, `userId` FK cascade, `tokenH
 | `users` → `audit_log` (`actorUserId`)                                                                        | **SET NULL** at DB level — history survives admin removal                                                                                                                                                                                                             |
 | `groups` → `group_members`, `group_invites`                                                                  | App-level cleanup in `GroupService.cascadeDelete()` (Tier 8)                                                                                                                                                                                                          |
 | `leagues` → `seasons`                                                                                        | `ON DELETE CASCADE` at DB level                                                                                                                                                                                                                                       |
+| `leagues` → `teams` (Tier 17)                                                                                | `ON DELETE CASCADE` at DB level — deleting a league drops every Elo state for that league. Re-seeding required to bootstrap a re-created league                                                                                                                       |
 | `leagues` → `games`                                                                                          | `SET NULL` historically; post-Tier-4b Chunk 3 `games.leagueId NOT NULL` — deletion of a league with active games requires admin-side migration first                                                                                                                  |
+| `games` → `teams` (Tier 17 logical link, no FK)                                                              | None — `games.homeTeam` / `awayTeam` are STRING name references, not FK UUIDs. The cascade looks up by `(name, leagueId)` so deleting a `teams` row doesn't break anything except the next cascade for that team (it'll be auto-inserted at MIN(elo))                 |
 
 ---
 
@@ -2005,7 +2068,7 @@ Public endpoint `GET /api/leagues` returns active leagues with their `seasons[]`
 
 `GET /api/games` accepts `leagueId` + `seasonId` query params (UUID-shape guard silently drops malformed values). `GameService.listGames({leagueId, seasonId})` applies them as a Sequelize where-clause. `DataContext.gameFilters` holds the active filter so `refreshGames` (called after picks, admin mutations) preserves it.
 
-### 8.17 ML Probability Pipeline ([ml/](ml/))
+### 8.17 ML Probability Pipeline (Tier 17 — in-process JS inference + reactive cascade)
 
 #### Why it exists — the value to Bantryx
 
@@ -2017,497 +2080,343 @@ The ML pipeline fills in real probabilities, which:
 2. **Activates draw scoring** — a pick where `pick.choice ∈ {'home', 'away'}` but the match ends as `result='draw'` now pays partial credit weighted by `drawProbability × opposite_team_prob / (homeProbability + awayProbability)`. Without `drawProbability > 0`, draws are a flat zero (the pre-tier behavior).
 3. **Drives the `PayoutMatrix` preview UI** — each upcoming `GameCard` renders a 2×3 matrix showing what each pick would pay under each outcome (Home Win / Draw / Away Win). The preview is only meaningful when probabilities aren't all sentinel.
 
-**Architectural promise**: the Node app is untouched by ML. The pipeline is a **consumer** of `lib/footballApi.js` outputs (read via the DB, not over HTTP) and a **producer** to `PUT /api/admin/games/:id` (the same admin endpoint a human admin would use through the GameManager UI). No new tables, no new endpoints, no new auth surface — the pipeline authenticates as a regular `role='admin'` user named `ml_pipeline` and every write lands in the `audit_log` table via the existing `auditMutation('admin.game.update', 'game')` middleware.
+**Tier 17 architectural inversion** (shipped 2026-05-23): the daily Container Apps Job that scored every upcoming fixture and POSTed back through the admin API is **gone**. Inference now runs **in-process in Node** via `services/PredictionService.js` + `lib/ml/` and fires **reactively on every captured result** — Elo gets atomically updated, every upcoming fixture involving either team gets re-predicted, all within the same request lifecycle as the result-set. The Python side is reduced to a **training-only offline tool** that produces the XGBoost native JSON dump committed to `lib/ml/models/PL_elo.json`. No more cron, no more API roundtrip, no more service-account user, no more ACR repo, no more Bicep module.
 
-**Why a separate Python service** — XGBoost + scikit-learn + pandas are the natural toolchain; equivalent Node ML libraries are immature. Isolation also means the Python deps (~600 MB with xgboost / scikit-learn / numpy / pyarrow) never bloat the Node container. The two services share a database, not a runtime.
+The new shape:
+
+- **Training (Python, offline)** — fit XGBoost on the committed PL CSV corpus, emit `booster.save_model(json_path)`. Lives in [ml/](ml/) (~300 LOC after Tier 17's aggressive trim). Run via `python -m scorecast_ml train --league PL` whenever a retrain is needed; commit the resulting JSON to `lib/ml/models/<code>_elo.json`.
+- **Runtime inference (Node, in-process)** — [lib/ml/xgboostInference.js](lib/ml/xgboostInference.js) tree-walks the native JSON dump (zero deps); [lib/ml/eloMath.js](lib/ml/eloMath.js) holds the pure Elo update math; [lib/ml/normalize.js](lib/ml/normalize.js) rounds + clips + nudges the output trio. ~250 LOC total + 39 unit tests.
+- **Reactive cascade (Node, in-process)** — [services/PredictionService.js](services/PredictionService.js) wires the inference into `GameService.setResult` / `bulkSetResult` / `applyLiveUpdate`. Every captured result atomically updates both teams' Elo (inside the result transaction) and asynchronously rewrites probabilities for every upcoming fixture involving either team (after commit).
+- **Elo state in Postgres** — new `teams` table holds per-(team, league) Elo. Bootstrapped by a one-shot seeder that replays the committed PL CSV history; maintained by the runtime cascade.
+
+**No new admin endpoints**. The pipeline used to authenticate as `ml_pipeline` and round-trip through `PUT /api/admin/games/:id` so every write was audit-logged. Tier 17 collapses that into in-process Sequelize writes inside the same transaction as the result commit — atomic + much faster (no HTTP, no cookie auth, no rate limiter). The trade-off: cascade writes aren't in `audit_log` (only admin-initiated mutations are). Result-set captures themselves ARE still audit-logged via the existing `auditMutation('admin.game.result', 'game')` on the PATCH route.
 
 #### Architecture overview
 
 ```
-                  ┌────────────────────────────────────────────────────┐
-                  │ Football-Data.co.uk public CSVs (~30y history)     │
-                  │   public domain; ~3 MB for PL committed to git     │
-                  └─────────────────────────┬──────────────────────────┘
-                                            │ ingest (one-time per season)
-                                            ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                              ml/                                          │
-│                                                                           │
-│  ┌──────────┐    ┌───────────┐    ┌──────────┐    ┌──────────────────┐   │
-│  │ ingest   │───▶│ reconcile │───▶│  elo     │───▶│  features        │   │
-│  │ FDCO CSV │    │ aliases   │    │ K=20     │    │ 11 cols, as-of   │   │
-│  │ → cache  │    │ teams.json│    │ HFA=0    │    │ < match date     │   │
-│  └──────────┘    └───────────┘    └──────────┘    └─────────┬────────┘   │
-│                                                              │            │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────────┴────────┐   │
-│  │  train   │◀───┤ time-split   │◀───┤  X, y  →  XGBoost              │   │
-│  │  (Phase  │    │ 15s train +  │    │  multi:softprob, ES on val     │   │
-│  │   2 isotonic │ 1s val +     │    │  IsotonicRegression(per-class) │   │
-│  │   cal'n) │    │ 1s held-out  │    │  → ModelBundle.joblib          │   │
-│  └────┬─────┘    └──────────────┘    └────────────────────────────────┘   │
-│       │                                                                    │
-│       │ bundle baked into ml/data/models/ at image build time              │
-│       ▼                                                                    │
-│  ┌──────────┐    ┌──────────────────┐    ┌─────────────────────────┐      │
-│  │  predict │───▶│ to_three_way     │───▶│  db/writer (httpx)      │      │
-│  │  (rebuild│    │  round to DEC    │    │   POST /api/login       │      │
-│  │   Elo +  │    │  rebalance       │    │   PUT  /api/admin/games │      │
-│  │   form on│    │  nudge off       │    │        /:id    × N      │      │
-│  │   DB +CSV│    │  (0.50,0.00,0.50)│    │  WriteResult{written,   │      │
-│  │   merge) │    │  sentinel        │    │   skipped, failed}      │      │
-│  └──────────┘    └──────────────────┘    └────────────┬────────────┘      │
-└─────────────────────────────────────────────────────── │ ──────────────────┘
-                                                         │ HTTPS
-                                                         ▼
-                  ┌────────────────────────────────────────────────────┐
-                  │ Node app — Postgres `games.{home,draw,away}Probability` │
-                  │   audit_log row per write via auditMutation        │
-                  │   GameCard payouts re-render on next refreshGames  │
-                  └────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ OFFLINE (Python, run when retraining)                                         │
+│                                                                               │
+│  ml/data/raw/PL_*.csv         (32 seasons committed to git, ~3 MB)             │
+│         │                                                                     │
+│         ▼                                                                     │
+│  ml/scorecast_ml/cli.py train                                                 │
+│    1. parse CSVs (ingest/football_data_uk.py)                                 │
+│    2. strict reconcile against reconcile/teams.json                           │
+│    3. Elo walk (elo/engine.py) → home_elo_pre, away_elo_pre                  │
+│    4. 2-feature matrix [home_elo, away_elo] + H/D/A labels                   │
+│    5. XGBoost multi:softprob, early stopping on val (seed=42)                │
+│    6. booster.save_model('ml/data/models/PL_elo_<date>.json')                │
+│                                                                               │
+│  Operator: cp ml/data/models/PL_elo_<date>.json                              │
+│              lib/ml/models/PL_elo.json                                       │
+│           git commit + push                                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+         │
+         │ JSON committed to git → baked into the next Node image
+         ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ RUNTIME (Node, in-process — every captured result)                            │
+│                                                                               │
+│  Admin sets result OR live-score job sees FINISHED                            │
+│         │                                                                     │
+│         ▼                                                                     │
+│  GameService.setResult / bulkSetResult / applyLiveUpdate                      │
+│    └──── sequelize.transaction(t) ────────────────────────────┐               │
+│           game.result = next                                   │               │
+│           game.status = 'finished'                             │               │
+│           await game.save({transaction: t})                    │               │
+│           PredictionService.onResultUpdated(game, {t})         │               │
+│             ├─ idempotent? (result === appliedResult) → no-op  │               │
+│             ├─ Team.findOne(...).LOCK.UPDATE × 2 (home + away) │               │
+│             ├─ reverse prior delta against game.homeEloPre/    │               │
+│             │     awayEloPre snapshot if appliedResult was set │               │
+│             ├─ apply new delta vs the SAME (locked) snapshot   │               │
+│             ├─ team.elo += delta; round to DECIMAL(8,2)        │               │
+│             ├─ game.{homeEloPre, awayEloPre, appliedResult}=…  │               │
+│             └─ await game.save({transaction: t})               │               │
+│    └──── COMMIT ──────────────────────────────────────────────┘               │
+│                                                                               │
+│  POST-COMMIT side effects (Tier 5.3 invariants):                              │
+│    NotificationService.notify(pick.userId, 'pick-scored', ...)               │
+│    BadgeService.evaluateBadges(pick.userId)                                  │
+│    LeaderboardService.invalidate('all')                                      │
+│    PredictionService.rePredictFutureFixtures({affectedTeams, leagueId})      │
+│         ├─ loadModel('lib/ml/models/PL_elo.json') (cached after 1st load)    │
+│         ├─ Game.findAll({status:'scheduled', homeTeam OR awayTeam in [...]}) │
+│         ├─ Team.findAll({name in [...]}) → eloByName map                     │
+│         ├─ for each fixture:                                                  │
+│         │     probs = xgboost.predict(model, [homeElo, awayElo])             │
+│         │     triple = normalize.toThreeWay(probs[0..2])                     │
+│         │     await game.update({home/draw/awayProbability: ...})            │
+│         └─ logger.info({rewritten, skipped}, 'cascade complete')             │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Package layout** under [ml/scorecast_ml/](ml/scorecast_ml/):
+**File layout (Tier 17 trim)**:
 
-| Subpackage   | Responsibility                                                                                                                                                 |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ingest/`    | Download + cache Football-Data.co.uk CSVs (`football_data_uk.py`); season-range parser (`seasons.py`)                                                          |
-| `reconcile/` | Bridge FDCO team names to football-data.org canonicals via [reconcile/teams.json](ml/scorecast_ml/reconcile/teams.json) (`team_mapping.py`)                    |
-| `elo/`       | Pure Elo engine — `expected_score`, `update`, `batch_compute` (`engine.py`); on-disk snapshot helpers (`snapshot.py`)                                          |
-| `features/`  | 11-column feature matrix builder (`build.py`); rolling-form-as-of helpers with the load-bearing `< as_of` filter (`form.py`)                                   |
-| `train/`     | Train/val/test split (`dataset.py`); XGBoost wrapper + `ModelBundle` joblib serializer (`model.py`); mlogloss + accuracy + majority-class baseline (`eval.py`) |
-| `inference/` | 3-class probability prediction (`predict.py`); 3-class → DECIMAL(3,2) rounding + sentinel-nudge (`normalize.py`)                                               |
-| `db/`        | Postgres connection (`connection.py`); read-only SELECTs for upcoming + completed games (`queries.py`); HTTP writer with cookie auth (`writer.py`)             |
-| (root)       | `cli.py` (typer commands), `config.py` (pydantic-settings), `logging.py` (structlog), `__main__.py`                                                            |
+Surviving Python (training-only):
 
-**Scripts** at [ml/scripts/](ml/scripts/) — runnable diagnostics, not part of the pipeline:
+| Path                                         | Responsibility                                                                                                                                                              |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ml/scorecast_ml/cli.py`                     | Single `train` subcommand. Inlined strict reconciliation + 2-feature build + season split.                                                                                  |
+| `ml/scorecast_ml/train/model.py`             | XGBoost wrapper. `train()` returns booster; `save_as_json()` emits native JSON dump.                                                                                        |
+| `ml/scorecast_ml/elo/engine.py`              | Source of truth for Elo math. `lib/ml/eloMath.js` parity-tests against this.                                                                                                |
+| `ml/scorecast_ml/ingest/football_data_uk.py` | FDCO CSV parser. Tolerates ragged trailing columns (XPath: ~12k rows / 32 seasons).                                                                                         |
+| `ml/scorecast_ml/reconcile/teams.json`       | Per-league alias map (FDCO short names → football-data.org canonical). Same data is mirrored into [seeders/reconcileMap.json](seeders/reconcileMap.json) for the JS seeder. |
+| `ml/data/raw/PL_*.csv`                       | 32 seasons of FDCO history; committed via `.gitignore` negation `!ml/data/raw/*.csv`.                                                                                       |
+| `ml/data/models/`                            | Train-output JSON (gitignored — the _production_ model lives at `lib/ml/models/`).                                                                                          |
 
-- `demo_predict_one.py` — single Liverpool-vs-Arsenal prediction with full feature trace (useful for end-to-end sanity check).
-- `compare_hfa.py` — HFA=0 vs HFA=65 ablation against a held-out test set. The script that locked in the `home_field_advantage=0` default.
-- `backtest_2526.py` — walk-forward eval on the in-progress 25/26 season pulled from the live DB. The honest OOS check (val metrics are by construction optimistic post-Phase-2 calibration).
+Runtime JS (always loaded by the Node app):
+
+| Path                            | Responsibility                                                                                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lib/ml/eloMath.js`             | Pure Elo math: `expectedHomeScore`, `actualScores`, `updateElos`, `eloDelta`. K=20, INITIAL=1500, HFA=0. JS port of `ml/scorecast_ml/elo/engine.py`.                                                         |
+| `lib/ml/xgboostInference.js`    | Native XGBoost JSON tree walker + softmax. Zero deps. ~150 LOC. Handles `multi:softprob` via `tree_info` per-class accumulation. `parseBaseScore()` defaults to 0 when XGBoost emits the hex-encoded format. |
+| `lib/ml/normalize.js`           | `toThreeWay(p_h, p_d, p_a)` → DECIMAL(3,2) triple summing to 1.0. Clip → round → rebalance against largest-RAW class → nudge off the `(0.50, 0.00, 0.50)` sentinel.                                          |
+| `lib/ml/models/PL_elo.json`     | The production model (615 trees, ~1.5 MB). Committed by operator after each retrain. JS loader looks up by exact name.                                                                                       |
+| `services/PredictionService.js` | The reactive cascade. `onResultUpdated` (idempotent + reversible) + `rePredictFutureFixtures`. Per-league model cache.                                                                                       |
+
+Tests:
+
+| Path                             | Coverage                                                                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/eloMath.test.js`          | 16 unit tests — symmetry, sum-to-1, zero-sum, monotonicity, draw split, delta+update parity.                                                             |
+| `tests/normalize.test.js`        | 10 unit tests — sum-to-1, clip floor, sentinel nudge, residual on largest raw.                                                                           |
+| `tests/xgboostInference.test.js` | 13 unit tests — tree walk, NaN default-left, malformed-tree throw, softmax stability, hex-encoded base_score, NaN guard, end-to-end on hand-built model. |
+| `ml/tests/test_elo_engine.py`    | Python Elo determinism + min_rating strategy. Mirror of the JS suite — drift means JS↔Python parity broke.                                               |
 
 #### Pipeline stages — detailed
 
-**1. Ingest** ([ingest/football_data_uk.py](ml/scorecast_ml/ingest/football_data_uk.py))
+**1. Training — Python, offline** ([ml/scorecast_ml/cli.py](ml/scorecast_ml/cli.py) → [train/model.py](ml/scorecast_ml/train/model.py))
 
-- URL: `https://www.football-data.co.uk/mmz4281/{season}/{fdco_code}.csv`. Free, public-domain, ~30 years of major European league history.
-- `LEAGUE_CODE_MAP` maps ScoreCast league codes (matching `leagues.sourceLeagueId` for football-data.org rows) to FDCO codes: `PL→E0`, `PD→SP1`, `BL1→D1`, `SA→I1`, `FL1→F1`. Only PL is actively trained today; the other four are mapped but await per-league `teams.json` extensions.
-- Cache path: `ml/data/raw/{league}_{season_code}.csv` — keyed by ScoreCast code (`PL`), NOT FDCO code (`E0`), so provider swaps don't move the cache.
-- HTTP fetch wrapped in `tenacity.retry` (4 attempts, exponential backoff 2–15 s) to absorb upstream blips. Idempotent — re-runs hit cache unless `--force-redownload` is passed.
-- Parser uses stdlib `csv` (not pandas) so historical CSVs with ragged trailing columns (e.g. 2003/04 added mid-season odds providers; later seasons added xG columns) still parse cleanly. Pandas's C/python engines would drop those rows.
-- For each row, normalizes columns into `(date, home, away, fthg, ftag, ftr, league, season)` shape. `ftr ∈ {H, D, A}` (Full-Time Result).
-- A SHA-256 of the response body is logged (first 12 chars) so anomalies in the upstream CSV can be detected after the fact.
+Single subcommand: `python -m scorecast_ml train --league PL`. Replaces the 6-subcommand pre-Tier-17 CLI; everything else (ingest / reconcile / elo / predict / predict-and-write) was deleted. The trainer inlines what it used to call out to:
 
-**2. Reconcile** ([reconcile/team_mapping.py](ml/scorecast_ml/reconcile/team_mapping.py))
+1. **Read CSVs** — `fs.readdirSync('ml/data/raw/')` filtered to `PL_\d{4}\.csv`, sorted by season-start-year (alphabetical sort breaks because PL_0001 sorts before PL_9394 due to the two-digit-year wrap). Parsed via the surviving `ingest/football_data_uk.py` which tolerates ragged trailing columns (mid-season odds providers added across history; pandas C engine drops those rows).
+2. **Strict reconciliation** — strict lookup against [reconcile/teams.json](ml/scorecast_ml/reconcile/teams.json). `KeyError` on any unmapped CSV name with the full list of missing entries. The pre-Tier-17 fuzzy fallback (rapidfuzz, three score tiers) was removed — historical corpus is static and known-clean; new clubs require a manual `teams.json` extension before retraining.
+3. **Elo walk** — [elo/engine.py](ml/scorecast_ml/elo/engine.py) `batch_compute(matches, EloConfig())`. K=20, INITIAL=1500, HFA=0. Promoted-team strategy: `min_rating` past the first season. Produces `home_elo_pre` / `away_elo_pre` columns (the PRE-match snapshot, no leakage).
+4. **2-feature matrix** — `X = augmented[['home_elo_pre','away_elo_pre']].rename(...)` to match `FEATURE_NAMES = ['home_elo','away_elo']`. Labels via `{H:0, D:1, A:2}` to match XGBoost's `multi:softprob` column order. The pre-Tier-17 11-feature build (form / ppg / days-rest) was dropped because the runtime cascade in Node has no source for rolling form — production features have to match what the cascade can supply.
+5. **Time-based split** — train through `--train-through-season` (default 2223); val on `--val-season` (default 2324, used for early-stopping). No held-out test set in the training run; honest OOS evaluation now happens organically via the picks that come in and resolve.
+6. **XGBoost fit** — `multi:softprob`, max_depth=4, learning_rate=0.05, num_boost_round=400, early_stopping=30 patience on val mlogloss, `seed=42` (determinism). The Phase-2 isotonic calibration step was dropped — runtime clipping in `lib/ml/normalize.js` handles the edge cases the calibrators used to.
+7. **Native JSON export** — `booster.save_model('ml/data/models/PL_elo_<date>.json')`. This is the file the operator commits (without the date suffix) to `lib/ml/models/PL_elo.json`. Replaces the `.joblib` bundle entirely — `ModelBundle` + `load_latest_bundle` + `fit_calibrators` + the joblib dependency are all gone.
 
-Bridges Football-Data.co.uk's short names ("Man United", "Spurs") to football-data.org's canonical names ("Manchester United FC", "Tottenham Hotspur FC"). The two providers must agree on team identity or inference would treat the same club as different teams.
+The trainer is the only entry point: `python -m scorecast_ml --help` shows just `train`. `requirements.txt` was slimmed to `pandas`, `numpy`, `xgboost`, `scikit-learn`, `typer`, `pydantic-settings`, `structlog`, `python-dateutil` + dev tools (pytest, ruff). `httpx`, `tenacity`, `psycopg`, `rapidfuzz`, `joblib`, `pyarrow` are all gone (no more API writes, no more DB reads, no more fuzzy matching, no more joblib bundles, no more parquet snapshots).
 
-- Aliases live in [reconcile/teams.json](ml/scorecast_ml/reconcile/teams.json), one block per league.
-- Three-tier resolution: (1) exact alias match, (2) exact canonical match, (3) `rapidfuzz` fuzzy match. Score thresholds:
-  - `≥ 92` → auto-match with WARN log.
-  - `75 ≤ score < 92` → ERROR with the score in the message.
-  - `< 75` → ERROR with "likely a new promotion — extend teams.json".
-- The loud-error path on unknown names is the design — silently auto-matching at low fuzzy scores is how naive pipelines drift across preseasons when promoted teams arrive with names that resemble already-mapped clubs.
+**2. Model artifact — `lib/ml/models/PL_elo.json`**
 
-**3. Elo** ([elo/engine.py](ml/scorecast_ml/elo/engine.py))
-
-Vanilla Elo math:
+XGBoost 2.x native JSON dump. ~1.5 MB for the production PL model (615 trees × ~16 nodes each, plus a small `learner_model_param` block). The format ([xgboost docs](https://xgboost.readthedocs.io/)) has these per-tree arrays:
 
 ```
-expected_score(r_home, r_away, hfa) = 1 / (1 + 10^((r_away - (r_home + hfa)) / 400))
-update(r, expected, actual, K) = r + K · (actual - expected)
-actual_score_from_ftr('H') = (1.0, 0.0)
-actual_score_from_ftr('D') = (0.5, 0.5)
-actual_score_from_ftr('A') = (0.0, 1.0)
-```
-
-`EloConfig` defaults: `initial_rating=1500`, `k_factor=20`, `home_field_advantage=0`, `promoted_team_strategy='min_rating'`. Two non-vanilla knobs:
-
-- **`home_field_advantage` defaults to `0`** (not the conventional 65). The ablation in [ml/scripts/compare_hfa.py](ml/scripts/compare_hfa.py) showed HFA is a structural no-op for XGBoost: trees absorb the constant `elo_diff` shift in split thresholds, and the home/away feature-pair structure (`home_elo` + `away_elo` as separate columns) carries the actual home-advantage signal. Test-set mlogloss diff was ~0.001 — within noise. Pass `--hfa 65` to reproduce the legacy training.
-- **`promoted_team_strategy='min_rating'`** — once `len(seasons_seen) > 1`, any team first appearing enters at `min(current ratings)` instead of `initial_rating=1500`. Captures the empirical reality that promoted teams underperform the bottom of the league they joined. On the very first match of a brand-new league, everyone defaults to `initial_rating` since there's no "current league" to peg against.
-
-`batch_compute(matches, config)` walks the chronologically-sorted match DataFrame and:
-
-1. For each row, before initializing any new team in this match, **snapshots `min(current ratings)`** — otherwise a brand-new home team would influence the away team's starting rating in the same row.
-2. Records each team's PRE-match rating into two new columns: `home_elo_pre`, `away_elo_pre`. These are exactly what a feature engineer would have at prediction time (no leakage).
-3. Applies the match outcome to both ratings via `update()`.
-4. Tracks `matches_played` + `last_match_date` per team in a `TeamState` dict.
-
-Returns `(augmented_dataframe, snapshot_dict)`. The snapshot is what `predict-and-write` uses to look up team ratings for upcoming fixtures.
-
-**Determinism**: same input + same config → same output. Locked in by [ml/tests/test_elo_engine.py](ml/tests/test_elo_engine.py).
-
-**4. Features** ([features/build.py](ml/scorecast_ml/features/build.py) + [features/form.py](ml/scorecast_ml/features/form.py))
-
-`FEATURE_NAMES` is the 11-column feature matrix (column order matters — XGBoost binds to it):
-
-```
-elo_diff           = home_elo_pre + HFA - away_elo_pre
-home_elo, away_elo = raw pre-match Elo ratings
-home_ppg_last5, away_ppg_last5     = points-per-game over the last 5 matches
-home_gf_last5, away_gf_last5       = goals-for over the last 5 matches
-home_ga_last5, away_ga_last5       = goals-against over the last 5 matches
-home_days_rest, away_days_rest     = days since last match, capped at 14
-```
-
-Label: `_ftr_to_label('H'→0, 'D'→1, 'A'→2)` — same column order as XGBoost's `multi:softprob` output.
-
-**The load-bearing leakage-prevention line** is in [features/form.py](ml/scorecast_ml/features/form.py) `compute_form(team_history, as_of, last_n)`:
-
-```python
-prior = team_history[team_history['date'] < as_of]  # strict less-than
-window = prior.tail(last_n)
-```
-
-If you accidentally pass today's date, you include matches that hadn't been played yet at prediction time — the canonical data leak. The function signature exists explicitly so callers must commit to an `as_of` value.
-
-**XGBoost handles NaN natively** — early-season matches with no prior form pass through unmodified, so the first 5 matches of every team's season aren't artificially zero-filled.
-
-The SAME builder runs at training (per-match chronological) and inference (per upcoming fixture). At inference, `history_for_form` is the **CSV history + completed current-season DB rows** (synthesized as CSV-shaped frames with `season='db'`) so rolling form stays current.
-
-**5. Train** ([train/](ml/scorecast_ml/train/))
-
-XGBoost defaults ([train/model.py](ml/scorecast_ml/train/model.py)):
-
-```python
-DEFAULT_PARAMS = {
-    'objective':           'multi:softprob',
-    'num_class':           3,
-    'max_depth':           4,             # shallow trees — pre-existing tabular wisdom
-    'learning_rate':       0.05,
-    'subsample':           0.8,
-    'colsample_bytree':    0.8,
-    'reg_lambda':          1.0,
-    'min_child_weight':    3,
-    'tree_method':         'hist',        # fastest histogram-based
-    'eval_metric':         'mlogloss',
-    'seed':                42,            # determinism
+{
+  learner: {
+    learner_model_param: { num_class: "3", base_score: "<hex-float>", ... },
+    gradient_booster: {
+      model: {
+        trees: [
+          {
+            tree_param: { num_nodes: "N" },
+            left_children:    [int...],   // -1 means leaf
+            right_children:   [int...],
+            split_indices:    [int...],   // feature index for split nodes
+            split_conditions: [float...], // threshold (or leaf weight if leaf)
+            default_left:     [0|1...],   // direction for NaN inputs
+            base_weights:     [float...]  // leaf output
+          }, ...
+        ],
+        tree_info: [int...]               // class index per tree
+      }
+    }
+  }
 }
-DEFAULT_NUM_BOOST_ROUND       = 400
-DEFAULT_EARLY_STOPPING_ROUNDS = 30        # patience on val mlogloss
 ```
 
-**Time-based train/val/test split (NEVER random)** — random k-fold gives flattering log-loss because the model peeks at its own season's future. Production split (baked into the Dockerfile build):
+**Gotcha — hex-encoded `base_score`** (caught live in prod): XGBoost 2.x emits `learner_model_param.base_score` as a C99 hex-float string (e.g. `"5E-1F"` for 0.5). JS `Number("5E-1F")` returns NaN, which would poison every logit and produce `[NaN, NaN, NaN]` out of softmax. `parseBaseScore()` in [lib/ml/xgboostInference.js](lib/ml/xgboostInference.js) falls back to 0 when the parse fails — correct for `multi:softprob` because base_score broadcasts identically to every class and cancels under softmax (shift-invariant). For `binary:logistic` this matters; the code has a TODO to handle that case when we ever train a binary model.
 
-- **Train**: 15 seasons (2009/10 → 2023/24) — `--train-from-season 0910 --train-last-season 2324`.
-- **Val**: 2024/25 (1 season). Used for early stopping AND for fitting the isotonic calibrators (Phase 2).
-- **Test**: `--test-season 2526` is set, but the 25/26 CSV isn't in the committed corpus (the season is still in progress). `train` gracefully skips the test-set metrics when the CSV is missing; honest OOS evaluation runs separately via [ml/scripts/backtest_2526.py](ml/scripts/backtest_2526.py) which pulls 25/26 finished games from the live DB.
+**3. JS inference — [lib/ml/xgboostInference.js](lib/ml/xgboostInference.js)**
 
-**Walk-forward backtest results** (5-season train 2004/05–2008/09 + 1-season val 2009/10 + 15-season held-out test 2010/11–2024/25, 5,700 OOS matches): **mlogloss 0.992 vs majority-class baseline 1.065 (−0.073)**, **accuracy 51.9% vs 44.9% (+7 pp)**. On the live 25/26 season via the DB-backed backtest: mlogloss 1.037 vs baseline 1.080 (−0.043), accuracy 47.6% vs 42.4% (+5.3 pp).
+Pure tree walker. Zero dependencies. ~150 LOC.
 
-**`fit_calibrators(bundle, X_val, y_val)`** (Phase 2) fits three independent `IsotonicRegression(y_min=0, y_max=1, out_of_bounds='clip')` calibrators on the raw val proba — one per class. Why hand-rolled instead of sklearn's `CalibratedClassifierCV(cv='prefit')`: that wrapper expects an estimator with `fit`, `predict_proba`, and `classes_` (sklearn API). The bundle wraps an `xgb.Booster` which doesn't satisfy that contract. The hand-rolled three-class loop is ~5 lines and we keep control of out-of-bounds clipping.
-
-**Why val metrics are optimistic** — the calibrators are fit on the same val set early stopping used. The `val_uncalibrated` metric is captured before calibration and reported alongside the post-calibration `val` so reviewers can see the shift. The honest evaluation lives in `backtest_2526.py`.
-
-**6. Inference + write** ([inference/](ml/scorecast_ml/inference/) + [db/writer.py](ml/scorecast_ml/db/writer.py))
-
-The CLI `_build_inference_context(league)` does the heavy lifting:
-
-1. `load_latest_bundle(league)` — finds the most recent `{league}_YYYY-MM-DD.joblib` matching the **strict canonical regex**. Suffixed variants (`{league}_YYYY-MM-DD_hfa0.joblib` from `--model-suffix hfa0` runs) are **deliberately ignored** — they're A/B artifacts, not production. To load one explicitly, call `load_bundle(path)`.
-2. Reads cached CSVs for the league via `parse_csv` → `reconcile_dataframe`.
-3. Opens a Postgres connection and:
-   - `fetch_league_by_code(conn, code='PL')` — looks up by `sourceLeagueId` (the football-data.org code), NOT internal UUID. Same code the frontend's URL uses.
-   - `fetch_completed_for_league` — `status='finished' AND homeScore IS NOT NULL`. Returns dict rows via `psycopg.rows.dict_row`.
-   - `fetch_upcoming_for_league(horizon_days=10_000)` — `status='scheduled' AND date > now() AND date < now() + horizon`. The CLI clips the result downstream to `horizon_days=7` by default.
-4. Synthesizes DB completed rows as CSV-shaped frames (with `season='db'`) and concatenates with CSV history.
-5. Walks Elo over the FULL chronological history (CSV + DB combined) — sub-second on ~6 seasons. **No incremental snapshot today** — Phase 2 / future work could swap to a cached snapshot + incremental tail update.
-6. Returns `(bundle, bundle_path, upcoming_df, full_history, elo_state)`.
-
-Then `predict_upcoming(...)` ([inference/predict.py](ml/scorecast_ml/inference/predict.py)):
-
-1. Builds inference features for each upcoming row via `build_inference_features` (same code path as training).
-2. Calls `bundle.predict_proba(X)` which:
-   - Calls `predict_proba_raw` first (uncalibrated XGBoost).
-   - If `bundle.calibrators` is set: applies each per-class isotonic regression.
-   - **Clips every probability to `[0.01, 0.99]`** — the 0.01 floor is exactly the DECIMAL(3,2) DB column floor. Without this clip, isotonic's lower-bound 0 mapping (which fires on lopsided matches like Arsenal-vs-Burnley) reaches the DB as a literal `0.00`. Locked in by [ml/tests/test_calibration.py](ml/tests/test_calibration.py) `test_calibrated_output_clipped_off_zero_and_one`.
-   - **Renormalizes per row** so probabilities sum to 1.0 after the clip.
-3. For each prediction, calls `to_three_way(p_h, p_d, p_a)` which:
-   - Validates each value is in `[0, 1]`.
-   - Tolerates up to 5% drift from sum-to-1 and silently re-normalizes (post-calibration imprecision); raises on >5% drift (broken model output).
-   - Rounds each class to 2 decimals; the rounding residual is absorbed by **the class with the largest RAW probability** (not the largest rounded value — preserves the model's intended ordering through close-rounded ties).
-   - Nudges off the `(0.50, 0.00, 0.50)` sentinel if the rounded trio lands there (direction taken from the raw pre-rounding pair; home-favored by default).
-4. Returns a DataFrame with the original upcoming columns plus `p_home`, `p_draw`, `p_away` (raw) and `home_out`, `draw_out`, `away_out` (write values).
-
-**HTTP writer** ([db/writer.py](ml/scorecast_ml/db/writer.py)) — `write_probabilities(rows, *, overwrite_existing, dry_run) → WriteResult`:
-
-```
-@dataclass
-class WriteResult:
-    written: int                                       # successful PUTs
-    skipped: int                                       # sentinel non-match
-    failed: int                                        # HTTP errors / non-200
-    failures: list[tuple[game_id, status, body_snippet]]
-    skipped_ids: list[str]
+```js
+function walkTree(tree, features) {
+  let i = 0;
+  for (let steps = 0; steps < tree.left_children.length; steps += 1) {
+    if (tree.left_children[i] === -1) return tree.base_weights[i];
+    const f = features[tree.split_indices[i]];
+    const goLeft = Number.isNaN(f) ? tree.default_left[i] === 1 : f < tree.split_conditions[i];
+    i = goLeft ? tree.left_children[i] : tree.right_children[i];
+  }
+  throw new Error('walkTree: did not reach a leaf within num_nodes steps');
+}
 ```
 
-Auth flow mirrors [tests/e2e/helpers/api.js](tests/e2e/helpers/api.js) `apiLogin`:
+`predict(model, features)` accumulates per-class logits across that class's trees (`tree_info[t]` says which class tree t belongs to), adds `base_score` uniformly (no-op for softmax), runs a numerically-stable softmax (subtract max(logits) before exp() to avoid overflow), and **throws if any output is non-finite** — defensive guard that surfaces propagation bugs at the predict boundary instead of letting them silently reach `normalize.toThreeWay`.
 
-1. **`_login(client)`** — POST `/api/login` once per `write_probabilities()` call. The response sets `sc_access` (HttpOnly) + `sc_refresh` + `sc_csrf` cookies on the `httpx.Client`. Extract the `sc_csrf` cookie value into the writer's static header dict. `/api/login` is rate-limited at 5/15 min/IP so **looping login per row would 429 the job** — the single-login pattern is load-bearing.
-2. For each row, **sentinel check** via `_is_sentinel(home, draw, away)` against the DB-current probabilities (read in step 3 of `_build_inference_context`). Tolerance `_SENTINEL_TOL = 0.001`. If non-sentinel and `not overwrite_existing` → skip + record in `skipped_ids`.
-3. **PUT `/api/admin/games/:id`** with `X-CSRF-Token: <sc_csrf>` header. `httpx.Client` carries the auth cookies automatically.
-4. HTTP timeout 15 s. Connection errors and non-200 responses are recorded in `failures[]` and don't block subsequent rows. The CLI surfaces the first 5 failures to the operator and exits non-zero if any failure occurred.
+`loadModel(path, { numFeatures })` is the **graceful-missing-model boundary**: if the JSON file is absent, logs a warn and returns `null`. `PredictionService.rePredictFutureFixtures` null-checks the cached model and silently no-ops (`{ rewritten: 0, skipped: 'no model' }`) so a missing file never crashes a result-capture transaction. This was the load-bearing contract that let PR B + PR C ship before the trained PL_elo.json existed.
 
-**Dry-run mode** (`--dry-run`) — runs the sentinel check, logs what would be written, but issues no HTTP requests. Login is skipped too. Useful for verifying skip-existing logic without touching the API.
+**Performance** — depth-4 trees × 615 trees per prediction ≈ 9,800 comparisons per fixture. JS Math.exp + Array.fill add another ~3 µs. End-to-end per-fixture prediction is ~50 µs. A typical PL cascade rewrites ~5-15 fixtures per result → cascade overhead is ~0.5 ms. Effectively free.
 
-#### CLI surface ([scorecast_ml/cli.py](ml/scorecast_ml/cli.py))
+**4. JS Elo math — [lib/ml/eloMath.js](lib/ml/eloMath.js)**
 
-Invocation: `python -m scorecast_ml <subcommand>` or `cd ml && python -m scorecast_ml <subcommand>`. Built on `typer`; `--help` works on every subcommand.
+Pure functions, no dependencies:
 
-| Subcommand                                                                                                                                                            | What it does                                                                                                                                                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ingest --league PL --seasons 9394-2425 [--force-redownload]`                                                                                                         | Download + cache Football-Data.co.uk CSVs for a season range. `--seasons` accepts a range (`9394-2425`) or a single code (`2425`)                                                                    |
-| `reconcile --league PL [--dry-run]`                                                                                                                                   | Walk every team name in the cached CSVs against `teams.json`. **Fails loudly** (exit 2) on any unmatched name. `--dry-run` prints the full mapping table without erroring                            |
-| `elo --league PL`                                                                                                                                                     | Compute Elo from cached CSVs and save a snapshot to `data/elo/{league}_{as_of}.parquet`. Prints top-5 teams by rating                                                                                |
-| `train --league PL [--train-from-season 0910] [--train-last-season 2324] [--val-season 2425] [--test-season 2526] [--hfa 0] [--no-calibration] [--model-suffix hfa0]` | Train a model. Time-based split. Saves `{league}_{data_through}.joblib` + `.meta.json`. `--model-suffix` appends to the filename — useful for ablations that `load_latest_bundle` should NOT pick up |
-| `predict --league PL [--horizon-days 7] [--out predictions.json]`                                                                                                     | Predict upcoming fixtures. **No DB writes**. Prints a table; optional `--out` writes JSON                                                                                                            |
-| `predict-and-write --league PL [--horizon-days 7] [--dry-run] [--overwrite-existing]`                                                                                 | Predict + push via `PUT /api/admin/games/:id`. Skips non-sentinel rows unless `--overwrite-existing` is set                                                                                          |
-
-There is **no `pipeline` composite command** — each step runs separately so failures are surfaced early and intermediate state stays inspectable on disk.
-
-#### Configuration ([scorecast_ml/config.py](ml/scorecast_ml/config.py))
-
-`pydantic-settings`-based `Settings`, env-prefix `SCORECAST_`, optionally loads `.env` from the working directory:
-
-| Env var                  | Default                 | Purpose                                                                                                                                                                                                  |
-| ------------------------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SCORECAST_ML_USERNAME`  | `ml_pipeline`           | Admin user the writer authenticates as. **Must match `^[A-Za-z0-9_]+$`** — the Node API's regex rejects hyphens, so `ml-pipeline` would 400 at registration. Older docs that say `ml-pipeline` are wrong |
-| `SCORECAST_ML_PASSWORD`  | `""`                    | Password for the admin user. Writer raises `RuntimeError` if empty rather than attempting an empty-password login                                                                                        |
-| `SCORECAST_API_BASE_URL` | `http://localhost:3000` | Base URL for the writer's HTTP client. Set to `https://bantryx.com` in the prod Container Apps Job; the Bicep module also accepts the FQDN fallback before custom-domain is set                          |
-| `SCORECAST_DB_URL`       | `""`                    | Same connection string as the Node app's `DATABASE_URL`. Includes `?sslmode=require` against Azure Postgres                                                                                              |
-| `SCORECAST_LOG_FORMAT`   | `""` (auto)             | `pretty` or `json`. structlog picks `json` automatically in prod                                                                                                                                         |
-| `SCORECAST_DATA_ROOT`    | `""` (auto)             | Override for `ml/data/`. Default resolves relative to the package                                                                                                                                        |
-
-The `Settings` instance is cached via `get_settings()` (module-level singleton).
-
-#### Model bundle + metadata format
-
-`ModelBundle` ([train/model.py](ml/scorecast_ml/train/model.py)) — a dataclass containing the XGBoost booster + everything needed to reproduce a prediction:
-
-- `model`: the trained `xgb.Booster`.
-- `feature_names`: list — bound to column order; `predict_proba_raw` re-orders incoming DataFrames to match.
-- `trained_at`: ISO 8601 UTC timestamp.
-- `data_through_date`: ISO 8601 date — the most recent match in training, used in the filename.
-- `league_code`: e.g. `PL`.
-- `metrics`: dict carrying `val_uncalibrated`, `val`, `test` (if test set was non-empty), `baseline_test`, `elo_config`, `split_summary`, `calibrated` bool.
-- `git_sha`: short git SHA captured at train time (via `subprocess`; tolerates running outside a git workdir).
-- `params`: the final XGBoost param dict (DEFAULT_PARAMS merged with overrides).
-- `num_boost_round`, `best_iteration`: training caps + early-stopping result.
-- `calibrators`: list of 3 `IsotonicRegression` or `None` (graceful `getattr` fallback for pre-Phase-2 pickles).
-
-Saved as **`{league}_{data_through}.joblib`** + sibling **`.meta.json`** under `ml/data/models/`. The `.meta.json` is human-readable so you can diff models without firing up Python — useful for verifying a CD-built model is what you expected.
-
-**`load_latest_bundle(league)` strict canonical regex**: `^{league}_\d{4}-\d{2}-\d{2}\.joblib$`. Suffixed variants are deliberately ignored. The four committed variants in [ml/data/models/](ml/data/models/) — `PL_2025-05-25.joblib` (canonical), `_hfa0`, `_hfa65`, `_5season_uncal` — illustrate the pattern: only the unsuffixed name becomes production via `load_latest_bundle`.
-
-#### Walk-forward correctness invariant
-
-Features for any match are built **from data strictly dated BEFORE that match**:
-
-- Elo's `home_elo_pre` / `away_elo_pre` columns are the pre-match snapshot (captured BEFORE the rating is updated for the current row in `batch_compute`).
-- Form's `compute_form(team_history, as_of)` does `team_history[team_history['date'] < as_of]` — strict less-than.
-
-The [ml/scripts/backtest_2526.py](ml/scripts/backtest_2526.py) backtest combines CSV history with DB 25/26 finished games and re-runs Elo across the whole chronological set — each 25/26 prediction uses only matches dated strictly before it.
-
-**Don't shortcut this** — computing form against the full match list as-of-today gives flattering log-loss with no out-of-sample value. This is the canonical data leak.
-
-#### Local invocation workflow
-
-Useful for dry-runs, ablations, and one-off retrains. Production runs in the Container Apps Job; local runs hit your laptop.
-
-1. **Provision an `ml_pipeline` admin user** in the running app (UI Register form, then Admin tab promote to admin). Username regex `^[A-Za-z0-9_]+$` at [validation/schemas.js:11](validation/schemas.js#L11) — underscore is allowed, hyphen is not.
-2. **Python env**: `cd ml && python -m venv .venv && pip install -r requirements.txt`. Python 3.14 in prod; 3.11+ locally is fine. Top-level deps: `httpx`, `tenacity`, `pandas`, `numpy`, `pyarrow`, `xgboost`, `scikit-learn`, `joblib`, `rapidfuzz`, `psycopg[binary]`, `pydantic-settings`, `structlog`, `typer`, `python-dateutil`.
-3. **`.env`**: copy `.env.example` and fill `SCORECAST_ML_PASSWORD` + `SCORECAST_DB_URL` (same URL as the Node app's `DATABASE_URL`; against local Postgres usually `postgres://postgres:postgres@localhost/scorecast_db`).
-4. **Pipeline run**:
-   ```bash
-   python -m scorecast_ml ingest --league PL --seasons 9394-2425
-   python -m scorecast_ml reconcile --league PL
-   python -m scorecast_ml elo --league PL
-   python -m scorecast_ml train --league PL
-   python -m scorecast_ml predict-and-write --league PL --dry-run
-   python -m scorecast_ml predict-and-write --league PL
-   ```
-
-See [ml/ONBOARDING.md](ml/ONBOARDING.md) for the per-league onboarding playbook (La Liga / Bundesliga / Serie A / Ligue 1).
-
-#### Production deployment (Phase 3, shipped)
-
-Azure Container Apps Job on a daily cron. Three components:
-
-**Image** ([ml/Dockerfile](ml/Dockerfile)) — 3-stage build:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 1 — base (python:3.14-slim)                                    │
-│   apt: libgomp1 (xgboost OpenMP runtime) + tini                      │
-│   pip: requirements.txt                                              │
-└─────────────────────┬───────────────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 2 — train                                                       │
-│   COPY scorecast_ml + data/raw (the CSV corpus)                       │
-│   RUN python -m scorecast_ml train --league PL \                      │
-│         --train-from-season 0910 --train-last-season 2324 \           │
-│         --val-season 2425 --test-season 2526                          │
-│   Output: /app/data/models/PL_<date>.joblib + .meta.json              │
-│   Deterministic (seed=42 + committed CSVs) → bit-identical models     │
-│     on no-op pushes                                                   │
-└─────────────────────┬───────────────────────────────────────────────┘
-                      │
-                      ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ Stage 3 — runtime                                                     │
-│   useradd uid=1001 app                                                │
-│   COPY scorecast_ml + scripts + data/raw                              │
-│   COPY --from=train /app/data/models ./data/models                    │
-│   USER app                                                            │
-│   ENTRYPOINT ["/usr/bin/tini", "--"]                                  │
-│   CMD ["python", "-m", "scorecast_ml", "predict-and-write",           │
-│        "--league", "PL", "--horizon-days", "7"]                       │
-└─────────────────────────────────────────────────────────────────────┘
+```js
+expectedHomeScore(homeElo, awayElo) = 1 / (1 + 10^((awayElo - (homeElo + HFA)) / 400))
+updateElos(homeElo, awayElo, result) → { newHomeElo, newAwayElo }
+eloDelta(homeElo, awayElo, result) → { home: delta, away: delta }
 ```
 
-Built + pushed to ACR repo **`scorecast-ml`** (separate from the Node app's `scorecast` repo) by [.github/workflows/ml-deploy.yml](.github/workflows/ml-deploy.yml) on `ml/**` changes. The two CD workflows never touch each other's repo. **Retraining = rebuilding the image** — deterministic build means git push is the canonical retrain trigger.
+The `eloDelta` function is what makes PR F's reversibility work — `PredictionService.onResultUpdated` computes the delta against a stored snapshot, subtracts it to reverse a prior application, then adds a new delta against the same snapshot. Zero-sum invariant (home delta = −away delta) is locked in by `tests/eloMath.test.js`.
 
-**Job** ([infra/modules/ml-job.bicep](infra/modules/ml-job.bicep)) — Azure Container Apps Job:
+**Parity with Python** — [ml/scorecast_ml/elo/engine.py](ml/scorecast_ml/elo/engine.py) is the source of truth. `lib/ml/eloMath.js` is a literal port. Drift would silently desync the seeder's bootstrap (Python-derived) from the runtime cascade (JS-derived). Both sides have determinism + invariant tests covering the same cases (`ml/tests/test_elo_engine.py` + `tests/eloMath.test.js`).
 
-- Name: `scorecast-ml-job`.
-- `triggerType: Schedule` with cron expression `30 2 * * *` (5-field standard cron, UTC) → **daily at 02:30 UTC**.
-- System-assigned managed identity with `AcrPull` on the ACR + `Key Vault Secrets User` on the vault.
-- Reads `database-url` + `ml-pipeline-password` from Key Vault via `secretRef`. The `ml-pipeline-password` secret is provisioned by the module from the `mlPipelinePassword` Bicep param — **required on every Bicep reapply** (same pattern as `pgAdminPassword`).
-- Sets env vars `SCORECAST_DB_URL`, `SCORECAST_ML_PASSWORD`, `SCORECAST_API_BASE_URL`, `SCORECAST_ML_USERNAME=ml_pipeline`.
-- Resources: 0.5 vCPU + 1 GiB. Typical execution time <60 s. Logs flow to the shared Log Analytics workspace.
+**5. JS normalize — [lib/ml/normalize.js](lib/ml/normalize.js)**
 
-**Cron offset rationale** — 02:30 UTC daily sits:
+End-to-end pipeline that takes the raw 3-tuple from `predict()` and produces the DECIMAL(3,2) triple that lands in the DB:
 
-- **30 min ahead of the Node app's daily fixture sync at 03:00 UTC**, so the two jobs never race on the same row. This is the load-bearing offset — don't move the ML job into the 03:00–03:05 window.
-- Outside the 60-s live-score poll's active window (PL kickoffs are 12:00–22:00 UTC; 02:30 is always between fixtures, including midweek competitions).
-- Pre-PL-gameweek when run on a Thursday morning (PL fixtures cluster Fri–Sun). Pre-midweek-fixtures when run on a Tue/Wed morning (Champions League etc.). Pre-anything when run any other day.
+1. **Validate range** — every prob in [0, 1] ± 1e-9, throws otherwise.
+2. **Renormalize if drifted** — tolerate ±5% sum-drift; throw on wilder.
+3. **Clip each class to [0.01, 0.99]** — DECIMAL(3,2) precision means anything below 0.005 rounds to 0.00. Without the clip, an isotonic-style lopsided model output (raw 0.001) would emit literal "0% chance" probability writes. The clip is load-bearing, not defensive — the bug it prevents was the original motivation for Phase 2 calibrators on the Python side.
+4. **Round each class to 2 decimals**.
+5. **Absorb rounding residual into the class with the largest RAW probability** (not the largest rounded value). Three close classes often tie after rounding; using the raw input as the tiebreak preserves model ordering through ties.
+6. **Nudge off the `(0.50, 0.00, 0.50)` sentinel** — that's the "untouched by anyone" tuple a fresh game has post-draw-scoring migration. Emitting it would collide with the auto-insert sentinel check; we shift to `(0.51, 0.00, 0.49)` or `(0.49, 0.00, 0.51)` based on raw direction.
 
-**Idempotency** — `predict-and-write` skips games whose probabilities aren't the `(0.50, 0.00, 0.50)` sentinel, so re-firing on the same fixtures is a no-op. Daily runs therefore stack cleanly: each one only writes to (a) newly-synced fixtures still on the sentinel and (b) cancelled/postponed fixtures that got rescheduled and reset.
+Mirrors [ml/scorecast_ml/inference/normalize.py](ml/scorecast_ml/inference/normalize.py) from before that file was deleted in Tier 17 PR D.
 
-**Cost** — ~$0.07/mo at the daily cadence (~60s × 0.5 vCPU × 1 GiB × 30 runs/mo on Consumption pricing). Up from the weekly's ~$0.01/mo. Trivial.
+**6. PredictionService — the reactive cascade** ([services/PredictionService.js](services/PredictionService.js))
 
-**Manual ad-hoc runs** work on a Schedule-triggered Job:
+The bridge between a captured result and the probability rewrites for every upcoming fixture involving either team. Two functions, two distinct transactional contexts:
+
+```js
+// Inside the result-capture transaction. Atomic with game.save().
+onResultUpdated(game, { transaction }) → { affectedTeams, leagueId } | null
+
+// AFTER the transaction commits. Best-effort, can't undo the result.
+rePredictFutureFixtures({ affectedTeams, leagueId }) → { rewritten, skipped, ... }
+```
+
+**`onResultUpdated` behavior matrix** (PR F): `game.appliedResult` is the value previously Elo-applied to the team rows; `game.result` is the new value the caller just set:
+
+| previous → next                 | What runs                                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `X === X` (idempotent)          | Short-circuit. No Elo shift, returns `null`, cascade skipped.                                                                              |
+| `null → 'home'                  | 'away'                                                                                                                                     | 'draw'` | First capture. Snapshot live team Elo onto `game.homeEloPre` + `awayEloPre`. Apply delta. Stamp `appliedResult`. `gamesPlayed += 1`. |
+| `X → Y` (change, both non-null) | Reverse prior delta against locked snapshot. Apply new delta against SAME snapshot. Update `appliedResult`. Net `gamesPlayed` change is 0. |
+| `X → null` (clear)              | Reverse prior delta against snapshot. Drop snapshot + `appliedResult`. `gamesPlayed -= 1`.                                                 |
+
+Both team rows are locked with `SELECT ... FOR UPDATE` so concurrent captures involving the same team serialize cleanly. The snapshot fields are **immutable** for the life of the game once first stored — they represent pre-match strength, not post-revision strength, so reverse + reapply always uses the same reference Elo pair regardless of what other games have shifted the team's live Elo in between.
+
+**`rePredictFutureFixtures`** runs after commit (in `.catch()` so failures can't undo the result):
+
+1. Resolve `leagueCode` from `leagueId` (one extra query; avoids a dep-cycle with LeagueService).
+2. Look up cached model via `getModelForSourceLeagueCode(code)`. `MODEL_PATHS` maps `PL` → `lib/ml/models/PL_elo.json`. Per-league cache populated lazily.
+3. `Game.findAll({ leagueId, status: 'scheduled', [Op.or]: [{ homeTeam IN affectedTeams }, { awayTeam IN affectedTeams }] })` — every upcoming fixture involving either side.
+4. Bulk-fetch the teams referenced (the affected teams + their opponents) in one query. Build `eloByName: Map<name, parseFloat(elo)>`.
+5. For each fixture: `predict()` + `toThreeWay()` + `game.update({ homeProbability, drawProbability, awayProbability })`. Skip with logged warn on missing-team / predict-throw / normalize-throw — never blocks the rest of the batch.
+6. Log `rePredictFutureFixtures: cascade complete` with rewritten + skipped counts.
+
+**7. Teams table + Elo state** ([models/Team.js](models/Team.js))
+
+New table introduced in Tier 17 PR A:
+
+| Column                    | Type                                 | Notes                                                                                                                             |
+| ------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | UUID PK                              | `gen_random_uuid()` default                                                                                                       |
+| `name`                    | VARCHAR(128) NOT NULL                | Canonical name as football-data.org sends it ("Manchester City FC", not "Man City")                                               |
+| `leagueId`                | UUID NOT NULL FK leagues(id) CASCADE | Per-league Elo space. Same canonical name can appear in multiple leagues.                                                         |
+| `elo`                     | NUMERIC(8,2) NOT NULL DEFAULT 1500   | DECIMAL — Sequelize returns as STRING, services parseFloat before math. NUMERIC vs FLOAT avoids drift over years of K=20 updates. |
+| `gamesPlayed`             | INTEGER NOT NULL DEFAULT 0           | Increments on first result capture per game; decrements on clear (PR F).                                                          |
+| `lastMatchDate`           | DATE                                 | Date of the most recent match the team's Elo was updated for.                                                                     |
+| `createdAt` / `updatedAt` | TIMESTAMPTZ                          | Standard Sequelize.                                                                                                               |
+
+Indexes: unique `(name, leagueId)` + non-unique on `leagueId`.
+
+**Two write paths populate this table**:
+
+- **Initial seed** — [seeders/20260522000001-seed-teams-from-elo-history.js](seeders/20260522000001-seed-teams-from-elo-history.js) walks the 32-season committed PL CSV history chronologically (custom sort to handle the two-digit-year wrap), applies the same K=20 / INITIAL=1500 / HFA=0 / min_rating algorithm the Python trainer uses, and inserts every team with its post-walk Elo + gamesPlayed + lastMatchDate. `ON CONFLICT (name, leagueId) DO NOTHING` — re-runs are no-ops for existing rows, so live Elo accumulated by the cascade is preserved. The seeder is NOT auto-run by CD's `db:migrate`; an operator runs it once after the first prod deploy.
+- **Runtime auto-insert** — [services/LeagueService.js](services/LeagueService.js) `ensureTeamExists` inserts a missing team at the league's current `MIN(elo)` (falling back to INITIAL_RATING=1500 when the league has zero teams). Fires on every `upsertFixture` call — both create and update paths — so newly-promoted clubs land in the table before their first match's cascade fires. Mirrors the Python pipeline's promoted-team `min_rating` strategy at the fixture-sync boundary.
+
+#### Per-game snapshot — PR F reversibility contract
+
+Three columns added to `games` in [migration 20260523000001-games-add-elo-snapshot.js](migrations/20260523000001-games-add-elo-snapshot.js):
+
+| Column          | Type              | Purpose                                                                   |
+| --------------- | ----------------- | ------------------------------------------------------------------------- |
+| `homeEloPre`    | NUMERIC(8,2) NULL | Home team's Elo at first result capture. Immutable after first store.     |
+| `awayEloPre`    | NUMERIC(8,2) NULL | Away team's Elo at first result capture. Immutable after first store.     |
+| `appliedResult` | VARCHAR(10) NULL  | The result value that's been Elo-applied. Mirrors the `game.result` enum. |
+
+The locked-snapshot pattern is the key to PR F's reversibility. When a result is changed, the cascade reverses the prior delta against the snapshot (NOT against live Elo, which may have shifted from other games' captures in between) and applies the new delta against the SAME snapshot. The arithmetic guarantee is that A → B → A round-trips to bit-identical Elo, regardless of intervening team activity.
+
+If the snapshot were re-taken on every change instead of being locked, we'd accumulate drift: each toggle would compound the current Elo with another delta. This was exactly the Tier 17 PR C bug that PR F fixed.
+
+#### Operator workflows
+
+**Retraining**:
 
 ```bash
-az containerapp job start --name scorecast-ml-job --resource-group scorecast-prod
+cd ml
+python -m venv .venv && .venv\Scripts\Activate.ps1   # or .venv/bin/activate
+pip install -r requirements.txt
+python -m scorecast_ml train --league PL
+# Produces ml/data/models/PL_elo_<date>.json
+cp data/models/PL_elo_<date>.json ../lib/ml/models/PL_elo.json
+git add ../lib/ml/models/PL_elo.json
+git commit -m "ml: retrain PL elo-only model (val mlogloss X.XXX)"
+git push
+# CD deploys ~3-4 min; per-league model cache populates on next cascade fire
 ```
 
-**Custom-args runs** (e.g. `--overwrite-existing`, a different league, longer horizon) — `az containerapp job start --args` does NOT work because the CLI parser greedily eats `--`-prefixed values. Use the `az rest` REST-API recipe in [ml/README.md → Ad-hoc runs with custom args](ml/README.md). Per-execution overrides are a full container replace (not a merge), so the body must carry over `image`, `resources`, AND `env` from the deployed template or the container starts without secret refs and dies on startup.
+**Backfill upcoming fixtures with the new model** (one-off, post-retrain):
 
-#### Runtime cadences — three independent moving parts
-
-```
-┌──────────────┬────────────────────────────┬──────────────────────────────────┐
-│ Part         │ Cadence                    │ Trigger                          │
-├──────────────┼────────────────────────────┼──────────────────────────────────┤
-│ Elo ratings  │ Every predict-and-write    │ Each Job execution rebuilds      │
-│              │ invocation (sub-second)    │ from scratch (CSV + DB completed)│
-│              │                            │ → yesterday's finished match     │
-│              │                            │   shows up in tomorrow's writes  │
-├──────────────┼────────────────────────────┼──────────────────────────────────┤
-│ Probabilities│ Daily 02:30 UTC            │ Scheduled Job. Idempotent skip-  │
-│              │ (~30 runs/mo)              │ existing → daily stack cleanly,  │
-│              │                            │   only new sentinel rows written │
-├──────────────┼────────────────────────────┼──────────────────────────────────┤
-│ Model bundle │ Every push to main         │ ml-deploy.yml rebuilds the image,│
-│              │ touching ml/**             │ Stage 2 retrains. Deterministic  │
-│              │                            │ → no-op pushes = bit-identical   │
-│              │                            │ Natural retrain: end-of-season   │
-│              │                            │ (add new CSV under data/raw/,    │
-│              │                            │ roll season flags in Dockerfile) │
-└──────────────┴────────────────────────────┴──────────────────────────────────┘
+```bash
+node scripts/backfill-probabilities.mjs --dry-run    # eyeball the writes first
+node scripts/backfill-probabilities.mjs              # for real
 ```
 
-Within-season adaptation happens via Elo + form (every day at 02:30 UTC); the XGBoost weights themselves are stable between annual rebuilds. This is the right cadence — the model captures slow structural priors (style of play, squad tier), Elo captures fast match-by-match shifts. Daily probability writes mean a Tuesday-night Champions League result lands in Wednesday's predictions automatically, without a manual ad-hoc trigger.
+Functionally identical to `PredictionService.rePredictFutureFixtures` but CLI-driven. Useful after retrain or any time probabilities need a forced refresh.
 
-#### How the writes land in Bantryx
+**Cleanup a corrupted game's Elo state** (rare — used during PR F migration):
 
-End-to-end daily timeline (the same loop, repeated every 24h):
-
-```
-Continuous : Live matches finish → status='in-progress' → 'finished'
-             via lib/jobs/syncLiveScores.js (60-s cron). Scores +
-             results land in DB throughout the day.
-
-03:00 UTC  : Node app's daily fixture sync (cron `0 3 * * *`) pulls
-   (prior     fresh upcoming fixtures from football-data.org. New
-    day)      fixtures land in `games` with sentinel probabilities
-             (homeProbability=0.50, drawProbability=0.00,
-              awayProbability=0.50).
-
-02:30 UTC  : scorecast-ml-job fires (30 min ahead of THAT day's 03:00
-             fixture sync; works on fixtures synced the previous day).
-             1. Login as ml_pipeline (POST /api/login).
-             2. Read upcoming + completed from DB (psycopg).
-             3. Rebuild Elo (CSV + DB merge — uses yesterday's
-                finished matches automatically).
-             4. predict_proba → to_three_way → rounded trios.
-             5. For each upcoming fixture (next 7d): sentinel-check,
-                PUT /api/admin/games/:id with {home, draw, away}Probability.
-                **Already-written fixtures are skipped** — only the
-                rows still on the sentinel get the new write. Daily
-                cadence stacks cleanly.
-             6. Each PUT triggers auditMutation → audit_log row.
-             7. PUT to /admin/games/:id flows through GameService
-                update; LeaderboardService.invalidate fires as standard
-                precaution (no in-flight picks are affected since
-                probabilities only matter at result-set time).
-
-Throughout : Users visit Bantryx. GameCard renders:
-             - PayoutMatrix preview uses (home, draw, away)Probability
-               via expectedWinPoints / expectedDrawPoints in
-               src/utils/scoring.js.
-             - Pick buttons show "+25 / +75" style preview.
-             - Outcome badge on locked picks shows the eventual
-               points payout via scorePick.
-             User picks lock at game.date.
-
-Post-match : Live matches → finished. scorePick computes per-pick
-             points via the now-real probabilities; pick-scored
-             notifications fire; leaderboard reflects skill-weighted
-             standings.
+```bash
+node scripts/find-game.mjs "Home FC" "Away FC"                # find the gameId
+node scripts/repair-test-game-elo.mjs <gameId> "Home FC" "Away FC"
+npx sequelize-cli db:seed --seed 20260522000001-seed-teams-from-elo-history.js
 ```
 
-#### Schema additions (post-draw-scoring tier)
+`repair-test-game-elo.mjs` clears the game's result + snapshot + appliedResult AND deletes the two team rows; the seeder re-inserts at canonical historical Elo on next run (`ON CONFLICT` preserves other teams).
 
-- `games.drawProbability DECIMAL(3,2) NOT NULL DEFAULT 0` (migration [20260518000008-games-add-draw-scoring.js](migrations/20260518000008-games-add-draw-scoring.js)).
-- `games.result` enum extended to `('home', 'away', 'draw')` via `ALTER TYPE ... ADD VALUE IF NOT EXISTS 'draw'`.
+**Add a new league** (e.g. La Liga):
 
-The pipeline writes all three probability columns via the `to_three_way` path. Each write is audit-logged through the existing `audit_log` table via the `auditMutation('admin.game.update', 'game')` middleware already wrapping the `PUT /api/admin/games/:id` route. No new tables, no new endpoints.
+1. Commit the new league's CSVs to `ml/data/raw/PD_*.csv`.
+2. Add a `PD` block to [ml/scorecast_ml/reconcile/teams.json](ml/scorecast_ml/reconcile/teams.json) with the full alias map.
+3. Mirror that alias map to [seeders/reconcileMap.json](seeders/reconcileMap.json).
+4. Add the league code to `MODEL_PATHS` in [services/PredictionService.js](services/PredictionService.js).
+5. Extend the seeder to iterate `PD_*.csv` alongside `PL_*.csv` (currently hardcoded to PL).
+6. `cd ml && python -m scorecast_ml train --league PD` and commit the resulting JSON to `lib/ml/models/PD_elo.json`.
 
-The legacy 2-class `to_two_way` + `(0.50, 0.50)` sentinel is preserved in [normalize.py](ml/scorecast_ml/inference/normalize.py) for ablation scripts under [ml/scripts/](ml/scripts/) but is off the live write path.
+#### Critical invariants (don't break these)
 
-#### Operator quirks (top of mind)
-
-1. **Username is `ml_pipeline`, NOT `ml-pipeline`** — the Node API's `^[A-Za-z0-9_]+$` regex rejects hyphens. Stale docs that say `ml-pipeline` are wrong; fix on sight.
-2. **`load_latest_bundle` is strict** — only matches `{league}_YYYY-MM-DD.joblib`. Suffix variants (`_hfa0`, `_hfa65`, `_5season_uncal`) are ignored. Load by explicit path for ablations.
-3. **`--model-suffix` is for A/B work, not production** — it produces non-canonical filenames that `load_latest_bundle` won't pick up. The natural workflow is: train a candidate with `--model-suffix candidate`, eval it manually, drop the suffix and retrain when promoting.
-4. **Login is rate-limited; loop ONE login per `write_probabilities()` call** — `/api/login` has `loginLimiter` (5/15 min/IP). The writer does a single login at startup and reuses the cookie jar for all PUTs.
-5. **`/api/login` returns CSRF only if the response sets it** — the writer raises if `sc_csrf` isn't on the response. Don't try to fall back to `/api/auth/refresh` here — that path is exempt from CSRF and won't seed the cookie either way.
-6. **Calibrator clip is load-bearing**, not defensive — isotonic regression maps low raw values to literal 0 at its training-range floor. DECIMAL(3,2) rounds anything below 0.005 to 0.00. Clipping at 0.01 keeps the rounded floor at 0.01. Locked in by `test_calibrated_output_clipped_off_zero_and_one`.
-7. **Val mlogloss reported AFTER calibration is by-design optimistic** — calibration is fit on the same val set. `bundle.metrics.val_uncalibrated` is the unbiased comparator. The honest OOS check is `scripts/backtest_2526.py`.
-8. **HFA default is 0** — set deliberately, not by mistake. Pass `--hfa 65` to reproduce conventional Elo. The ablation in `scripts/compare_hfa.py` showed it's a structural no-op for tree-based models.
-9. **Promoted-team rating defaults to `min_rating`** — captures the empirical "promoted teams underperform the bottom of their new league." Pass `EloConfig(promoted_team_strategy='initial')` for vanilla Elo.
-10. **Pre-Phase-2 bundles don't have `calibrators`** — `getattr(self, 'calibrators', None)` fallback in `predict_proba` handles them gracefully. Don't drop the fallback.
-11. **Sentinel skip is on the DB-CURRENT value**, not the new one — `predict-and-write` queries `homeProbability`, `drawProbability`, `awayProbability` from the upcoming row and skips if they're the sentinel. Means a previously-ML-written game won't be rewritten without `--overwrite-existing` even if the new prediction is wildly different.
-12. **`az containerapp job start --args` greedily eats `--`-prefixed values** — for ad-hoc custom-arg runs (e.g. `--overwrite-existing`) use the `az rest` REST-API recipe in [ml/README.md](ml/README.md). Per-execution overrides are a full container replace, so the body must carry `image`, `resources`, AND `env` from the deployed template.
-13. **Bicep reapply requires `mlPipelinePassword`** — same pattern as `pgAdminPassword`. Skipping it flips the Job back to the placeholder bootstrap image. See CLAUDE.md "Bicep reapply requires 6 params" for the full list.
-14. **CSVs in git are tracked**, scratch files aren't — the [.gitignore](.gitignore) negation rule `!ml/data/raw/*.csv` allows CSVs while blocking `ml/data/raw/*.parquet` / `*.json` / etc. **Don't drop non-CSV scratch under `ml/data/raw/`** or it'll silently slip into git.
-15. **`scorecast-ml` and `scorecast` are SEPARATE ACR repos** — same Container Registry, different repos. Node's `deploy.yml` only pushes to `scorecast:*`; ML's `ml-deploy.yml` only pushes to `scorecast-ml:*`. The two CDs never collide.
-16. **`predict-and-write` writes only to `status='scheduled'` games** — `fetch_upcoming_for_league` filters on status. In-progress / finished / postponed games are never touched.
-17. **`fetch_league_by_code` looks up by `sourceLeagueId`** (e.g. `'PL'`), not by internal UUID. Matches the URL-stable identifier used everywhere else.
-18. **Test coverage**: 48 tests across [ml/tests/](ml/tests/) — Elo determinism (`test_elo_engine.py`), normalize sum-to-1 + sentinel-nudge (`test_normalize.py`), calibrator clip + sum-to-1 (`test_calibration.py`), reconcile manual/fuzzy/error paths (`test_reconcile.py`). Run via `pytest` from `ml/`.
+1. **Python ↔ JS Elo math parity**: K=20, INITIAL=1500, HFA=0. `lib/ml/eloMath.js` is the JS port of `ml/scorecast_ml/elo/engine.py`; drift between them silently desyncs the seeder's bootstrap from the runtime cascade. Both have determinism + invariant tests covering the same cases.
+2. **Atomicity of Elo update with result**: `onResultUpdated` runs INSIDE the result-capture transaction. If the result rolls back, Elo rolls back with it. The `SELECT ... FOR UPDATE` on team rows serializes concurrent captures.
+3. **`rePredictFutureFixtures` runs AFTER commit**: read-only-on-teams cascade. Safe to retry; failures don't roll back the result. Mirror of Tier 5.3 notify/badge pattern.
+4. **Per-game snapshot is immutable after first store**: `game.homeEloPre` + `awayEloPre` represent pre-match strength. Reverse + reapply uses them as the reference Elo pair — never refresh from live Elo, or the reverse would be against wrong-Elo and the round-trip wouldn't bit-match.
+5. **Probability normalize ordering**: `toThreeWay` absorbs rounding residual into the largest-RAW class (not the largest rounded). `(0.501, 0.249, 0.250)` rounds to `(0.50, 0.25, 0.25)` preserving home as the top class, not flipping to `(0.51, 0.24, 0.25)`.
+6. **Default-left for NaN features**: tree walker honors `default_left[i]` when input feature is NaN. Never relevant for our 2-feature model in practice but mandatory for XGBoost JSON parity.
+7. **Clip to [0.01, 0.99] BEFORE rounding**: caught real Arsenal-vs-Burnley 1.00 / 0.00 / 0.00 outputs in the wild on the Python pipeline. `normalize.js` preserves the same clip on the JS side. Test: `tests/normalize.test.js` `toThreeWay clips literal-zero outputs`.
+8. **Numeric precision**: `teams.elo` is NUMERIC(8,2). Sequelize returns DECIMAL as STRING; always parseFloat before math. Same for `games.homeEloPre` / `awayEloPre`.
+9. **`parseBaseScore` defaults to 0**: XGBoost 2.x's hex-encoded base_score can't be parsed by JS `Number()`. For `multi:softprob` (our case) base_score broadcasts equally → safe to default to 0. Tests lock this in.
+10. **Seeder idempotency**: `ON CONFLICT (name, leagueId) DO NOTHING`. Re-running the seeder MUST NOT reset live Elo back to historical-snapshot values.
+11. **Auto-insert at `MIN(elo)`**: newly-promoted clubs enter at the league's current minimum (or INITIAL_RATING when empty). Mirrors the Python trainer's `promoted_team_strategy='min_rating'`. Without this, a brand-new club would enter at 1500 and immediately tank the leaderboard via favorable early matches.
 
 #### Known limits + forward path
 
-- **Isotonic calibration** ✅ shipped (Phase 2). Per-class `IsotonicRegression` fit on val, attached to `ModelBundle.calibrators`. Applied automatically inside `predict_proba` with `[0.01, 0.99]` clip + renormalize.
-- **Automated cron** ✅ shipped (Phase 3, daily as of 2026-05-18). Container Apps Job runs every day at 02:30 UTC.
-- **Draw scoring** ✅ shipped (post-tier). Pipeline writes all 3 probabilities via `to_three_way`. Pick semantics stay winner-only.
-- **Single-league models** — one model per league, no shared pool. La Liga / Bundesliga / Serie A / Ligue 1 each need their own training runs + `teams.json` alias extension + ingest + reconcile + train + predict-and-write. The pipeline is league-agnostic by design; per-league work is mostly data, not code.
-- **No incremental Elo snapshot** — `_build_inference_context` rebuilds Elo from scratch on every prediction. Sub-second on ~6 seasons; would matter at 10x league coverage. Phase N+1 cache invalidation would key on (league, max(completed_match_date)).
-- **No pick-type expansion** — winner-only picks. Spread / over-under / score prediction (deferred from Tier 4b) would need their own probability columns + scoring branches. The pipeline's `multi:softprob` output already carries goal-difference signal via Elo; a future GD-prediction model would reuse the same feature pipeline.
-- **No xG / lineup features** — Phase N+ might layer xG from a paid provider, or team-strength deltas from injuries / suspensions. Both require provider access; both would land as additional columns in `FEATURE_NAMES`.
-- **No per-user calibration** — pipeline outputs are uniform across viewers. A future personalization layer would shift expected payouts per user (e.g. user A consistently picks underdogs; the EV display would change for them).
+- **Single league at launch** — PL only. Architecture supports multi-league via `(name, leagueId)` unique index + per-league `MODEL_PATHS`. La Liga / Bundesliga / Serie A / Ligue 1 each need their own training run + reconcile-map extension + seeder extension. The pipeline is league-agnostic; per-league work is mostly data, not code.
+- **No isotonic calibration** — dropped per the design call to keep the runtime path zero-dep. Calibrators would re-introduce sklearn or require porting `IsotonicRegression.predict` to JS (binary search through piecewise constants). Probabilities may be slightly miscalibrated at extremes (>70%); accept as tradeoff. ~30-LOC JS addition if it ever matters.
+- **No monotonicity constraints** — XGBoost trees over a 2-feature space can have small non-monotonic kinks across narrow Elo ranges (`monotone_constraints={'home_elo':1, 'away_elo':-1}` would eliminate). Observed in the user verification: a 20-pt Elo drop for Newcastle slightly INCREASED their away-win probability by 3pp against Fulham. Noise-level; not blocking. If pursued, the Python trainer is a one-line config addition.
+- **No xG / form features** — Tier 17's elo-only feature set was deliberate (the runtime cascade has no source for rolling form). If we add an xG provider later, the runtime cascade would need to maintain xG state per team in the `teams` table too.
+- **Cascade write count** — typical PL result rewrites 5-15 upcoming fixtures (count is bounded by remaining-fixtures-this-season for both teams). End-of-season the cascade naturally trails off. Cost is negligible (sub-ms total cascade time).
+- **Multi-replica scaling** — the per-league model cache is per-process. Multi-replica deploys (post-Tier-10.4) would load the model independently in each replica; no shared state needed. The cascade's `SELECT ... FOR UPDATE` on team rows + the same-game transaction means concurrent result-captures across replicas serialize cleanly via Postgres locks.
+- **Retraining cadence** — once per season is typical (after a new season's worth of CSV data is available). Mid-season retraining happens only if model drift becomes visible in the OOS payout structure. The seeder + cascade run continuously regardless of model version.
 
 ### 8.18 Profile Privacy (Tier 8.6)
 
@@ -2848,12 +2757,41 @@ submitPick(gameId, 'home') → POST /api/picks { gameId, choice: 'home' }
 
 POST /api/games/:gameId/result { result: 'home' }   (admin via GameManager)
         │
-        ▼  server:
-   game.result = 'home'; game.save()
-   for each pick on this game:
-     scorePick(pick, game) → N
-     notify(pick.userId, 'pick-scored', 'Your pick on X vs Y: ✓ Correct +N pts')
-     evaluateBadges(pick.userId)     ───── may award first-win, correct-N, upset-specialist
+        ▼  server (Tier 17 — transactional):
+   TX:
+     SELECT games ... FOR UPDATE
+     game.result = 'home'; game.status = 'finished'; game.save({transaction})
+     PredictionService.onResultUpdated(game, {transaction})
+       previous = game.appliedResult ?? null  (existing value)
+       next = 'home'
+       if previous === next → idempotent no-op, return null
+       SELECT teams (homeTeam, leagueId) FOR UPDATE
+       SELECT teams (awayTeam, leagueId) FOR UPDATE
+       if previous != null && snapshot present:
+         reverse prior delta: team.elo -= eloDelta(snapshot, previous)
+       if next != null:
+         if !snapshot: snapshot live team Elo into game.homeEloPre / awayEloPre
+         apply: team.elo += eloDelta(snapshot, next)
+       team.gamesPlayed += (delta in {0, +1, -1})
+       team.lastMatchDate = game.date.toISOString().slice(0,10) (on apply only)
+       game.{homeEloPre, awayEloPre, appliedResult} updated; game.save
+   COMMIT (mid-cascade exception → ROLLBACK; result + Elo + snapshot all intact)
+
+   POST-COMMIT side effects:
+     for each pick on this game:
+       scorePick(pick, game) → N
+       notify(pick.userId, 'pick-scored', 'Your pick on X vs Y: ✓ Correct +N pts')
+       evaluateBadges(pick.userId)     ───── may award first-win, correct-N, upset-specialist
+     LeaderboardService.invalidate('all')
+     PredictionService.rePredictFutureFixtures({affectedTeams, leagueId})  ← Tier 17
+       loadModel('lib/ml/models/PL_elo.json')  (per-league cache)
+       Game.findAll({status:'scheduled', homeTeam|awayTeam in [home, away]})
+       for each upcoming fixture:
+         probs = xgboost.predict(model, [eloByName[home], eloByName[away]])
+         triple = normalize.toThreeWay(probs[0], probs[1], probs[2])
+         game.update({homeProbability, drawProbability, awayProbability})
+       logger.info({rewritten: N, skipped: 0}, 'cascade complete')
+
    200 { success: true, game }
 
 
@@ -2953,12 +2891,22 @@ See §8.22 for the full lifecycle diagram. Compressed:
   │       if fresh.status='finished' && apiMatch.status not in (FINISHED,AWARDED):
   │         log + return — finished-status flip-back guard
   │       update games {status, homeScore, awayScore, result, halfTimeReached, phase}
+  │       if transitionedToFinished && newResult && leagueId:
+  │         PredictionService.onResultUpdated(fresh, {transaction: t})  ← Tier 17
+  │           SELECT teams ... FOR UPDATE × 2 (home + away)
+  │           snapshot game.{homeEloPre, awayEloPre} if first capture
+  │           apply eloDelta(snapshot, newResult) to team rows
+  │           stamp game.appliedResult = newResult
   │     POST-COMMIT (outside tx):
   │       if just transitioned to 'finished' AND result was null → now set:
   │         for each pick on this game:
   │           NotificationService.notify('pick-scored', '... Drew/Won/Missed +N pts')
   │           BadgeService.evaluateBadges()
   │         LeaderboardService.invalidate('all')
+  │         PredictionService.rePredictFutureFixtures({affectedTeams, leagueId})  ← Tier 17
+  │           load lib/ml/models/<code>_elo.json (cached after 1st load)
+  │           Game.findAll({status:'scheduled', homeTeam|awayTeam in [affected]})
+  │           for each: predict([homeElo, awayElo]) → toThreeWay → game.update(probs)
   └─ reconcile pass: for in-progress local games not in the LIVE response,
        and scheduled local games with kickoff > 15 min ago:
        footballApi.getMatchesByIds([...]) → applyLiveUpdate (same flow)
@@ -2969,6 +2917,8 @@ See §8.22 for the full lifecycle diagram. Compressed:
 ```
 
 Frontend picks up the update on the next `refreshGames` call (after pick / undo / admin action) or on a manual tab switch. Notifications surface via NotificationBell's 30 s poll. No WebSocket/SSE today.
+
+**Tier 17 cascade** runs both inside the live-update tx (atomic Elo update) and after commit (probability rewrites). The cascade is best-effort post-commit: a model-load failure or per-fixture predict throw never undoes the result commit above it. See §8.17 for the full mechanism + behavior matrix.
 
 ---
 
@@ -3358,8 +3308,9 @@ Container Apps issues + binds a free Azure managed cert via HTTP-01 ACME validat
 | TypeScript migration         | No TS yet; whole codebase JavaScript + JSX. Parked at end of roadmap                                                                                                                                                                                                                                                                                                                                                                                             | Tier 9.10                 |
 | Storybook                    | No component sandbox. Visual changes verified by running the dev server + Playwright `screenshots/mobile.spec.js`. Parked at end of roadmap                                                                                                                                                                                                                                                                                                                      | Tier 9.11                 |
 | Token-rule lint              | The "components must use design tokens, not raw `slate-*`/`cyan-*` literals" rule is review-only; no ESLint plugin enforces it                                                                                                                                                                                                                                                                                                                                   | future                    |
-| ML — single-league models    | One trained model per league; no shared pool / multi-task learning. La Liga / Bundesliga / Serie A / Ligue 1 each need their own training run + alias table extension. Pipeline is league-agnostic by design                                                                                                                                                                                                                                                     | future                    |
-| ML — calibration honesty     | Train-CLI reports val mlogloss AFTER calibration; that's by-design optimistic since calibration was fit on the same data it's measured on. Honest OOS check is the held-out test set ([ml/scripts/backtest_2526.py](ml/scripts/backtest_2526.py) against the in-progress DB season)                                                                                                                                                                              | acknowledged              |
+| ML — single-league models    | PL only at launch. Architecture supports multi-league via `(name, leagueId)` unique index + per-league `MODEL_PATHS`. La Liga / Bundesliga / Serie A / Ligue 1 each need own CSV corpus + reconcile-map extension + seeder extension + training run                                                                                                                                                                                                              | future                    |
+| ML — no isotonic calibration | Tier 17 dropped Phase 2's calibration to keep the JS runtime zero-dep. Probabilities may be slightly miscalibrated at extremes (>70%). Re-introducing it would mean porting `IsotonicRegression.predict` to JS (binary search through piecewise constants exported as JSON arrays) — ~30 LOC follow-up if it ever matters                                                                                                                                        | future                    |
+| ML — no monotonicity         | Tree models over a 2-feature space can have small non-monotonic kinks across narrow Elo ranges (a 20-pt Elo drop occasionally INCREASES a team's win probability by 1–3pp). Eliminable via `monotone_constraints={'home_elo':1, 'away_elo':-1}` in the Python trainer — one-line config addition if needed                                                                                                                                                       | future                    |
 
 ---
 
@@ -3393,7 +3344,8 @@ Summary:
 - ✅ **Security hardening batch** (standalone, shipped 2026-05-18) — 12 fixes: H1 `trust proxy 1` (real client IPs through Cloudflare → Azure); H2 constant-time login (`LOGIN_DUMMY_HASH`); H3 `currentPassword` required on `PATCH /me/email` + `POST /me/2fa/setup`; M1 `setImmediate` for forgot-password token INSERT + email send (closes timing-based enumeration); M3 Sentry PII redaction (`sendDefaultPii:false` + `beforeSend` redacts password/secret/token/recovery/otp/totp/cookie/set-cookie/authorization/csrf/api-key keys); M4 `algorithms:['HS256']` pinned on every `jwt.verify`; M5 new `POST /api/me/password` + `ChangePasswordPanel` (calling client stays signed in, every other refresh-bearing device kicked out); L3 Permissions-Policy header; L4 `bodyParser.json({limit:'32kb'})`; L5 constant-time recovery-code verify (`Promise.all(codes.map(bcrypt.compare))`); L6 `displayName`/`bio` reject bidi-override + zero-width + control codepoints (ZWJ U+200D intentionally allowed for emoji); L8 CI `npm audit --audit-level=high --omit=dev` + Dependabot weekly grouped PRs. See §10.2.
 - ✅ **Per-endpoint API test suite** (standalone, shipped 2026-05-18) — ~250 new Playwright tests under [tests/e2e/api/](tests/e2e/api/) — one spec per route file covering happy path + 401 + admin-403 + CSRF-403 + 400 + 404 + ownership for every one of the 68 endpoints. New helper [apiAssertions.js](tests/e2e/helpers/apiAssertions.js) collapses per-test boilerplate. Plus two UI smokes ([change-email-panel.spec.js](tests/e2e/change-email-panel.spec.js) + [change-password-panel.spec.js](tests/e2e/change-password-panel.spec.js)). Total suite now 270 tests across 22 specs. See §10.6.
 - ✅ **Leaderboard league + season filters** (standalone, shipped 2026-05-18) — `GET /api/leaderboard?leagueId=&seasonId=` scopes overall + per-group blocks. Builders `buildGroupLeaderboard(groupId, {leagueId, seasonId})` + `buildUserSummary({leagueId, seasonId})` add `where: gameWhere` on Game.findAll. In-memory pick loop's existing `if (!gameById.has(pick.gameId)) continue` guard drops out-of-scope picks from both numerator AND denominator → winRate scopes automatically. Cache key extended via `LeaderboardService.buildKey(scope, {leagueId, seasonId})` to `overall:l:<id|*>:s:<id|*>` and `group:<groupId>:l:<id|*>:s:<id|*>`. New `lib/leaderboardCache.js invalidatePrefix(prefix)` required because one logical scope now spans many keys. New [LeaderboardFiltersBar](src/components/LeaderboardFiltersBar.jsx) + `?lbLeague=&lbSeason=` URL keys (separate axis from games-view) + `DataContext.leaderboardFilters` slot. Mounts on Leaderboard + My Picks tabs (one global "stats scope" filter).
-- ✅ **ML probability pipeline** — Phase 1 (PL only, manual, shipped 2026-05-17): standalone Python project at [ml/](ml/) producing `(homeProbability, awayProbability)` via Elo + XGBoost. 5-season train (2004/05–2008/09) → 15-season held-out test (2010/11–2024/25, 5,700 OOS matches): mlogloss 0.992 vs baseline 1.065 (-0.073), accuracy 51.9% vs 44.9% (+7pp). Phase 2 (isotonic calibration, shipped 2026-05-17): per-class IsotonicRegression fit on val; clip every class to [0.01, 0.99] before renormalization; 15-season train + 1-season val + held-out 25/26 test; 70-80% bucket overconfidence pulled from -7pp to -2pp deviation. Phase 3 (Azure deployment, shipped 2026-05-17; daily cadence as of 2026-05-18): `scorecast-ml-job` Container Apps Job, Schedule trigger cron `30 2 * * *` (daily 02:30 UTC, sits 30 min ahead of Node app's 03:00 UTC fixture sync; daily cadence so newly-synced fixtures get probabilities within 24h, idempotent skip-existing keeps re-runs cheap); ml-deploy.yml workflow path-filtered on `ml/**`; CSV training corpus committed to git via `.gitignore` negation; image-baked-in trained bundle. Post-draw-scoring: pipeline writes all 3 probabilities via `to_three_way` + sentinel updated to `(0.50, 0.00, 0.50)`. See §8.17.
+- ✅ **ML probability pipeline (Phase 1–3 history)** — Phase 1 (PL only, manual, shipped 2026-05-17): standalone Python project at [ml/](ml/) producing `(homeProbability, awayProbability)` via Elo + XGBoost. 5-season train (2004/05–2008/09) → 15-season held-out test (2010/11–2024/25, 5,700 OOS matches): mlogloss 0.992 vs baseline 1.065 (-0.073), accuracy 51.9% vs 44.9% (+7pp). Phase 2 (isotonic calibration, shipped 2026-05-17): per-class IsotonicRegression fit on val; clip every class to [0.01, 0.99] before renormalization; 70-80% bucket overconfidence pulled from -7pp to -2pp. Phase 3 (Azure deployment, shipped 2026-05-17 → daily 2026-05-18): `scorecast-ml-job` Container Apps Job on a daily 02:30 UTC cron, image-baked trained bundle, idempotent skip-existing. **All three Phase 1/2/3 deployment-side pieces were retired by Tier 17** (see below).
+- ✅ **Tier 17 — Reactive Elo cascade + JS-native inference + retire Python pipeline** (shipped 2026-05-23 across 6 PRs). Inverts the daily-cron probability writer into an event-driven cascade triggered by every captured result. **PR A** (`teams` table + Elo bootstrap seeder); **PR B** (zero-dep JS XGBoost tree walker + Elo math + normalize, 39 unit tests via `node --test`); **PR C** (`PredictionService.onResultUpdated` + `rePredictFutureFixtures` wired into `GameService.setResult`/`bulkSetResult`/`applyLiveUpdate`); **PR D** (deleted Container Apps Job + ACR repo + `ml-deploy.yml` + `ml-job.bicep` + `ml-pipeline-password` KV secret + `ml_pipeline` DB user + 24 Python files; slimmed trainer to single `train` subcommand emitting `booster.save_model('PL_elo_<date>.json')`); **PR E** (fix XGBoost 2.x hex-encoded `base_score` parse → NaN poisoning every cascade prediction + defensive non-finite guard); **PR F** (idempotent + reversible cascade via per-game pre-match Elo snapshot — `games.{homeEloPre, awayEloPre, appliedResult}`; same result re-saved no-ops; result change reverses prior delta against snapshot + applies new delta against SAME snapshot; result clear reverses and drops snapshot; round-trip is bit-identical). Production model: `lib/ml/models/PL_elo.json` (615 trees, val mlogloss 0.944). Bicep reapply param count dropped 7 → 5. Operator scripts under [scripts/](scripts/): `query-teams.mjs`, `find-game.mjs`, `repair-test-game-elo.mjs`, `backfill-probabilities.mjs`. See §8.17 for the full architecture.
 
 ---
 

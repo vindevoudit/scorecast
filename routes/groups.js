@@ -10,11 +10,18 @@ const {
   inviteSchema,
   transferOwnerSchema,
   visibilitySchema,
+  setGroupPasswordSchema,
+  joinWithPasswordSchema,
+  joinRequestSchema,
   commentSchema,
 } = require('../validation/schemas');
 const { authMiddleware } = require('../middleware/auth');
 const { optionalAuth } = require('../middleware/optionalAuth');
-const { publicReadLimiter, commentLimiter } = require('../middleware/rateLimit');
+const {
+  publicReadLimiter,
+  commentLimiter,
+  groupJoinPasswordLimiter,
+} = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
 const GroupService = require('../services/GroupService');
 const CommentService = require('../services/CommentService');
@@ -60,6 +67,9 @@ router.post(
       ownerId: req.user.id,
       name: req.body.name,
       visibility: req.body.visibility,
+      // Tier 19 Chunk 1 — optional plaintext password (server hashes).
+      // Schema's refine() guarantees it's only set when visibility==='private'.
+      password: req.body.password || null,
     });
     res.json(created);
   }),
@@ -150,12 +160,112 @@ router.post(
   authMiddleware,
   validate(visibilitySchema),
   asyncHandler(async (req, res) => {
-    const visibility = await GroupService.setVisibility({
+    const result = await GroupService.setVisibility({
       groupId: req.params.groupId,
       requesterId: req.user.id,
       visibility: req.body.visibility,
+      password: req.body.password || null,
     });
-    res.json({ success: true, visibility });
+    res.json({ success: true, ...result });
+  }),
+);
+
+// Tier 19 Chunk 1 — password-protected join. Per-user rate limited at
+// `groupJoinPasswordLimiter` to deter brute force (bcrypt is constant-time
+// but slow enough that an attacker would still want to throttle).
+router.post(
+  '/groups/:groupId/join-with-password',
+  groupJoinPasswordLimiter,
+  authMiddleware,
+  validate(joinWithPasswordSchema),
+  asyncHandler(async (req, res) => {
+    const group = await GroupService.joinWithPassword({
+      groupId: req.params.groupId,
+      userId: req.user.id,
+      password: req.body.password,
+    });
+    res.json({ success: true, group });
+  }),
+);
+
+router.put(
+  '/groups/:groupId/password',
+  authMiddleware,
+  validate(setGroupPasswordSchema),
+  asyncHandler(async (req, res) => {
+    const result = await GroupService.setPassword({
+      groupId: req.params.groupId,
+      requesterId: req.user.id,
+      password: req.body.password,
+    });
+    res.json({ success: true, ...result });
+  }),
+);
+
+// Tier 19 Chunk 3 — request-to-join CRUD. POST creates, GET lists (owner),
+// approve/decline are owner-only, DELETE cancels (requester only).
+router.post(
+  '/groups/:groupId/join-request',
+  authMiddleware,
+  validate(joinRequestSchema),
+  asyncHandler(async (req, res) => {
+    const created = await GroupService.requestToJoin({
+      groupId: req.params.groupId,
+      requesterId: req.user.id,
+      message: req.body.message || null,
+    });
+    res.json({ success: true, request: created });
+  }),
+);
+
+router.get(
+  '/groups/:groupId/join-requests',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const items = await GroupService.listJoinRequests({
+      groupId: req.params.groupId,
+      requesterId: req.user.id,
+    });
+    res.json({ items });
+  }),
+);
+
+router.post(
+  '/groups/:groupId/join-requests/:requestId/approve',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const group = await GroupService.approveJoinRequest({
+      groupId: req.params.groupId,
+      requestId: req.params.requestId,
+      ownerId: req.user.id,
+    });
+    res.json({ success: true, group });
+  }),
+);
+
+router.post(
+  '/groups/:groupId/join-requests/:requestId/decline',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    await GroupService.declineJoinRequest({
+      groupId: req.params.groupId,
+      requestId: req.params.requestId,
+      ownerId: req.user.id,
+    });
+    res.json({ success: true });
+  }),
+);
+
+router.delete(
+  '/groups/:groupId/join-requests/:requestId',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    await GroupService.cancelJoinRequest({
+      groupId: req.params.groupId,
+      requestId: req.params.requestId,
+      requesterId: req.user.id,
+    });
+    res.json({ success: true });
   }),
 );
 

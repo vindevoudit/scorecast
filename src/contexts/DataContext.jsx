@@ -515,11 +515,16 @@ export function DataProvider({ children }) {
   // --- Group mutations ---------------------------------------------------
 
   const handleCreateGroup = useCallback(
-    async ({ name, visibility }) => {
+    async ({ name, visibility, password = null }) => {
       try {
+        // Tier 19 — pass password through only when present (server's
+        // refine() rejects password on non-private). Empty-string sentinel
+        // is converted to null upstream by DashboardView's submit.
+        const body = { name, visibility };
+        if (password) body.password = password;
         await request('/api/groups', {
           method: 'POST',
-          body: JSON.stringify({ name, visibility }),
+          body: JSON.stringify(body),
         });
         await Promise.all([refreshGroups(), refreshLeaderboard(), refreshDiscover()]);
         showStatus('Group created successfully');
@@ -625,6 +630,126 @@ export function DataProvider({ children }) {
       }
     },
     [request, loadDashboard, showStatus],
+  );
+
+  // --- Tier 19 Chunks 1+3 — password join + request-to-join handlers -----
+
+  // Password-protected join. Returns `true` on success so the dialog can
+  // close itself; throws on incorrect password so the caller can keep the
+  // dialog open + surface the message. Refreshes the same surfaces as
+  // joinPublic so the new group appears in the user's list immediately.
+  const handleJoinGroupWithPassword = useCallback(
+    async (groupId, password) => {
+      try {
+        await request(`/api/groups/${groupId}/join-with-password`, {
+          method: 'POST',
+          body: JSON.stringify({ password }),
+        });
+        await Promise.all([refreshGroups(), refreshDiscover(), refreshLeaderboard()]);
+        showStatus('Joined group');
+        return true;
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+        throw error;
+      }
+    },
+    [request, refreshGroups, refreshDiscover, refreshLeaderboard, showStatus],
+  );
+
+  // Owner-only password rotation. `password === null` clears it (group
+  // reverts to request-to-join + invite-only).
+  const handleSetGroupPassword = useCallback(
+    async (groupId, password) => {
+      try {
+        await request(`/api/groups/${groupId}/password`, {
+          method: 'PUT',
+          body: JSON.stringify({ password }),
+        });
+        await refreshGroups();
+        showStatus(password === null ? 'Password cleared' : 'Password updated');
+        return true;
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+        throw error;
+      }
+    },
+    [request, refreshGroups, showStatus],
+  );
+
+  // Request-to-join — open invitation flow. The 24h-cooldown response
+  // surfaces a friendly message via the standard error path; the dialog
+  // stays open so the user can read it.
+  const handleRequestToJoinGroup = useCallback(
+    async (groupId, message = null) => {
+      try {
+        await request(`/api/groups/${groupId}/join-request`, {
+          method: 'POST',
+          body: JSON.stringify({ message: message || undefined }),
+        });
+        showStatus('Request sent — the owner will be notified');
+        return true;
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+        throw error;
+      }
+    },
+    [request, showStatus],
+  );
+
+  // Cancel my own pending request. Silent (no notification to owner).
+  const handleCancelJoinRequest = useCallback(
+    async (groupId, requestId) => {
+      try {
+        await request(`/api/groups/${groupId}/join-requests/${requestId}`, {
+          method: 'DELETE',
+        });
+        showStatus('Request cancelled');
+        return true;
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+        throw error;
+      }
+    },
+    [request, showStatus],
+  );
+
+  // Owner: list pending requests for a group. Returns the array; callers
+  // typically cache it in their own state for an owner-only panel.
+  const fetchGroupJoinRequests = useCallback(
+    async (groupId) => {
+      const data = await request(`/api/groups/${groupId}/join-requests`);
+      return data.items || [];
+    },
+    [request],
+  );
+
+  const handleApproveJoinRequest = useCallback(
+    async (groupId, requestId) => {
+      try {
+        await request(`/api/groups/${groupId}/join-requests/${requestId}/approve`, {
+          method: 'POST',
+        });
+        await Promise.all([refreshGroups(), refreshLeaderboard()]);
+        showStatus('Request approved');
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+      }
+    },
+    [request, refreshGroups, refreshLeaderboard, showStatus],
+  );
+
+  const handleDeclineJoinRequest = useCallback(
+    async (groupId, requestId) => {
+      try {
+        await request(`/api/groups/${groupId}/join-requests/${requestId}/decline`, {
+          method: 'POST',
+        });
+        showStatus('Request declined');
+      } catch (error) {
+        if (error.message !== 'Session expired') showStatus(error.message);
+      }
+    },
+    [request, showStatus],
   );
 
   // --- Friend mutations --------------------------------------------------
@@ -836,6 +961,14 @@ export function DataProvider({ children }) {
     handleInvite,
     handleAcceptInvite,
     handleDeclineInvite,
+    // Tier 19 Chunks 1+3 — password join + request-to-join lifecycle.
+    handleJoinGroupWithPassword,
+    handleSetGroupPassword,
+    handleRequestToJoinGroup,
+    handleCancelJoinRequest,
+    fetchGroupJoinRequests,
+    handleApproveJoinRequest,
+    handleDeclineJoinRequest,
 
     // Friend mutations
     handleSendFriendRequest,

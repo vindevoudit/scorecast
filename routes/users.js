@@ -13,7 +13,7 @@ const { optionalAuth } = require('../middleware/optionalAuth');
 const { publicReadLimiter } = require('../middleware/rateLimit');
 const { getJoinedGroupIds } = require('../lib/groups');
 const { friendStatusFrom } = require('../lib/friends');
-const { User, Group, Game, Friendship } = require('../models');
+const { User, Group, Game, Friendship, GroupJoinRequest } = require('../models');
 const UserService = require('../services/UserService');
 const errors = require('../lib/errors');
 
@@ -81,28 +81,66 @@ router.get('/search', publicReadLimiter, optionalAuth, async (req, res) => {
     }
 
     if (type === 'all' || type === 'groups') {
-      // Anonymous viewers see only public groups (joinedIds is empty).
+      // Tier 19 — visibility rules:
+      //   anon → only 'public' groups
+      //   authed → 'public' + 'private' + any 'secret' they're a member of
+      // 'secret' is hidden from non-members by design (search would leak
+      // existence otherwise). joinedIds captures group memberships so an
+      // authed user always sees their own group in search.
       const joinedIds = viewerId ? await getJoinedGroupIds(viewerId) : [];
-      const groups = await Group.findAll({
-        where: {
-          name: { [Op.iLike]: like },
-          [Op.or]: [
-            {
-              id: {
-                [Op.in]: joinedIds.length ? joinedIds : ['00000000-0000-0000-0000-000000000000'],
+      const visibilityClause = viewerId
+        ? {
+            [Op.or]: [
+              {
+                id: {
+                  [Op.in]: joinedIds.length ? joinedIds : ['00000000-0000-0000-0000-000000000000'],
+                },
               },
-            },
-            { visibility: 'public' },
-          ],
-        },
+              { visibility: { [Op.in]: ['public', 'private'] } },
+            ],
+          }
+        : { visibility: 'public' };
+      const groups = await Group.findAll({
+        where: { name: { [Op.iLike]: like }, ...visibilityClause },
         limit: 5,
       });
-      results.groups = groups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        visibility: g.visibility,
-        isMember: joinedIds.includes(g.id),
-      }));
+
+      // Tier 19 Chunks 1+3 — per-row CTA flags. Five mutually-informative
+      // flags drive the frontend dropdown's button choice:
+      //   isMember        → "Joined" (disabled, success)
+      //   canJoin         → "Join" (public free join)
+      //   canJoinWithPassword → "Enter password" (private + hasPassword)
+      //   canRequestJoin  → "Request to join" (private, no pending request)
+      //   hasPendingRequest → "Request sent" (disabled)
+      // Multiple flags can be true for the same row (e.g. a private group
+      // with a password also accepts requests-to-join — the UI prefers the
+      // password CTA but offers the request as a secondary action).
+      const groupIds = groups.map((g) => g.id);
+      let pendingByGroup = new Set();
+      if (viewerId && groupIds.length > 0) {
+        const pending = await GroupJoinRequest.findAll({
+          where: { groupId: { [Op.in]: groupIds }, requesterId: viewerId, declinedAt: null },
+          attributes: ['groupId'],
+        });
+        pendingByGroup = new Set(pending.map((p) => p.groupId));
+      }
+
+      results.groups = groups.map((g) => {
+        const isMember = joinedIds.includes(g.id);
+        const hasPassword = Boolean(g.passwordHash);
+        const hasPending = pendingByGroup.has(g.id);
+        return {
+          id: g.id,
+          name: g.name,
+          visibility: g.visibility,
+          isMember,
+          hasPassword,
+          canJoin: !isMember && g.visibility === 'public',
+          canJoinWithPassword: !isMember && g.visibility === 'private' && hasPassword,
+          canRequestJoin: !isMember && g.visibility === 'private' && !hasPending,
+          hasPendingRequest: hasPending,
+        };
+      });
     }
 
     if (type === 'all' || type === 'games') {

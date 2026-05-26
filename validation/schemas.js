@@ -108,6 +108,13 @@ const PUSH_NOTIFICATION_TYPES = [
   'odds-shifted',
   'kickoff-reminder',
   'friend-request',
+  // Tier 19 Chunk 3 — request-to-join lifecycle for `private` groups.
+  // 'join-request' → owner gets notified when someone requests.
+  // 'join-request-approved' / 'join-request-declined' → requester gets
+  // notified of the owner's decision.
+  'join-request',
+  'join-request-approved',
+  'join-request-declined',
 ];
 
 const pushPreferencesSchema = z
@@ -116,10 +123,25 @@ const pushPreferencesSchema = z
   })
   .openapi('PushPreferencesRequest');
 
+// Tier 19 Chunks 1+3 — visibility enum + optional password (only allowed
+// when visibility='private'). Password length window matches what we
+// expect users to type out-of-band — 4-char floor catches typos, 64 ceiling
+// is comfortably under bcrypt's 72-byte input limit.
+const GROUP_VISIBILITY = ['public', 'private', 'secret'];
+const groupPassword = z.string().min(4).max(64);
 const createGroupSchema = z
   .object({
     name: z.string().trim().min(1).max(60),
-    visibility: z.enum(['private', 'public']).optional(),
+    visibility: z.enum(GROUP_VISIBILITY).optional(),
+    password: groupPassword.optional(),
+  })
+  .refine((data) => data.visibility !== 'private' || !data.password || data.password.length >= 4, {
+    message: 'Password must be at least 4 characters',
+    path: ['password'],
+  })
+  .refine((data) => data.visibility === 'private' || !data.password, {
+    message: 'Password is only allowed for private groups',
+    path: ['password'],
   })
   .openapi('CreateGroupRequest');
 const inviteSchema = z.object({ username }).openapi('InviteRequest');
@@ -131,9 +153,31 @@ const resultSchema = z
   .openapi('SetResultRequest');
 
 const friendRequestSchema = z.object({ username }).openapi('FriendRequest');
+// Tier 19 Chunks 1+3 — visibility flip optionally accepts a password (only
+// when target='private'). Setting/clearing the password independently uses
+// `setGroupPasswordSchema` instead.
 const visibilitySchema = z
-  .object({ visibility: z.enum(['private', 'public']) })
+  .object({
+    visibility: z.enum(GROUP_VISIBILITY),
+    password: groupPassword.optional(),
+  })
+  .refine((data) => data.visibility === 'private' || !data.password, {
+    message: 'Password is only allowed when target visibility is private',
+    path: ['password'],
+  })
   .openapi('VisibilityRequest');
+const setGroupPasswordSchema = z
+  .object({
+    // `null` clears the password. Otherwise a 4-64 char string sets it.
+    password: z.union([groupPassword, z.null()]),
+  })
+  .openapi('SetGroupPasswordRequest');
+const joinWithPasswordSchema = z
+  .object({ password: z.string().min(1).max(64) })
+  .openapi('JoinGroupWithPasswordRequest');
+const joinRequestSchema = z
+  .object({ message: z.string().trim().max(160).optional() })
+  .openapi('GroupJoinRequest');
 const commentSchema = z
   .object({ body: z.string().trim().min(1).max(500) })
   .openapi('CommentRequest');
@@ -319,6 +363,10 @@ module.exports = {
   resultSchema,
   friendRequestSchema,
   visibilitySchema,
+  GROUP_VISIBILITY,
+  setGroupPasswordSchema,
+  joinWithPasswordSchema,
+  joinRequestSchema,
   commentSchema,
   createGameSchema,
   updateGameSchema,

@@ -170,7 +170,7 @@ test('cascade delete: deleting a user removes the groups they own (Tier 5.3 tran
   const tempApi = await apiLogin({ username: temp.username, password: 'TempPassword123!' });
   try {
     const createRes = await tempApi.post('/api/groups', {
-      data: { name: groupName, visibility: 'private' },
+      data: { name: groupName, visibility: 'secret' },
     });
     expect(createRes.ok()).toBeTruthy();
     const created = await createRes.json();

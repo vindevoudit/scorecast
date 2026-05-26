@@ -12,6 +12,8 @@ import ProfileDrawer from '../components/ProfileDrawer';
 import FriendsList from '../components/FriendsList';
 import NotificationBell from '../components/NotificationBell';
 import SearchBar from '../components/SearchBar';
+import JoinGroupPasswordDialog from '../components/JoinGroupPasswordDialog';
+import JoinRequestDialog from '../components/JoinRequestDialog';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
@@ -107,11 +109,31 @@ function DashboardView() {
   }, [collapsed]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [invitesRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
+  // Tier 19 Chunks 1+3 — dialog-target state. Holds the group object the
+  // user picked from search; the dialog component decides what to render
+  // (password vs request-to-join) based on the kind we set.
+  const [passwordDialogGroup, setPasswordDialogGroup] = useState(null);
+  const [requestDialogGroup, setRequestDialogGroup] = useState(null);
 
   const onCreateGroupSubmit = async (event) => {
     event.preventDefault();
-    await handleCreateGroup({ name: authData.groupName, visibility: authData.groupVisibility });
-    setAuthData((prev) => ({ ...prev, groupName: '', groupVisibility: 'private' }));
+    // Tier 19 Chunks 1+3 — only send `password` when visibility is private.
+    // Server-side schema rejects password+non-private combos with 400, so
+    // matching the gate here keeps the request shape clean.
+    const payload = {
+      name: authData.groupName,
+      visibility: authData.groupVisibility,
+    };
+    if (authData.groupVisibility === 'private' && authData.groupPassword) {
+      payload.password = authData.groupPassword;
+    }
+    await handleCreateGroup(payload);
+    setAuthData((prev) => ({
+      ...prev,
+      groupName: '',
+      groupVisibility: 'secret',
+      groupPassword: '',
+    }));
   };
 
   return (
@@ -230,13 +252,33 @@ function DashboardView() {
           const search = (
             <SearchBar
               onSelectGroup={async (g) => {
+                // Tier 19 — five-way action dispatch driven by the row's
+                // flag set (see routes/users.js search response). Members
+                // navigate; non-members get the most permissive available
+                // join path. We prefer Password over Request because the
+                // password is a deliberate "skip approval" path the owner
+                // chose to enable.
                 if (g.isMember) {
                   setView('groups');
-                } else if (g.visibility === 'public') {
+                  return;
+                }
+                if (g.canJoin) {
                   if (!gate('join a group')) return;
                   await handleJoinPublicGroup(g.id);
                   setView('groups');
+                  return;
                 }
+                if (g.canJoinWithPassword) {
+                  if (!gate('join a group')) return;
+                  setPasswordDialogGroup(g);
+                  return;
+                }
+                if (g.canRequestJoin) {
+                  if (!gate('join a group')) return;
+                  setRequestDialogGroup(g);
+                  return;
+                }
+                // hasPendingRequest, or secret-by-member fallthrough — no-op.
               }}
               onSelectGame={() => setView('games')}
             />
@@ -433,37 +475,95 @@ function DashboardView() {
                         }
                         placeholder="Group name"
                       />
+                      {/* Tier 19 — three-tier visibility. Each option gets
+                          a one-line tagline explaining who can find +
+                          join the group so the user can pick confidently
+                          without reading docs. Order: most-open →
+                          most-private. */}
                       <fieldset className="rounded-3xl border border-default bg-overlay/50 px-4 py-3">
                         <legend className="px-2 text-xs uppercase tracking-[0.25em] text-fg-muted">
                           Visibility
                         </legend>
-                        <div className="flex flex-wrap gap-3 pt-2 text-sm text-fg">
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="radio"
-                              name="group-visibility"
-                              value="private"
-                              checked={authData.groupVisibility === 'private'}
-                              onChange={() =>
-                                setAuthData((prev) => ({ ...prev, groupVisibility: 'private' }))
-                              }
-                            />
-                            Private (invite-only)
-                          </label>
-                          <label className="inline-flex items-center gap-2">
-                            <input
-                              type="radio"
-                              name="group-visibility"
-                              value="public"
-                              checked={authData.groupVisibility === 'public'}
-                              onChange={() =>
-                                setAuthData((prev) => ({ ...prev, groupVisibility: 'public' }))
-                              }
-                            />
-                            Public (discoverable)
-                          </label>
+                        <div className="flex flex-col gap-3 pt-2 text-sm text-fg">
+                          {[
+                            {
+                              value: 'public',
+                              label: 'Public',
+                              description: 'Discoverable and free to join.',
+                            },
+                            {
+                              value: 'private',
+                              label: 'Private',
+                              description:
+                                'Discoverable. Join by request, invitation, or password.',
+                            },
+                            {
+                              value: 'secret',
+                              label: 'Secret',
+                              description: 'Hidden. Invite-only.',
+                            },
+                          ].map((opt) => (
+                            // eslint-disable-next-line jsx-a11y/label-has-associated-control
+                            <label
+                              key={opt.value}
+                              htmlFor={`group-visibility-${opt.value}`}
+                              className="flex items-start gap-2"
+                            >
+                              <input
+                                id={`group-visibility-${opt.value}`}
+                                type="radio"
+                                name="group-visibility"
+                                value={opt.value}
+                                checked={authData.groupVisibility === opt.value}
+                                onChange={() =>
+                                  setAuthData((prev) => ({
+                                    ...prev,
+                                    groupVisibility: opt.value,
+                                  }))
+                                }
+                                className="mt-1"
+                              />
+                              <span className="flex flex-col">
+                                <span className="font-medium">{opt.label}</span>
+                                <span className="text-xs text-fg-muted">{opt.description}</span>
+                              </span>
+                            </label>
+                          ))}
                         </div>
                       </fieldset>
+
+                      {/* Tier 19 Chunk 1 — optional password input, only
+                          rendered when the user picks Private. Min 4 chars
+                          (enforced server-side too). */}
+                      {authData.groupVisibility === 'private' ? (
+                        <div className="rounded-3xl border border-default bg-overlay/50 px-4 py-3">
+                          <label
+                            htmlFor="group-password"
+                            className="block text-xs uppercase tracking-[0.25em] text-fg-muted"
+                          >
+                            Password (optional)
+                          </label>
+                          <p className="mt-1 text-xs text-fg-muted">
+                            Anyone with this password can join without owner approval. Leave blank
+                            to require requests + invitations only.
+                          </p>
+                          <Input
+                            id="group-password"
+                            type="password"
+                            aria-label="Group password"
+                            value={authData.groupPassword}
+                            onChange={(event) =>
+                              setAuthData((prev) => ({
+                                ...prev,
+                                groupPassword: event.target.value,
+                              }))
+                            }
+                            placeholder="Min 4 characters"
+                            autoComplete="off"
+                            className="mt-2"
+                          />
+                        </div>
+                      ) : null}
                       <Button type="submit" variant="primary" size="lg">
                         Create group
                       </Button>
@@ -644,6 +744,20 @@ function DashboardView() {
       />
 
       <ProfileDrawer />
+
+      {/* Tier 19 Chunks 1+3 — join dialogs. Mounted at top level so they
+          aren't unmounted when the user navigates between views. State
+          lives in DashboardView; the dialogs themselves dispatch through
+          DataContext handlers. */}
+      {passwordDialogGroup ? (
+        <JoinGroupPasswordDialog
+          group={passwordDialogGroup}
+          onClose={() => setPasswordDialogGroup(null)}
+        />
+      ) : null}
+      {requestDialogGroup ? (
+        <JoinRequestDialog group={requestDialogGroup} onClose={() => setRequestDialogGroup(null)} />
+      ) : null}
     </div>
   );
 }

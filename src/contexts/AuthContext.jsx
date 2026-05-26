@@ -27,7 +27,12 @@ const initialAuthData = {
   resetPassword: '',
   resetToken: '',
   groupName: '',
-  groupVisibility: 'private',
+  // Tier 19 — three-tier visibility model. 'secret' (default) preserves
+  // the old "invite-only / hidden" semantic; 'private' is the new
+  // discoverable tier (request / invite / password); 'public' is free join.
+  groupVisibility: 'secret',
+  // Optional password — only used when groupVisibility === 'private'.
+  groupPassword: '',
 };
 
 const AuthContext = createContext(null);

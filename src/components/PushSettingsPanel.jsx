@@ -59,6 +59,22 @@ const NOTIFICATION_TYPES = [
     label: 'Friend requests',
     description: 'When someone sends you a friend request, or accepts one you sent.',
   },
+  // Tier 19 Chunk 3 — request-to-join lifecycle for private groups.
+  {
+    key: 'join-request',
+    label: 'Join requests',
+    description: 'When someone asks to join a private group you own.',
+  },
+  {
+    key: 'join-request-approved',
+    label: 'Join request approved',
+    description: 'When a group owner approves your request to join.',
+  },
+  {
+    key: 'join-request-declined',
+    label: 'Join request declined',
+    description: 'When a group owner declines your request to join.',
+  },
 ];
 
 function PushSettingsPanel() {

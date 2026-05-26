@@ -23,13 +23,16 @@ const {
 const BOGUS_ID = '99999999-0000-4000-8000-999999999999';
 
 // Many tests need a fresh group owned by alice. Helper to spin one up.
-async function createGroupAs(user, { name, visibility = 'private' } = {}) {
+// Tier 19 — extended to accept an optional password (private groups only).
+async function createGroupAs(user, { name, visibility = 'secret', password } = {}) {
   const authed = await apiLogin(user);
   try {
-    const payload = await assertOk(authed, 'POST', '/api/groups', {
+    const body = {
       name: name || `g_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       visibility,
-    });
+    };
+    if (password) body.password = password;
+    const payload = await assertOk(authed, 'POST', '/api/groups', body);
     return payload.id;
   } finally {
     await authed.dispose();
@@ -126,7 +129,7 @@ test.describe('GET /api/groups/:groupId', () => {
   });
 
   test('anon viewing private group → 404 (no existence leak)', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const anon = await apiAnon();
     try {
       const res = await anon.get(`/api/groups/${groupId}`);
@@ -168,7 +171,7 @@ test.describe('POST /api/groups', () => {
     try {
       const payload = await assertOk(authed, 'POST', '/api/groups', {
         name: 'API Test Group',
-        visibility: 'private',
+        visibility: 'secret',
       });
       expectShape(payload, ['id', 'name', 'ownerId']);
     } finally {
@@ -347,7 +350,7 @@ test.describe('POST /api/groups/:groupId/join + /leave', () => {
   });
 
   test('join private group → 403/404', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const bob = await apiLogin(USERS.bob);
     try {
       const res = await bob.post(`/api/groups/${groupId}/join`);
@@ -503,7 +506,7 @@ test.describe('DELETE /api/groups/:groupId', () => {
 
 test.describe('POST /api/groups/:groupId/visibility', () => {
   test('owner flips → 200', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const authed = await apiLogin(USERS.alice);
     try {
       const payload = await assertOk(authed, 'POST', `/api/groups/${groupId}/visibility`, {
@@ -529,11 +532,13 @@ test.describe('POST /api/groups/:groupId/visibility', () => {
   });
 
   test('bad enum → 400', async () => {
+    // Tier 19 — visibility enum is now public/private/secret. Use a
+    // string that's NOT in the set so we hit the zod validation path.
     const groupId = await createGroupAs(USERS.alice);
     const authed = await apiLogin(USERS.alice);
     try {
       await assertValidationError(authed, 'POST', `/api/groups/${groupId}/visibility`, {
-        visibility: 'secret',
+        visibility: 'bogus',
       });
     } finally {
       await authed.dispose();
@@ -564,7 +569,7 @@ async function addBobToGroup(groupId) {
 
 test.describe('GET /api/groups/:groupId/comments', () => {
   test('owner reading own private group → 200 + array', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const authed = await apiLogin(USERS.alice);
     try {
       const payload = await assertOk(authed, 'GET', `/api/groups/${groupId}/comments`);
@@ -575,7 +580,7 @@ test.describe('GET /api/groups/:groupId/comments', () => {
   });
 
   test('member reading private group → 200', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     await addBobToGroup(groupId);
     const bobCtx = await apiLogin(USERS.bob);
     try {
@@ -587,7 +592,7 @@ test.describe('GET /api/groups/:groupId/comments', () => {
   });
 
   test('non-member reading private group → 404 (no existence leak)', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const bobCtx = await apiLogin(USERS.bob);
     try {
       await assertNotFound(bobCtx, 'GET', `/api/groups/${groupId}/comments`);
@@ -619,7 +624,7 @@ test.describe('GET /api/groups/:groupId/comments', () => {
 
 test.describe('POST /api/groups/:groupId/comments', () => {
   test('member happy path → 200 with comment shape', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const authed = await apiLogin(USERS.alice);
     try {
       const created = await assertOk(authed, 'POST', `/api/groups/${groupId}/comments`, {
@@ -648,7 +653,7 @@ test.describe('POST /api/groups/:groupId/comments', () => {
   });
 
   test('post appears in subsequent GET list', async () => {
-    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
     const authed = await apiLogin(USERS.alice);
     try {
       await assertOk(authed, 'POST', `/api/groups/${groupId}/comments`, { body: 'hello group' });
@@ -683,6 +688,322 @@ test.describe('POST /api/groups/:groupId/comments', () => {
       });
     } finally {
       await authed.dispose();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 19 Chunk 1 — Password-protected join + owner password rotation
+// ---------------------------------------------------------------------------
+
+test.describe('POST /api/groups/:groupId/join-with-password', () => {
+  test('private + correct password → 200, becomes a member', async () => {
+    const groupId = await createGroupAs(USERS.alice, {
+      visibility: 'private',
+      password: 'sosecret',
+    });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-with-password`, {
+        password: 'sosecret',
+      });
+      expect(res.group.members.some((m) => m.userId === USERS.bob.id)).toBe(true);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('private + wrong password → 401', async () => {
+    const groupId = await createGroupAs(USERS.alice, {
+      visibility: 'private',
+      password: 'sosecret',
+    });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.post(`/api/groups/${groupId}/join-with-password`, {
+        data: { password: 'wrong' },
+      });
+      expect(res.status()).toBe(401);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('private with no password set → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.post(`/api/groups/${groupId}/join-with-password`, {
+        data: { password: 'anything' },
+      });
+      expect(res.status()).toBe(403);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('public group rejects password-join → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'public' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.post(`/api/groups/${groupId}/join-with-password`, {
+        data: { password: 'anything' },
+      });
+      expect(res.status()).toBe(403);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('no auth → 401', async () => {
+    await assertUnauthorized('POST', `/api/groups/${BOGUS_ID}/join-with-password`, {
+      password: 'x',
+    });
+  });
+});
+
+test.describe('PUT /api/groups/:groupId/password', () => {
+  test('owner sets a password → 200, hasPassword:true', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const res = await assertOk(alice, 'PUT', `/api/groups/${groupId}/password`, {
+        password: 'rotated',
+      });
+      expect(res.hasPassword).toBe(true);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('owner clears the password (null) → 200, hasPassword:false', async () => {
+    const groupId = await createGroupAs(USERS.alice, {
+      visibility: 'private',
+      password: 'starting',
+    });
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const res = await assertOk(alice, 'PUT', `/api/groups/${groupId}/password`, {
+        password: null,
+      });
+      expect(res.hasPassword).toBe(false);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('non-owner → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      // Use a 4+ char password so we hit the ownership check, not the
+      // zod min(4) rule that would surface a 400 first.
+      const res = await bob.put(`/api/groups/${groupId}/password`, {
+        data: { password: 'try-this' },
+      });
+      expect(res.status()).toBe(403);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('non-private group → 400', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'public' });
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const res = await alice.put(`/api/groups/${groupId}/password`, {
+        data: { password: 'longenough' },
+      });
+      expect(res.status()).toBe(400);
+    } finally {
+      await alice.dispose();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 19 Chunk 3 — Request-to-join lifecycle
+// ---------------------------------------------------------------------------
+
+test.describe('POST /api/groups/:groupId/join-request', () => {
+  test('private group, no relation → 200 with request payload', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {
+        message: 'lmk',
+      });
+      expect(res.request.groupId).toBe(groupId);
+      expect(res.request.requesterId).toBe(USERS.bob.id);
+      expect(res.request.message).toBe('lmk');
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('public group rejects request-to-join → 400', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'public' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.post(`/api/groups/${groupId}/join-request`, { data: {} });
+      expect(res.status()).toBe(400);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('secret group → 404 (no existence leak)', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'secret' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.post(`/api/groups/${groupId}/join-request`, { data: {} });
+      expect(res.status()).toBe(404);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('duplicate active request → 400', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
+      const res = await bob.post(`/api/groups/${groupId}/join-request`, { data: {} });
+      expect(res.status()).toBe(400);
+    } finally {
+      await bob.dispose();
+    }
+  });
+});
+
+test.describe('GET /api/groups/:groupId/join-requests', () => {
+  test('owner sees pending requests', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    // Bob requests
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, { message: 'pls' });
+    } finally {
+      await bob.dispose();
+    }
+    // Alice (owner) lists
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const res = await assertOk(alice, 'GET', `/api/groups/${groupId}/join-requests`);
+      expect(res.items.length).toBe(1);
+      expect(res.items[0].requesterId).toBe(USERS.bob.id);
+      expect(res.items[0].message).toBe('pls');
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('non-owner → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.get(`/api/groups/${groupId}/join-requests`);
+      expect(res.status()).toBe(403);
+    } finally {
+      await bob.dispose();
+    }
+  });
+});
+
+test.describe('approve / decline / cancel join request', () => {
+  test('owner approves → bob becomes a member, request row destroyed', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    // Bob requests
+    let requestId;
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const created = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
+      requestId = created.request.id;
+    } finally {
+      await bob.dispose();
+    }
+    // Alice approves
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const res = await assertOk(
+        alice,
+        'POST',
+        `/api/groups/${groupId}/join-requests/${requestId}/approve`,
+        {},
+      );
+      expect(res.group.members.some((m) => m.userId === USERS.bob.id)).toBe(true);
+
+      // Pending list now empty
+      const list = await assertOk(alice, 'GET', `/api/groups/${groupId}/join-requests`);
+      expect(list.items).toHaveLength(0);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('owner declines → request stays as declined (cooldown bookkeeping)', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    let requestId;
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const created = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
+      requestId = created.request.id;
+    } finally {
+      await bob.dispose();
+    }
+    const alice = await apiLogin(USERS.alice);
+    try {
+      await assertOk(
+        alice,
+        'POST',
+        `/api/groups/${groupId}/join-requests/${requestId}/decline`,
+        {},
+      );
+      // Active list is empty (only `declinedAt IS NULL` rows surface).
+      const list = await assertOk(alice, 'GET', `/api/groups/${groupId}/join-requests`);
+      expect(list.items).toHaveLength(0);
+    } finally {
+      await alice.dispose();
+    }
+
+    // Bob trying again within cooldown → 400 with cooldown code.
+    const bob2 = await apiLogin(USERS.bob);
+    try {
+      const res = await bob2.post(`/api/groups/${groupId}/join-request`, { data: {} });
+      expect(res.status()).toBe(400);
+    } finally {
+      await bob2.dispose();
+    }
+  });
+
+  test('non-owner approve → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    let requestId;
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const created = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
+      requestId = created.request.id;
+      const res = await bob.post(`/api/groups/${groupId}/join-requests/${requestId}/approve`, {
+        data: {},
+      });
+      expect(res.status()).toBe(403);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('requester cancels own request → 200, no cooldown applies', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const created = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
+      const requestId = created.request.id;
+      await assertOk(bob, 'DELETE', `/api/groups/${groupId}/join-requests/${requestId}`);
+      // Re-request immediately works (no cooldown after self-cancel).
+      const res = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
+      expect(res.request.requesterId).toBe(USERS.bob.id);
+    } finally {
+      await bob.dispose();
     }
   });
 });

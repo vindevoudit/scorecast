@@ -143,24 +143,46 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                 <div>
                   <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Groups</p>
                   <ul className="mt-1 space-y-1">
-                    {results.groups.map((g) => (
-                      <li key={g.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSelectGroup?.(g);
-                            close();
-                          }}
-                          className={`${itemBtn} flex items-center justify-between gap-2`}
-                        >
-                          <span className="truncate">{g.name}</span>
-                          <span className="shrink-0 text-xs text-fg-subtle">
-                            {g.visibility === 'public' ? 'public' : 'private'}
-                            {g.isMember ? ' · joined' : ''}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                    {/* Tier 19 — per-row CTA driven by `canJoin` /
+                        `canJoinWithPassword` / `canRequestJoin` /
+                        `hasPendingRequest` / `isMember` flags from the
+                        search response. The name button still opens /
+                        navigates; the small right-side label communicates
+                        the actionable state, and we pass the full result
+                        row to `onSelectGroup` so DashboardView can route
+                        to the right dialog. */}
+                    {results.groups.map((g) => {
+                      let cta = null;
+                      if (g.isMember) cta = { label: 'Joined', tone: 'success' };
+                      else if (g.canJoin) cta = { label: 'Public — tap to join', tone: 'accent' };
+                      else if (g.canJoinWithPassword)
+                        cta = { label: 'Password required', tone: 'accent' };
+                      else if (g.hasPendingRequest)
+                        cta = { label: 'Request pending', tone: 'muted' };
+                      else if (g.canRequestJoin) cta = { label: 'Request to join', tone: 'accent' };
+                      else cta = { label: g.visibility, tone: 'muted' }; // fallback
+                      const toneClass =
+                        cta.tone === 'success'
+                          ? 'text-success'
+                          : cta.tone === 'accent'
+                            ? 'text-accent'
+                            : 'text-fg-subtle';
+                      return (
+                        <li key={g.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSelectGroup?.(g);
+                              close();
+                            }}
+                            className={`${itemBtn} flex items-center justify-between gap-2`}
+                          >
+                            <span className="truncate">{g.name}</span>
+                            <span className={`shrink-0 text-xs ${toneClass}`}>{cta.label}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}

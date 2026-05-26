@@ -1,20 +1,94 @@
 // Tier 11 Chunk 2 — GroupCard migrated to tokens + Button + Badge.
+// Tier 19 Chunks 1+3 — visibility badge handles 3 tiers; owner sees a
+// pending-join-requests panel + a "Set/change password" surface when the
+// group is private.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import InviteRow from './InviteRow';
 import Avatar from './Avatar';
 import CommentThread from './CommentThread';
 import ConfirmModal from './ConfirmModal';
-import { Badge, Button } from './ui';
+import { Badge, Button, Input } from './ui';
+import { useData } from '../hooks/useData';
+
+function VisibilityBadge({ visibility, hasPassword }) {
+  // Three-tier visibility badge with tone + label per level.
+  if (visibility === 'public') return <Badge tone="success">Public</Badge>;
+  if (visibility === 'secret') return <Badge tone="neutral">Secret</Badge>;
+  // private
+  return <Badge tone="accent">{hasPassword ? 'Private · Password' : 'Private'}</Badge>;
+}
 
 function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDelete }) {
   const isOwner = group.ownerId === currentUserId;
   const isMember = group.members.some((m) => (m.userId || m) === currentUserId);
 
+  const {
+    fetchGroupJoinRequests,
+    handleApproveJoinRequest,
+    handleDeclineJoinRequest,
+    handleSetGroupPassword,
+  } = useData();
+
   const [confirmingLeave, setConfirmingLeave] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [transferTarget, setTransferTarget] = useState('');
+
+  // Tier 19 Chunk 3 — owner-side pending requests. Loaded lazily on mount
+  // for owners of private groups (the only case where the endpoint
+  // returns anything meaningful). Re-fetched after approve/decline so
+  // the local list stays in sync without a full DataContext refresh.
+  const [joinRequests, setJoinRequests] = useState([]);
+  const isPrivateOwner = isOwner && group.visibility === 'private';
+  useEffect(() => {
+    if (!isPrivateOwner) return;
+    let cancelled = false;
+    fetchGroupJoinRequests(group.id)
+      .then((items) => {
+        if (!cancelled) setJoinRequests(items);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isPrivateOwner, group.id, fetchGroupJoinRequests]);
+
+  const refreshJoinRequests = async () => {
+    try {
+      const items = await fetchGroupJoinRequests(group.id);
+      setJoinRequests(items);
+    } catch {
+      // best-effort — the list will refresh on next mount
+    }
+  };
+
+  const onApprove = async (request) => {
+    await handleApproveJoinRequest(group.id, request.id);
+    await refreshJoinRequests();
+  };
+  const onDecline = async (request) => {
+    await handleDeclineJoinRequest(group.id, request.id);
+    await refreshJoinRequests();
+  };
+
+  // Password rotation (private groups only). Empty input = clear password.
+  const [showPasswordPanel, setShowPasswordPanel] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const onSubmitPassword = async (event) => {
+    event.preventDefault();
+    setSavingPassword(true);
+    try {
+      await handleSetGroupPassword(group.id, newPassword || null);
+      setNewPassword('');
+      setShowPasswordPanel(false);
+    } catch {
+      // Toast already shown by DataContext
+    } finally {
+      setSavingPassword(false);
+    }
+  };
 
   const transferCandidates = group.members.filter((m) => (m.userId || m) !== group.ownerId);
 
@@ -46,9 +120,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={group.visibility === 'public' ? 'success' : 'neutral'}>
-            {group.visibility === 'public' ? 'Public' : 'Private'}
-          </Badge>
+          <VisibilityBadge visibility={group.visibility} hasPassword={Boolean(group.hasPassword)} />
           {isOwner ? <Badge tone="accent">Owner</Badge> : null}
         </div>
       </div>
@@ -81,6 +153,105 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
         </div>
 
         <InviteRow groupId={group.id} onInvite={onInvite} />
+
+        {/* Tier 19 Chunk 3 — owner's pending-requests panel. Hidden when
+            empty; rendered only for private groups (public/secret have no
+            request flow). Each row carries the requester username + their
+            optional 160-char message + Approve/Decline buttons. */}
+        {isPrivateOwner && joinRequests.length > 0 ? (
+          <div className="rounded-3xl bg-overlay/70 p-4">
+            <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">
+              Pending requests ({joinRequests.length})
+            </p>
+            <div className="mt-3 space-y-2 text-sm">
+              {joinRequests.map((request) => (
+                <div
+                  key={request.id}
+                  className="flex flex-col gap-2 rounded-2xl bg-elevated/80 px-3 py-2 sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Avatar
+                        username={request.username}
+                        displayName={request.displayName}
+                        size={22}
+                      />
+                      <span className="truncate font-medium text-fg">
+                        {request.displayName || request.username}
+                      </span>
+                    </div>
+                    {request.message ? (
+                      <p className="mt-1 text-xs text-fg-muted">{request.message}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button size="sm" onClick={() => onApprove(request)}>
+                      Approve
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => onDecline(request)}>
+                      Decline
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Tier 19 Chunk 1 — owner-only password rotation. Visible only on
+            private groups (passwords are a private-tier feature). The form
+            is collapsed behind a toggle so the card stays compact for
+            groups that don't use the feature. Submitting an empty field
+            clears the password (group reverts to invite + request only). */}
+        {isOwner && group.visibility === 'private' ? (
+          <div className="rounded-3xl bg-overlay/70 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Group password</p>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setShowPasswordPanel((prev) => !prev);
+                  if (showPasswordPanel) setNewPassword('');
+                }}
+              >
+                {showPasswordPanel
+                  ? 'Cancel'
+                  : group.hasPassword
+                    ? 'Change password'
+                    : 'Set password'}
+              </Button>
+            </div>
+            {showPasswordPanel ? (
+              <form onSubmit={onSubmitPassword} className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <div className="flex-1">
+                  <Input
+                    id={`group-${group.id}-new-password`}
+                    type="password"
+                    aria-label="New group password"
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    placeholder={
+                      group.hasPassword
+                        ? 'Leave blank to clear (min 4 chars to set)'
+                        : 'Min 4 characters'
+                    }
+                    autoComplete="off"
+                  />
+                </div>
+                <Button type="submit" size="sm" disabled={savingPassword}>
+                  {savingPassword
+                    ? 'Saving…'
+                    : newPassword
+                      ? 'Save'
+                      : group.hasPassword
+                        ? 'Clear password'
+                        : 'Save'}
+                </Button>
+              </form>
+            ) : null}
+          </div>
+        ) : null}
 
         {(isMember || isOwner) && (onLeave || onTransfer || onDelete) ? (
           <div className="flex flex-wrap gap-2 pt-1">

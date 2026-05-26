@@ -85,6 +85,19 @@ const publicReadLimiter = rateLimit({
   message: { error: 'Too many requests — slow down' },
 });
 
+// Tier 19 Chunk 1 — password-protected group join. Tighter than the friend-
+// request budget because the surface here is an actual secret (the group
+// password). 10 attempts/min/user is plenty for a fat-fingered legitimate
+// user and aggressively throttles brute-force probing.
+const groupJoinPasswordLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  message: { error: 'Too many join attempts — please wait a minute and retry' },
+});
+
 module.exports = {
   skipInTest,
   loginLimiter,
@@ -95,4 +108,5 @@ module.exports = {
   pickLimiter,
   forgotPasswordLimiter,
   publicReadLimiter,
+  groupJoinPasswordLimiter,
 };

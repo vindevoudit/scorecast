@@ -35,6 +35,7 @@ const Game = require('./Game')(sequelize);
 const Pick = require('./Pick')(sequelize);
 const GroupMember = require('./GroupMember')(sequelize);
 const GroupInvite = require('./GroupInvite')(sequelize);
+const GroupJoinRequest = require('./GroupJoinRequest')(sequelize);
 const Badge = require('./Badge')(sequelize);
 const Friendship = require('./Friendship')(sequelize);
 const Comment = require('./Comment')(sequelize);
@@ -72,6 +73,21 @@ GroupMember.belongsTo(User, { foreignKey: 'userId' });
 
 Group.hasMany(GroupInvite, { foreignKey: 'groupId', as: 'invites', onDelete: 'CASCADE' });
 GroupInvite.belongsTo(Group, { foreignKey: 'groupId' });
+
+// Tier 19 Chunk 3 — group join requests. CASCADE on both sides so deleting
+// a group or a user atomically clears pending requests they owned.
+Group.hasMany(GroupJoinRequest, {
+  foreignKey: 'groupId',
+  as: 'joinRequests',
+  onDelete: 'CASCADE',
+});
+GroupJoinRequest.belongsTo(Group, { foreignKey: 'groupId' });
+User.hasMany(GroupJoinRequest, {
+  foreignKey: 'requesterId',
+  as: 'groupJoinRequests',
+  onDelete: 'CASCADE',
+});
+GroupJoinRequest.belongsTo(User, { foreignKey: 'requesterId', as: 'requester' });
 
 User.hasMany(Badge, { foreignKey: 'userId', as: 'badges', onDelete: 'CASCADE' });
 Badge.belongsTo(User, { foreignKey: 'userId' });
@@ -279,6 +295,7 @@ module.exports = {
   Pick,
   GroupMember,
   GroupInvite,
+  GroupJoinRequest,
   Badge,
   Friendship,
   Comment,

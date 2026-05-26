@@ -83,6 +83,12 @@ Game.hasMany(Comment, { foreignKey: 'gameId', as: 'comments', onDelete: 'CASCADE
 Comment.belongsTo(Game, { foreignKey: 'gameId' });
 Comment.belongsTo(User, { foreignKey: 'userId' });
 User.hasMany(Comment, { foreignKey: 'userId', as: 'comments', onDelete: 'CASCADE' });
+// Tier 18 Chunk 5 — group running comments. CASCADE so deleting a group
+// removes its comment thread atomically; GroupService.cascadeDelete also
+// fires an explicit Comment.destroy inside the transaction for parity
+// with the post-Tier-11 user-cascade pattern.
+Group.hasMany(Comment, { foreignKey: 'groupId', as: 'comments', onDelete: 'CASCADE' });
+Comment.belongsTo(Group, { foreignKey: 'groupId' });
 
 User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications', onDelete: 'CASCADE' });
 Notification.belongsTo(User, { foreignKey: 'userId' });

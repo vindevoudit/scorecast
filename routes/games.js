@@ -50,7 +50,7 @@ router.get(
   publicReadLimiter,
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const comments = await CommentService.listForGame(req.params.gameId, req.user?.id ?? null);
+    const comments = await CommentService.list({ gameId: req.params.gameId }, req.user?.id ?? null);
     res.json(comments);
   }),
 );

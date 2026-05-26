@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import InviteRow from './InviteRow';
 import Avatar from './Avatar';
+import CommentThread from './CommentThread';
 import ConfirmModal from './ConfirmModal';
 import { Badge, Button } from './ui';
 
@@ -104,6 +105,13 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
             ) : null}
           </div>
         ) : null}
+
+        {/* Tier 18 Chunk 5 — group running comments. Only renders for
+            members + owner (the GET requires membership for private
+            groups; for public groups it would technically work for
+            non-members too, but a non-member wouldn't be inside this
+            card via the My Groups list anyway). */}
+        {isMember || isOwner ? <CommentThread scope="group" scopeId={group.id} /> : null}
 
         {transferring ? (
           <form

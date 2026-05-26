@@ -77,6 +77,10 @@ const PUSH_NOTIFICATION_TYPES = [
   'badge',
   'invite',
   'group-join',
+  // Tier 18 Chunk 5 — fan-out from CommentService.create when a member
+  // posts in a group thread; every OTHER member of that group receives
+  // one. PushSettingsPanel.NOTIFICATION_TYPES mirrors this enum.
+  'group-comment',
   'odds-shifted',
   'kickoff-reminder',
   'friend-request',

@@ -9,9 +9,17 @@ module.exports = (sequelize) => {
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true,
       },
+      // Tier 18 Chunk 5 — gameId is now nullable; comments are EITHER
+      // game-scoped (gameId set) OR group-scoped (groupId set). A DB
+      // CHECK constraint enforces "exactly one" so the model can't get
+      // into an invalid state regardless of caller bugs.
       gameId: {
         type: DataTypes.UUID,
-        allowNull: false,
+        allowNull: true,
+      },
+      groupId: {
+        type: DataTypes.UUID,
+        allowNull: true,
       },
       userId: {
         type: DataTypes.UUID,

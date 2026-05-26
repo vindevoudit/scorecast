@@ -4,14 +4,32 @@
 // and CommentReaction. ALLOWED_EMOJIS in validation/schemas.js is the source
 // of truth for the reaction palette (CLAUDE.md invariant: REACTION_EMOJIS
 // in CommentThread.jsx must stay in sync).
-const { Comment, CommentReaction, User, Game } = require('../models');
+// Tier 18 Chunk 5 — list + create accept either a `gameId` OR a `groupId`
+// scope. The DB CHECK constraint guarantees exactly one is set; service
+// callers assert the same so we never round-trip a half-formed scope to
+// Postgres. Group-scoped creates fan out a `group-comment` notification
+// to every other group member.
+const { Comment, CommentReaction, GroupMember, User, Game, Group } = require('../models');
 const { ALLOWED_EMOJIS } = require('../validation/schemas');
 const errors = require('../lib/errors');
 const { getUserById } = require('../lib/users');
+const NotificationService = require('./NotificationService');
 
-async function listForGame(gameId, viewerId, { limit = 50 } = {}) {
+function assertSingleScope({ gameId, groupId }) {
+  const haveGame = Boolean(gameId);
+  const haveGroup = Boolean(groupId);
+  if (haveGame === haveGroup) {
+    // Both set or both missing — programmer error, surface a 400 so a
+    // bad client/test path gets a recognizable response shape.
+    throw errors.badRequest('Comment must be scoped to exactly one of gameId or groupId');
+  }
+}
+
+async function list({ gameId, groupId }, viewerId, { limit = 50 } = {}) {
+  assertSingleScope({ gameId, groupId });
+  const where = gameId ? { gameId } : { groupId };
   const comments = await Comment.findAll({
-    where: { gameId },
+    where,
     order: [['createdAt', 'DESC']],
     limit,
   });
@@ -38,6 +56,7 @@ async function listForGame(gameId, viewerId, { limit = 50 } = {}) {
   return comments.map((c) => ({
     id: c.id,
     gameId: c.gameId,
+    groupId: c.groupId,
     userId: c.userId,
     username: userById.get(c.userId)?.username || 'Unknown',
     body: c.body,
@@ -48,15 +67,68 @@ async function listForGame(gameId, viewerId, { limit = 50 } = {}) {
   }));
 }
 
-async function create({ gameId, userId, body }) {
-  const game = await Game.findByPk(gameId);
-  if (!game) throw errors.notFound('Game not found');
+// Tier 18 Chunk 5 — fan out a `group-comment` push/bell notification to
+// every group member EXCEPT the author. Best-effort: notify() itself is
+// never-throws, and we wrap the loop in a try/catch so a notification
+// outage can't break the comment create. Title carries the author +
+// group name; body is the comment text (capped at 160 chars to keep
+// push payloads small). Link deep-links to the group view — picked up
+// by Chunk 6's notification-click consumer.
+async function fanOutGroupComment({ comment, author, group }) {
+  try {
+    const members = await GroupMember.findAll({ where: { groupId: group.id } });
+    const recipients = members.map((m) => m.userId).filter((id) => id !== author.id);
+    if (recipients.length === 0) return;
+    const title = `${author.username} commented in ${group.name}`;
+    const body = comment.body.length > 160 ? `${comment.body.slice(0, 157).trim()}…` : comment.body;
+    const link = `/?view=groups&groupId=${group.id}`;
+    await Promise.all(
+      recipients.map((userId) =>
+        NotificationService.notify(userId, 'group-comment', title, body, link),
+      ),
+    );
+  } catch (_err) {
+    // Notification fan-out is best-effort — swallow so the comment
+    // create still resolves cleanly. NotificationService.notify already
+    // logs per-recipient failures internally.
+  }
+}
 
-  const comment = await Comment.create({ gameId, userId, body });
+async function create({ gameId, groupId, userId, body }) {
+  assertSingleScope({ gameId, groupId });
+
+  // Game scope: existence check (matches the old behavior).
+  if (gameId) {
+    const game = await Game.findByPk(gameId);
+    if (!game) throw errors.notFound('Game not found');
+  }
+
+  // Group scope: load the group + verify the author is a member. Owner
+  // counts (owner is automatically a member via the GroupMember row
+  // created in GroupService.createGroup). Non-members get 403 even on
+  // public groups — write is member-only by design.
+  let group = null;
+  if (groupId) {
+    group = await Group.findByPk(groupId);
+    if (!group) throw errors.notFound('Group not found');
+    const membership = await GroupMember.findOne({ where: { groupId, userId } });
+    if (!membership) throw errors.forbidden('Only group members can post comments');
+  }
+
+  const comment = await Comment.create({ gameId, groupId, userId, body });
   const user = await getUserById(userId);
+
+  // Group fan-out runs OUTSIDE any wrapping transaction (none here, but
+  // matches the Tier 5.3 invariant) — so a downstream rollback can't
+  // leave behind ghost notifications.
+  if (group) {
+    fanOutGroupComment({ comment, author: user, group }).catch(() => {});
+  }
+
   return {
     id: comment.id,
     gameId: comment.gameId,
+    groupId: comment.groupId,
     userId: comment.userId,
     username: user.username,
     body: comment.body,
@@ -102,4 +174,15 @@ async function unreact({ commentId, userId, emoji }) {
   await CommentReaction.destroy({ where: { commentId, userId, emoji } });
 }
 
-module.exports = { listForGame, create, edit, remove, react, unreact };
+module.exports = {
+  list,
+  create,
+  edit,
+  remove,
+  react,
+  unreact,
+  // Tier 18 Chunk 5 — kept as a thin shim so any external caller that
+  // imported the old signature keeps working. Internal code paths
+  // (routes/games.js) have been updated to call list() directly.
+  listForGame: (gameId, viewerId, opts) => list({ gameId }, viewerId, opts),
+};

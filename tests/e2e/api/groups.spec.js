@@ -546,3 +546,143 @@ test.describe('POST /api/groups/:groupId/visibility', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET/POST /api/groups/:id/comments — Tier 18 Chunk 5
+// ---------------------------------------------------------------------------
+
+// Walks bob through invite → accept so he ends up as a member of the group.
+async function addBobToGroup(groupId) {
+  const inviteId = await inviteBobAndGetInviteId(groupId);
+  const bobCtx = await apiLogin(USERS.bob);
+  try {
+    await assertOk(bobCtx, 'POST', `/api/groups/${groupId}/invite/${inviteId}/accept`);
+  } finally {
+    await bobCtx.dispose();
+  }
+}
+
+test.describe('GET /api/groups/:groupId/comments', () => {
+  test('owner reading own private group → 200 + array', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', `/api/groups/${groupId}/comments`);
+      expect(Array.isArray(payload)).toBe(true);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('member reading private group → 200', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    await addBobToGroup(groupId);
+    const bobCtx = await apiLogin(USERS.bob);
+    try {
+      const payload = await assertOk(bobCtx, 'GET', `/api/groups/${groupId}/comments`);
+      expect(Array.isArray(payload)).toBe(true);
+    } finally {
+      await bobCtx.dispose();
+    }
+  });
+
+  test('non-member reading private group → 404 (no existence leak)', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const bobCtx = await apiLogin(USERS.bob);
+    try {
+      await assertNotFound(bobCtx, 'GET', `/api/groups/${groupId}/comments`);
+    } finally {
+      await bobCtx.dispose();
+    }
+  });
+
+  test('anon reading public group → 200', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'public' });
+    const anon = await apiAnon();
+    try {
+      const payload = await assertOk(anon, 'GET', `/api/groups/${groupId}/comments`);
+      expect(Array.isArray(payload)).toBe(true);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test('unknown group id → 404', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertNotFound(authed, 'GET', `/api/groups/${BOGUS_ID}/comments`);
+    } finally {
+      await authed.dispose();
+    }
+  });
+});
+
+test.describe('POST /api/groups/:groupId/comments', () => {
+  test('member happy path → 200 with comment shape', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const created = await assertOk(authed, 'POST', `/api/groups/${groupId}/comments`, {
+        body: 'first post',
+      });
+      expectShape(created, ['id', 'groupId', 'userId', 'username', 'body', 'createdAt']);
+      expect(created.body).toBe('first post');
+      expect(created.groupId).toBe(groupId);
+      expect(created.gameId).toBeNull();
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('non-member → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'public' });
+    const bobCtx = await apiLogin(USERS.bob);
+    try {
+      const res = await bobCtx.post(`/api/groups/${groupId}/comments`, {
+        data: { body: 'sneaky' },
+      });
+      expect(res.status()).toBe(403);
+    } finally {
+      await bobCtx.dispose();
+    }
+  });
+
+  test('post appears in subsequent GET list', async () => {
+    const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertOk(authed, 'POST', `/api/groups/${groupId}/comments`, { body: 'hello group' });
+      const list = await assertOk(authed, 'GET', `/api/groups/${groupId}/comments`);
+      expect(list.length).toBeGreaterThanOrEqual(1);
+      expect(list[0].body).toBe('hello group');
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('empty body → 400', async () => {
+    const groupId = await createGroupAs(USERS.alice);
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertValidationError(authed, 'POST', `/api/groups/${groupId}/comments`, { body: '' });
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('no auth → 401', async () => {
+    await assertUnauthorized('POST', `/api/groups/${BOGUS_ID}/comments`, { body: 'nope' });
+  });
+
+  test('no CSRF → 403', async () => {
+    const groupId = await createGroupAs(USERS.alice);
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertCsrfRejected(authed, 'POST', `/api/groups/${groupId}/comments`, {
+        body: 'nope',
+      });
+    } finally {
+      await authed.dispose();
+    }
+  });
+});

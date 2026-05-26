@@ -50,6 +50,11 @@ const NOTIFICATION_TYPES = [
     description: 'When someone joins or leaves a group you own.',
   },
   {
+    key: 'group-comment',
+    label: 'Group comments',
+    description: "When someone posts in a group thread you're a member of.",
+  },
+  {
     key: 'friend-request',
     label: 'Friend requests',
     description: 'When someone sends you a friend request, or accepts one you sent.',

@@ -1,6 +1,11 @@
 // Tier 11 Chunk 2 — CommentThread migrated. Reaction toggle preserves its
 // gate('react') wiring; the post composer (authed) becomes a tokenized
 // Textarea + Button; anon visitors still get the InlineGatePanel fallback.
+// Tier 18 Chunk 5 — scope-agnostic. Mount with either
+// `<CommentThread scope="game" scopeId={game.id} />` or
+// `<CommentThread scope="group" scopeId={group.id} />`. The list/create
+// URL flips on scope; everything else (reactions, edits, deletes) is
+// scope-free at the API level (commentId-only).
 
 import { useEffect, useState } from 'react';
 import { timeAgo } from '../utils/time';
@@ -117,7 +122,16 @@ function CommentRow({ comment, currentUserId, onEdit, onDelete, onToggleReaction
   );
 }
 
-function CommentThread({ gameId }) {
+function CommentThread({ scope = 'game', scopeId, gameId }) {
+  // Tier 18 Chunk 5 backwards-compat shim: existing GameCard callers
+  // pass `gameId={game.id}`; new callers pass `scope` + `scopeId`. When
+  // only `gameId` is given, default scope to 'game' and use it as the id.
+  const effectiveScopeId = scopeId || gameId;
+  const baseUrl =
+    scope === 'group'
+      ? `/api/groups/${effectiveScopeId}/comments`
+      : `/api/games/${effectiveScopeId}/comments`;
+
   const request = useRequest();
   const { user } = useAuth();
   const { gate } = useAuthGate();
@@ -135,7 +149,7 @@ function CommentThread({ gameId }) {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await request(`/api/games/${gameId}/comments`);
+      const data = await request(baseUrl);
       setComments(data);
     } catch (error) {
       onError?.(error.message);
@@ -154,7 +168,7 @@ function CommentThread({ gameId }) {
     if (!body.trim()) return;
     setSubmitting(true);
     try {
-      const created = await request(`/api/games/${gameId}/comments`, {
+      const created = await request(baseUrl, {
         method: 'POST',
         body: JSON.stringify({ body: body.trim() }),
       });
@@ -253,7 +267,7 @@ function CommentThread({ gameId }) {
           {user ? (
             <form onSubmit={submit} className="space-y-2">
               <Textarea
-                id={`comment-${gameId}`}
+                id={`comment-${scope}-${effectiveScopeId}`}
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 maxLength={500}

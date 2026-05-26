@@ -4,7 +4,14 @@
 // Tier 5.3 invariant: deleteGroup wraps cascadeDelete in sequelize.transaction;
 // notify() fires OUTSIDE the transaction. Tier 5.2: every member-mutating op
 // invalidates the per-group leaderboard cache.
-const { Group, GroupMember, GroupInvite, sequelize } = require('../models');
+const {
+  Group,
+  GroupMember,
+  GroupInvite,
+  Comment,
+  CommentReaction,
+  sequelize,
+} = require('../models');
 const { Op } = require('sequelize');
 const errors = require('../lib/errors');
 const { getUserById, getUserByUsername } = require('../lib/users');
@@ -15,6 +22,22 @@ const LeaderboardService = require('./LeaderboardService');
 
 async function cascadeDelete(group, { transaction } = {}) {
   const opts = transaction ? { transaction } : {};
+  // Tier 18 Chunk 5 — explicitly destroy group comments + their reactions
+  // inside the transaction. The FK on comments declares ON DELETE CASCADE
+  // (and CommentReaction → Comment is the same), so SQL alone would handle
+  // it — but we follow the post-Tier-11 user-cascade pattern of explicit
+  // dependency destroys to guard against any sync-vs-migration table
+  // where the FK might have landed as NO ACTION.
+  const groupComments = await Comment.findAll({
+    where: { groupId: group.id },
+    attributes: ['id'],
+    ...opts,
+  });
+  if (groupComments.length > 0) {
+    const commentIds = groupComments.map((c) => c.id);
+    await CommentReaction.destroy({ where: { commentId: commentIds }, ...opts });
+    await Comment.destroy({ where: { groupId: group.id }, ...opts });
+  }
   await GroupMember.destroy({ where: { groupId: group.id }, ...opts });
   await GroupInvite.destroy({ where: { groupId: group.id }, ...opts });
   await group.destroy(opts);

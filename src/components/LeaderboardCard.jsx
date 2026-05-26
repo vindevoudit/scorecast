@@ -1,7 +1,12 @@
 // Tier 11 Chunk 2 — LeaderboardCard tokenized.
 // Tier 8.6 — masked rows (entry.isMasked) suppress click-to-open-drawer and
 // dim the row visually so the privacy state is legible without hiding rank.
+// Tier 18 Chunk 3 — compact view that shows top-3 + viewer + friends with
+// `… N more players` dividers between gaps and an [Expand] toggle. Friends
+// stay unmasked because they're inside the viewer's friend set; masking
+// logic in services/LeaderboardService is unchanged.
 
+import { useMemo, useState } from 'react';
 import EmptyState from './EmptyState';
 import Avatar from './Avatar';
 
@@ -46,6 +51,53 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
   return <div className={baseClass}>{content}</div>;
 }
 
+// Tier 18 Chunk 3 — compact mode. Returns either a flat list of full
+// rows (when expanded or when compact would already show everyone) or
+// an interleaved row/divider list that surfaces top-3 + self + friends
+// and collapses the rest into "… N more players" markers.
+function buildCompact({ entries, currentUserId, friendSet }) {
+  if (entries.length === 0) return { items: [], rowCount: 0 };
+  const visible = new Set();
+  for (let i = 0; i < Math.min(3, entries.length); i += 1) {
+    visible.add(entries[i].userId);
+  }
+  if (currentUserId) visible.add(currentUserId);
+  for (const id of friendSet) visible.add(id);
+
+  const items = [];
+  let lastRank = 0;
+  let rowCount = 0;
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    const rank = i + 1;
+    if (!visible.has(entry.userId)) continue;
+    const gap = rank - lastRank - 1;
+    if (gap > 0) {
+      items.push({ type: 'divider', count: gap, key: `gap-${rank}` });
+    }
+    items.push({ type: 'row', entry, rank, key: entry.userId });
+    rowCount += 1;
+    lastRank = rank;
+  }
+  const trailingGap = entries.length - lastRank;
+  if (trailingGap > 0) {
+    items.push({ type: 'divider', count: trailingGap, key: 'gap-end' });
+  }
+  return { items, rowCount };
+}
+
+function GapDivider({ count }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-fg-subtle">
+      <span className="bg-default/60 h-px flex-1" aria-hidden="true" />
+      <span>
+        … {count} more {count === 1 ? 'player' : 'players'}
+      </span>
+      <span className="bg-default/60 h-px flex-1" aria-hidden="true" />
+    </div>
+  );
+}
+
 function LeaderboardCard({
   title,
   entries,
@@ -53,7 +105,25 @@ function LeaderboardCard({
   description,
   onSelectUser,
   isFiltered = false,
+  friendUserIds, // Iterable of user ids — passed by DashboardView from useFriends().
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const friendSet = useMemo(() => {
+    if (!friendUserIds) return new Set();
+    return friendUserIds instanceof Set ? friendUserIds : new Set(friendUserIds);
+  }, [friendUserIds]);
+
+  const compact = useMemo(
+    () => buildCompact({ entries, currentUserId, friendSet }),
+    [entries, currentUserId, friendSet],
+  );
+
+  // When the compact projection would already render every row (e.g. small
+  // leaderboard, or the viewer's whole friend group sits across all ranks)
+  // there's nothing to expand into — skip the toggle entirely.
+  const canExpand = compact.rowCount < entries.length;
+  const showExpanded = expanded || !canExpand;
+
   // When a filter is active and the resulting list is "everyone at 0 pts"
   // (which renders identical to truly empty), surface the scope so the
   // user understands the filter is the cause rather than missing data.
@@ -83,7 +153,7 @@ function LeaderboardCard({
             title="No leaderboard data yet"
             description="Once games have results, points will appear here."
           />
-        ) : (
+        ) : showExpanded ? (
           entries.map((entry, index) => (
             <LeaderboardRow
               key={entry.userId}
@@ -93,8 +163,34 @@ function LeaderboardCard({
               onSelectUser={onSelectUser}
             />
           ))
+        ) : (
+          compact.items.map((item) =>
+            item.type === 'row' ? (
+              <LeaderboardRow
+                key={item.key}
+                entry={item.entry}
+                rank={item.rank}
+                isCurrentUser={item.entry.userId === currentUserId}
+                onSelectUser={onSelectUser}
+              />
+            ) : (
+              <GapDivider key={item.key} count={item.count} />
+            ),
+          )
         )}
       </div>
+      {canExpand ? (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            aria-expanded={expanded}
+            className="rounded-full border border-default bg-elevated/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {expanded ? 'Show fewer' : `Show all ${entries.length} players`}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

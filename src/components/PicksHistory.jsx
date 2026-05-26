@@ -17,6 +17,7 @@ import { displayTeamName } from '../utils/teamNames';
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'wins', label: 'Wins' },
+  { id: 'draws', label: 'Draws' },
   { id: 'losses', label: 'Losses' },
   { id: 'pending', label: 'Pending' },
 ];
@@ -71,6 +72,10 @@ function PicksHistory({ picks, games }) {
   const filtered = useMemo(() => {
     if (filter === 'all') return scopedRows;
     if (filter === 'wins') return scopedRows.filter((r) => r.status === 'won');
+    // Tier 18 Chunk 3 — Draws is its own chip. statusBadge already
+    // renders the Drew +N pts badge per Tier 17 draw-scoring, so no
+    // rendering change is needed.
+    if (filter === 'draws') return scopedRows.filter((r) => r.status === 'draw');
     if (filter === 'losses') return scopedRows.filter((r) => r.status === 'lost');
     if (filter === 'pending')
       return scopedRows.filter((r) => r.status === 'pending' || r.status === 'live');

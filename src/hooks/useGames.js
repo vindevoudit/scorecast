@@ -5,6 +5,15 @@
 import { useMemo } from 'react';
 import { useData } from './useData';
 
+// Tier 18 Chunk 3 — day-bucket key in the viewer's local timezone.
+// `en-CA` reliably produces YYYY-MM-DD across browsers/locales (the
+// CA locale uses ISO date order by design — safer than constructing
+// from getFullYear/getMonth/getDate which can desync at midnight
+// boundaries depending on timezone).
+export function dayKey(value) {
+  return new Date(value).toLocaleDateString('en-CA');
+}
+
 export function useGames() {
   const { games, refreshGames } = useData();
 
@@ -39,5 +48,22 @@ export function useGames() {
     return { upcomingGames: upcoming, liveGames: live, completedGames: completed };
   }, [games]);
 
-  return { games, refreshGames, ...segmented };
+  // Tier 18 Chunk 3 — Map<YYYY-MM-DD, Game[]> for the calendar viewer.
+  // Same source array, just a different shape — components that already
+  // use `games` / `upcomingGames` / etc. are unaffected.
+  const byDay = useMemo(() => {
+    const map = new Map();
+    for (const game of games) {
+      const key = dayKey(game.date);
+      const list = map.get(key);
+      if (list) {
+        list.push(game);
+      } else {
+        map.set(key, [game]);
+      }
+    }
+    return map;
+  }, [games]);
+
+  return { games, refreshGames, byDay, ...segmented };
 }

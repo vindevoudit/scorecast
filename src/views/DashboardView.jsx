@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { lazyWithReload } from '../lib/lazyWithReload';
-import GameCard from '../components/GameCard';
+import GamesCalendar from '../components/GamesCalendar';
 import LeaderboardCard, { LeaderboardRow } from '../components/LeaderboardCard';
 import GroupCard from '../components/GroupCard';
 import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
@@ -63,6 +63,7 @@ function DashboardView() {
     setView,
     groups,
     pendingInvites,
+    friends,
     leaderboard,
     groupOrderBy,
     groupOffset,
@@ -86,7 +87,7 @@ function DashboardView() {
     leaderboardFilters,
   } = useData();
   const isLeaderboardFiltered = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
-  const { games, upcomingGames, liveGames, completedGames } = useGames();
+  const { games, byDay } = useGames();
 
   const tabs = useMemo(() => {
     if (!user) {
@@ -96,8 +97,6 @@ function DashboardView() {
     }
     return user.role === 'admin' ? [...BASE_TABS, ADMIN_TAB] : BASE_TABS;
   }, [user]);
-  const [showCompleted, setShowCompleted] = useState(false);
-
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('sc_sidebar_collapsed') === '1';
@@ -113,17 +112,6 @@ function DashboardView() {
     await handleCreateGroup({ name: authData.groupName, visibility: authData.groupVisibility });
     setAuthData((prev) => ({ ...prev, groupName: '', groupVisibility: 'private' }));
   };
-
-  const renderGameSection = (heading, list, emptyText) => (
-    <div className="space-y-4">
-      <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">{heading}</h3>
-      {list.length === 0 ? (
-        <EmptyState title={emptyText} />
-      ) : (
-        list.map((game) => <GameCard key={game.id} game={game} />)
-      )}
-    </div>
-  );
 
   return (
     <div className="flex min-h-[calc(100dvh-3rem)] gap-4 lg:gap-6" aria-busy={loading}>
@@ -328,21 +316,13 @@ function DashboardView() {
                   </div>
                 </div>
 
-                {liveGames.length > 0 ? renderGameSection('Live now', liveGames, '') : null}
-
-                {renderGameSection(
-                  'Upcoming',
-                  upcomingGames,
-                  'No upcoming games yet. Check back soon.',
-                )}
-
-                {completedGames.length > 0 ? (
-                  <CompletedSection
-                    completedGames={completedGames}
-                    showCompleted={showCompleted}
-                    setShowCompleted={setShowCompleted}
-                  />
-                ) : null}
+                {/* Tier 18 Chunk 3 — calendar viewer replaces the previous
+                    Live + Upcoming + Completed-toggle cascade. Day strip +
+                    grouped list keeps the screen scannable when the entire
+                    season is loaded. The `liveGames` / `upcomingGames` /
+                    `completedGames` selectors stay on useGames() for any
+                    future surface that still wants the old buckets. */}
+                <GamesCalendar byDay={byDay} />
               </div>
 
               <div className="space-y-4">
@@ -616,6 +596,10 @@ function DashboardView() {
                   currentUserId={user?.id}
                   onSelectUser={openProfile}
                   isFiltered={isLeaderboardFiltered}
+                  // Tier 18 Chunk 3 — drives the compact view: top-3 + self
+                  // + every accepted friend are always shown; the rest
+                  // collapses into "… N more players" until expanded.
+                  friendUserIds={(friends?.friends || []).map((f) => f.id)}
                 />
                 <GroupLeaderboardCard
                   groups={groups}
@@ -657,22 +641,6 @@ function DashboardView() {
       />
 
       <ProfileDrawer />
-    </div>
-  );
-}
-
-function CompletedSection({ completedGames, showCompleted, setShowCompleted }) {
-  return (
-    <div className="space-y-4">
-      <button
-        type="button"
-        onClick={() => setShowCompleted((prev) => !prev)}
-        className="w-full rounded-3xl border border-default bg-elevated/60 px-5 py-4 text-left text-sm font-semibold uppercase tracking-[0.24em] text-fg transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        aria-expanded={showCompleted}
-      >
-        {showCompleted ? 'Hide' : 'Show'} {completedGames.length} completed
-      </button>
-      {showCompleted ? completedGames.map((game) => <GameCard key={game.id} game={game} />) : null}
     </div>
   );
 }

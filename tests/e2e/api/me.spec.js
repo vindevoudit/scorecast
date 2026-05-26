@@ -97,6 +97,21 @@ test.describe('PUT /api/me', () => {
     }
   });
 
+  // Tier 20 Chunk 2 — profanity rejection covers displayName + bio. The
+  // matcher is shared across 6 surfaces (see validation/schemas.js
+  // noProfanity).
+  test('profane displayName → 400 with rejection message', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const res = await authed.put('/api/me', { data: { displayName: 'Mr Shit' } });
+      expect(res.status()).toBe(400);
+      const payload = await res.json();
+      expect(payload.error).toMatch(/inappropriate language/i);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
   test('no auth → 401', async () => {
     await assertUnauthorized('PUT', '/api/me', { displayName: 'x' });
   });

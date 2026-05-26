@@ -188,6 +188,23 @@ test.describe('POST /api/groups', () => {
     }
   });
 
+  // Tier 20 Chunk 2 — profanity rejection on group name. Third surface
+  // covered (comment body + displayName covered in comments.spec.js +
+  // me.spec.js).
+  test('profane name → 400 with rejection message', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const res = await authed.post('/api/groups', {
+        data: { name: 'Shit group' },
+      });
+      expect(res.status()).toBe(400);
+      const payload = await res.json();
+      expect(payload.error).toMatch(/inappropriate language/i);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
   test('no auth → 401', async () => {
     await assertUnauthorized('POST', '/api/groups', { name: 'x' });
   });

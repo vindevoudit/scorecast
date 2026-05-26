@@ -84,6 +84,25 @@ test.describe('PUT /api/comments/:id', () => {
     }
   });
 
+  // Tier 20 Chunk 2 — profanity rejection. The obscenity matcher is shared
+  // across 6 free-text surfaces (username, displayName, bio, comment body,
+  // group name, join-request message); covering one surface here is enough
+  // to lock the wiring. The other two surfaces get their own boundary
+  // tests in me.spec.js and groups.spec.js.
+  test('profane body → 400 with rejection message', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const res = await authed.put(`/api/comments/${aliceCommentId}`, {
+        data: { body: 'this is shit' },
+      });
+      expect(res.status()).toBe(400);
+      const payload = await res.json();
+      expect(payload.error).toMatch(/inappropriate language/i);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
   test('no auth → 401', async () => {
     await assertUnauthorized('PUT', `/api/comments/${aliceCommentId}`, { body: 'x' });
   });

@@ -1,14 +1,34 @@
 const { z } = require('zod');
 const { extendZodWithOpenApi } = require('@asteasolutions/zod-to-openapi');
+const { RegExpMatcher, englishDataset, englishRecommendedTransformers } = require('obscenity');
 
 extendZodWithOpenApi(z);
+
+// Tier 20 Chunk 2 — shared profanity matcher. Applied via .refine() to
+// every free-text surface a user can submit: username, displayName, bio,
+// comment body, group name, join-request message. Symmetric with the
+// existing DANGEROUS_TEXT_CHARS refine pattern from Tier 5.5b L6.
+// `englishDataset` includes whitelisting for collision-prone English
+// words (Scunthorpe, etc.) so we don't generate false positives on
+// legitimate place names / surnames. When ADDING a new free-text
+// surface, plumb noProfanity() in via .refine() — that's the
+// single source of truth.
+const profanityMatcher = new RegExpMatcher({
+  ...englishDataset.build(),
+  ...englishRecommendedTransformers,
+});
+const NO_PROFANITY_MSG = 'Please remove inappropriate language';
+function noProfanity(val) {
+  return !profanityMatcher.hasMatch(val ?? '');
+}
 
 const username = z
   .string()
   .trim()
   .min(3)
   .max(32)
-  .regex(/^[A-Za-z0-9_]+$/, 'Username may only contain letters, numbers, and underscores');
+  .regex(/^[A-Za-z0-9_]+$/, 'Username may only contain letters, numbers, and underscores')
+  .refine(noProfanity, { message: NO_PROFANITY_MSG });
 const password = z.string().min(8).max(200);
 const email = z.string().trim().toLowerCase().email().max(254);
 const uuid = z.string().uuid();
@@ -141,7 +161,7 @@ const GROUP_VISIBILITY = ['public', 'private', 'secret'];
 const groupPassword = z.string().min(4).max(64);
 const createGroupSchema = z
   .object({
-    name: z.string().trim().min(1).max(60),
+    name: z.string().trim().min(1).max(60).refine(noProfanity, { message: NO_PROFANITY_MSG }),
     visibility: z.enum(GROUP_VISIBILITY).optional(),
     password: groupPassword.optional(),
   })
@@ -186,10 +206,19 @@ const joinWithPasswordSchema = z
   .object({ password: z.string().min(1).max(64) })
   .openapi('JoinGroupWithPasswordRequest');
 const joinRequestSchema = z
-  .object({ message: z.string().trim().max(160).optional() })
+  .object({
+    message: z
+      .string()
+      .trim()
+      .max(160)
+      .refine(noProfanity, { message: NO_PROFANITY_MSG })
+      .optional(),
+  })
   .openapi('GroupJoinRequest');
 const commentSchema = z
-  .object({ body: z.string().trim().min(1).max(500) })
+  .object({
+    body: z.string().trim().min(1).max(500).refine(noProfanity, { message: NO_PROFANITY_MSG }),
+  })
   .openapi('CommentRequest');
 
 const teamName = z.string().trim().min(1).max(80);
@@ -262,12 +291,14 @@ const displayName = z
   .string()
   .trim()
   .max(60)
-  .refine((s) => !DANGEROUS_TEXT_CHARS.test(s), { message: NO_DANGEROUS_TEXT_MSG });
+  .refine((s) => !DANGEROUS_TEXT_CHARS.test(s), { message: NO_DANGEROUS_TEXT_MSG })
+  .refine(noProfanity, { message: NO_PROFANITY_MSG });
 const bio = z
   .string()
   .trim()
   .max(280)
-  .refine((s) => !DANGEROUS_TEXT_CHARS.test(s), { message: NO_DANGEROUS_TEXT_MSG });
+  .refine((s) => !DANGEROUS_TEXT_CHARS.test(s), { message: NO_DANGEROUS_TEXT_MSG })
+  .refine(noProfanity, { message: NO_PROFANITY_MSG });
 
 const editProfileSchema = z
   .object({

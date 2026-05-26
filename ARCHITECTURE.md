@@ -850,13 +850,15 @@ try `loadDashboard()` (sends cookies)
 - `useFriendsPicks` (Tier 18 Chunk 4) — `{ friendsPicks, byGame }`. `byGame` is a `Map<gameId, FriendPick[]>` so `FriendPicksPanel` per-card lookups are O(1).
 - `useGroups` / `useLeaderboard` / `useFriends` — projections on `useData()`
 
-**Notification deep-link consumer** (Tier 18 Chunk 6a) — `DataContext.consumeDeepLinks(gamesList)` runs ONCE between the initial data load and `bootDone` flipping true. Recognizes three params:
+**Notification deep-link consumer** (Tier 18 Chunk 6a, extended in Tier 19 follow-up) — `DataContext.consumeDeepLinks(gamesList)` is the read-the-URL → mutate-app-state primitive. It runs ONCE on boot between the initial data load and `bootDone` flipping true (the original Chunk 6a use-case), AND it's re-invoked in-process by `DataContext.navigateToDeepLink(link)` whenever the in-app `NotificationBell` row click needs to navigate via a stored `link` (the Tier 19 follow-up). Recognizes three params:
 
 - `?view=games|mypicks|groups|leaderboard|profile|admin` → `setView(...)`
 - `?gameId=<uuid>` → resolves to the game's day via `dayKey(game.date)`, writes the synthetic `?date=YYYY-MM-DD` into the URL via `history.replaceState`, then `setView('games')`. The `?date=` lands BEFORE `GamesCalendar` reads it on its first mount, so the calendar selects the right chip without any inter-component event plumbing. Today's date deletes `?date=` instead of setting it (calendar treats absent `?date=` as today).
 - `?groupId=<uuid>` → `setSelectedGroupId(...)` + `setView('groups')` if no view was supplied.
 
 After consumption, all three params are stripped via `history.replaceState` so refresh / share-link doesn't re-fire side effects. UUIDs are regex-validated (`DEEP_LINK_UUID_RE` at module scope) so a garbage `?gameId=` is ignored without throwing.
+
+**In-app navigator** (Tier 19 follow-up) — `navigateToDeepLink(link)` is the only sanctioned bell-click target. It parses `link` with `new URL(link, origin)` to tolerate absolute or relative shapes, `history.pushState`s the resolved URL (so Back works), and then calls `consumeDeepLinks(games)` to re-run the same param interpretation that boot uses. Malformed input bails silently — never throws. Closes the bell popover via `setOpen(false)` so the user lands on the destination with no lingering UI.
 
 The matching server side: every `NotificationService.notify(userId, type, title, body, link)` call site now passes a `link` string. Convention:
 
@@ -872,7 +874,7 @@ The matching server side: every `NotificationService.notify(userId, type, title,
 | `group-comment`              | `/?view=groups&groupId=<id>` | `CommentService.fanOutGroupComment`                              |
 | `friend-request`             | `/?view=groups`              | `routes/friends.js` (request + accept)                           |
 
-`src/sw.js`'s `notificationclick` handler reads the link from `data.link` and calls `clients.openWindow(targetUrl)` — no SW change was needed for Chunk 6 since the link plumbing was already wired.
+`src/sw.js`'s `notificationclick` handler reads the link from `data.link` and calls `clients.openWindow(targetUrl)` — no SW change was needed for Chunk 6 since the link plumbing was already wired. The in-app `NotificationBell` click handler ([src/components/NotificationBell.jsx](src/components/NotificationBell.jsx), Tier 19 follow-up) wires the third consumer: clicking a row calls `markRead(n.id)` (if unread) AND `navigateToDeepLink(n.link)` (if present) AND closes the popover. Before this wiring, bell rows only marked-read and the `link` field was dead in-app — only push clicks routed users via deep-link. The `odds-shifted` producer was the regression target (had been emitting `/games/<id>` — a non-route path — instead of the documented `/?gameId=<id>`; fixed alongside the bell wiring).
 
 > **Note on `pickMap`**: it stores the **full pick object** keyed by `gameId`, not just the choice. This was changed in Tier 8.2 so `GameCard` can pass `existingPickId` to the undo-pick handler. Tier 13 moved this `useMemo` into [src/hooks/usePicks.js](src/hooks/usePicks.js).
 
@@ -1516,16 +1518,16 @@ Composite primary key `(groupId, userId)`. No additional columns.
 
 #### `notifications`
 
-| Column      | Type                                        | Notes                                                                                                                                        |
-| ----------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`        | UUID PK                                     |                                                                                                                                              |
-| `userId`    | UUID NOT NULL → users(id) ON DELETE CASCADE |                                                                                                                                              |
-| `type`      | STRING NOT NULL                             | Free-form: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`. **Not an ENUM** so adding new types doesn't require a migration |
-| `title`     | STRING NOT NULL                             |                                                                                                                                              |
-| `body`      | TEXT NULLABLE                               |                                                                                                                                              |
-| `link`      | STRING NULLABLE                             | Reserved for deep-linking; not yet rendered                                                                                                  |
-| `read`      | BOOLEAN NOT NULL DEFAULT false              |                                                                                                                                              |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW                     |                                                                                                                                              |
+| Column      | Type                                        | Notes                                                                                                                                                                                                                                                                          |
+| ----------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`        | UUID PK                                     |                                                                                                                                                                                                                                                                                |
+| `userId`    | UUID NOT NULL → users(id) ON DELETE CASCADE |                                                                                                                                                                                                                                                                                |
+| `type`      | STRING NOT NULL                             | Free-form: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`. **Not an ENUM** so adding new types doesn't require a migration                                                                                                                                   |
+| `title`     | STRING NOT NULL                             |                                                                                                                                                                                                                                                                                |
+| `body`      | TEXT NULLABLE                               |                                                                                                                                                                                                                                                                                |
+| `link`      | STRING NULLABLE                             | Deep-link URL (e.g. `/?view=profile`, `/?gameId=<id>`). Populated by every `notify()` call site (Tier 18 Chunk 6a). Consumed by three surfaces: boot `consumeDeepLinks`, SW `notificationclick`, in-app `NotificationBell` click via `navigateToDeepLink` (Tier 19 follow-up). |
+| `read`      | BOOLEAN NOT NULL DEFAULT false              |                                                                                                                                                                                                                                                                                |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW                     |                                                                                                                                                                                                                                                                                |
 
 **Index**: `notifications_user_read_idx (userId, read, createdAt)`.
 
@@ -1770,7 +1772,7 @@ notify(userId, type, title, body=null, link=null)
 
 `type` is a free-form string (not ENUM) for the in-app row but constrained to `PUSH_NOTIFICATION_TYPES` in [validation/schemas.js](validation/schemas.js) for the per-type push preferences UI. Current types: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`, `odds-shifted`, `kickoff-reminder`, `group-comment` (Tier 18 Chunk 5). Adding a new type for a push category requires editing BOTH `PUSH_NOTIFICATION_TYPES` AND `NOTIFICATION_TYPES` in [src/components/PushSettingsPanel.jsx](src/components/PushSettingsPanel.jsx) in the same commit.
 
-**`link` field** (Tier 18 Chunk 6a) — every `notify()` call site now passes a deep-link URL. The SPA's `DataContext.consumeDeepLinks` reads `?view=` / `?gameId=` / `?groupId=` on boot to route the user to the relevant tab + state. Convention table is in §6.2 above; the SW's `notificationclick` handler uses `data.link` to call `clients.openWindow(targetUrl)`.
+**`link` field** (Tier 18 Chunk 6a, extended in Tier 19 follow-up) — every `notify()` call site passes a deep-link URL. Three consumers fire on a populated `link`: (1) boot — `DataContext.consumeDeepLinks` reads `?view=` / `?gameId=` / `?groupId=` ONCE inside `loadDashboard().then(...)`; (2) Web Push click — `src/sw.js`'s `notificationclick` handler calls `clients.openWindow(data.link)`, a cold load that lands on consumer (1); (3) **in-app `NotificationBell` row click** — `DataContext.navigateToDeepLink(n.link)` `history.pushState`s the URL and re-runs `consumeDeepLinks` in-process, then closes the popover. Convention table + consumer details in §6.2 above.
 
 **Polling**: `NotificationBell` calls `GET /api/notifications` (which returns `{items, unreadCount}`) every 30 s. The unread count drives a red badge on the bell icon. Marking-as-read is local-then-remote: the UI optimistically dims the item and decrements the count, then fires `POST /api/notifications/:id/read`.
 
@@ -2885,6 +2887,8 @@ The query uses an `INNER JOIN` (`required: true`) against `Game` so the date fil
 ### 8.26 Notification Deep-Links + Error Toast Cleanup (Tier 18 Chunk 6a + 6b)
 
 **6a — Deep-link plumbing** is described in full in §6.2 (consumer + link convention table). The server side is just every `NotificationService.notify(...)` call site populating the 5th positional arg (`link`). No new state or endpoints — the SW `notificationclick` handler was already calling `clients.openWindow(targetUrl)` from `data.link`.
+
+**Tier 19 follow-up — bell click-through + `odds-shifted` link fix.** Chunk 6a wired the server side AND the SW + boot consumers but missed the in-app `NotificationBell` click handler: bell row click only marked-read and ignored `n.link`, so the populated `link` field was dead for anyone interacting via the bell (i.e. anyone without push subscribed). Fix is a 3-file change: (1) `DataContext.navigateToDeepLink(link)` — `history.pushState`s the URL and re-runs the existing memoized `consumeDeepLinks(games)`; exported through context. (2) `NotificationBell.jsx` row click handler — does mark-read + `navigateToDeepLink` + `setOpen(false)` in order. (3) `services/GameService.js:notifyOddsShiftFanOut` — `odds-shifted` had been emitting `link = '/games/${game.id}'`, a path that isn't a real SPA route; both boot + new bell consumers parse only query params, and the SW would `openWindow` straight to a 404-ish "/" landing. Corrected to the convention `link = '/?gameId=${game.id}'`. The dedup `Notification.findOne({ where: { link, … } })` automatically tracks the new format. Boundary tests in `tests/e2e/notifications-badges.spec.js` cover badge → Profile tab and pick-scored → Games tab navigation + assert consumed params are stripped post-click.
 
 **6b — Error toast cleanup** addresses two long-standing UX papercuts:
 

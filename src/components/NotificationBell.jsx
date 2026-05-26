@@ -8,11 +8,13 @@ import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { timeAgo } from '../utils/time';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
+import { useData } from '../hooks/useData';
 import { Popover, PopoverTrigger, PopoverContent } from './ui';
 
 function NotificationBell() {
   const request = useRequest();
   const { showStatus } = useNotifications();
+  const { navigateToDeepLink } = useData();
   const onError = (msg) => {
     if (msg && msg !== 'Session expired') showStatus(msg);
   };
@@ -121,7 +123,16 @@ function NotificationBell() {
                 <button
                   key={n.id}
                   type="button"
-                  onClick={() => !n.read && markRead(n.id)}
+                  onClick={() => {
+                    // Mark read first so the optimistic state flips before
+                    // the deep-link consumer re-renders. Both side effects
+                    // are no-ops if not applicable (already read / no link).
+                    if (!n.read) markRead(n.id);
+                    if (n.link) {
+                      navigateToDeepLink(n.link);
+                      setOpen(false);
+                    }
+                  }}
                   className={`block w-full rounded-2xl px-3 py-2 text-left text-sm transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     n.read
                       ? 'bg-overlay/50 text-fg-subtle'

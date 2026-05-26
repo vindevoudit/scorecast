@@ -107,7 +107,11 @@ async function notifyOddsShiftFanOut(game, next) {
   if (picks.length === 0) return;
 
   const sinceCutoff = new Date(Date.now() - ODDS_SHIFT_COOLDOWN_MS);
-  const link = `/games/${game.id}`;
+  // Deep-link convention: `?gameId=<id>` is consumed by DataContext.consumeDeepLinks
+  // on cold loads (push notification click) AND by the in-app NotificationBell
+  // click handler (Tier 19 follow-up). The earlier `/games/<id>` path didn't
+  // exist as a real route and silently no-op'd on both surfaces.
+  const link = `/?gameId=${game.id}`;
 
   for (const pick of picks) {
     if (pick.pickedHomeProbability == null) continue; // legacy: silent skip

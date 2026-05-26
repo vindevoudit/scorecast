@@ -53,6 +53,11 @@ test.afterAll(async () => {
 
 async function pickLionsAndScore(page) {
   await loginViaUI(page, USERS.alice);
+  // Tier 18 Chunk 3 — Games tab uses a 7-day calendar that defaults to
+  // today. Lions kickoff is `daysFromNow(1)`, so navigate to its date via
+  // the `?date=` URL param GamesCalendar reads on mount.
+  const lionsDateKey = new Date(GAMES.lions.date).toLocaleDateString('en-CA');
+  await page.goto(`/?date=${lionsDateKey}`);
   const pickButton = page.getByRole('button', {
     name: `Pick ${GAMES.lions.homeTeam} to win`,
     exact: true,
@@ -90,16 +95,62 @@ test('badge unlock + pick-scored notification: bell shows fresh unread items', a
   expect(match, `bell aria-label "${label}"`).not.toBeNull();
   expect(parseInt(match[1], 10)).toBeGreaterThanOrEqual(3);
 
-  // Open the dropdown and confirm both notification types rendered.
+  // Open the dropdown and confirm both notification types rendered. The
+  // popover is rendered into a Radix Portal (post Tier-11 migration) so we
+  // can't scope the search to the trigger's DOM parent; just assert at
+  // page-scope, which finds the portal-rendered rows.
   await bell.click();
-  const tray = page.getByRole('button', { name: /Notifications/ }).locator('..');
   await expect(
-    tray.getByText(`Your pick on ${GAMES.lions.homeTeam} vs ${GAMES.lions.awayTeam}:`, {
+    page.getByText(`Your pick on ${GAMES.lions.homeTeam} vs ${GAMES.lions.awayTeam}:`, {
       exact: false,
     }),
   ).toBeVisible({ timeout: 5_000 });
-  await expect(tray.getByText(/Badge earned: First Pick/i)).toBeVisible();
-  await expect(tray.getByText(/Badge earned: First Win/i)).toBeVisible();
+  await expect(page.getByText(/Badge earned: First Pick/i)).toBeVisible();
+  await expect(page.getByText(/Badge earned: First Win/i)).toBeVisible();
+});
+
+test('notification click navigates via deep-link (badge → profile tab, pick-scored → games tab)', async ({
+  page,
+}) => {
+  // Tier 19 follow-up — verifies that clicking a notification row in the
+  // bell actually goes somewhere. Before this wiring, the bell only marked
+  // the row read; the `link` field on every Notification row was dead.
+  await pickLionsAndScore(page);
+
+  const bell = page.getByRole('button', { name: /^Notifications,\s+\d+ unread$/ });
+  await expect(bell).toBeVisible({ timeout: 15_000 });
+
+  // Click a badge notification → DataContext.navigateToDeepLink consumes
+  // `?view=profile` and the Profile tab becomes aria-selected. We pick the
+  // First Pick badge because its title is unique enough for filter().
+  await bell.click();
+  const firstPickRow = page.getByRole('button').filter({ hasText: /Badge earned: First Pick/i });
+  await firstPickRow.click();
+
+  // Sidebar tab name comes from `${kicker} ${label}` → "Profile Your Stats".
+  const profileTab = page.getByRole('tab', { name: /Your Stats/i });
+  await expect(profileTab).toHaveAttribute('aria-selected', 'true', { timeout: 5_000 });
+
+  // Now click a pick-scored notification → `?gameId=<id>` consumer flips
+  // the view back to games AND writes a `?date=<lions kickoff>` synthetic
+  // param GamesCalendar picks up on its next mount. The Games tab should
+  // become aria-selected; URL search may carry `?date=` for non-today.
+  await bell.click();
+  const pickScoredRow = page
+    .getByRole('button')
+    .filter({ hasText: new RegExp(`Your pick on ${GAMES.lions.homeTeam}`, 'i') });
+  await pickScoredRow.click();
+
+  const gamesTab = page.getByRole('tab', { name: /Upcoming Matches/i });
+  await expect(gamesTab).toHaveAttribute('aria-selected', 'true', { timeout: 5_000 });
+
+  // Sanity — the consumed query params (`view`, `gameId`) are stripped from
+  // the URL after consume; only `date` may remain. So the URL doesn't carry
+  // the deep-link params anymore (refresh-safety invariant).
+  const search = new URL(page.url()).searchParams;
+  expect(search.get('view')).toBeNull();
+  expect(search.get('gameId')).toBeNull();
+  expect(search.get('groupId')).toBeNull();
 });
 
 test('mark-as-read: clicking a notification decrements the unread count; mark-all clears it', async ({
@@ -118,7 +169,10 @@ test('mark-as-read: clicking a notification decrements the unread count; mark-al
 
   // Click the "First Pick" badge notification by its visible text. Each
   // notification row is a button; matching on the unique badge text avoids
-  // depending on tray DOM structure.
+  // depending on tray DOM structure. Tier 19 follow-up — the row click
+  // ALSO triggers deep-link navigation + closes the popover (because the
+  // badge link is `/?view=profile`), so we re-open the bell before the
+  // Mark-all-read interaction below.
   const firstPickRow = page.getByRole('button').filter({ hasText: /Badge earned: First Pick/i });
   await firstPickRow.click();
 
@@ -134,7 +188,9 @@ test('mark-as-read: clicking a notification decrements the unread count; mark-al
     )
     .toBe(initialCount - 1);
 
-  // Click "Mark all read".
+  // Re-open the bell (popover closed when the row click navigated us to
+  // Profile) and click "Mark all read".
+  await bell.click();
   await page.getByRole('button', { name: 'Mark all read', exact: true }).click();
 
   // Bell aria-label collapses to "Notifications" (no count) when 0 unread.

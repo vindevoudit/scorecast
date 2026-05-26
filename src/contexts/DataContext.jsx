@@ -307,6 +307,25 @@ export function DataProvider({ children }) {
     window.history.replaceState({}, '', next);
   }, []);
 
+  // In-app deep-link navigator (Tier 19 follow-up). Used by the NotificationBell
+  // to make a notification row's stored `link` actually go somewhere — pushes
+  // the URL onto history and re-runs the same consumer that boot uses, so the
+  // tab switches + group/game preselection happen identically to a cold load
+  // from a push-notification click. Bail on malformed input; never throws.
+  const navigateToDeepLink = useCallback(
+    (link) => {
+      if (typeof window === 'undefined' || !link) return;
+      try {
+        const url = new URL(link, window.location.origin);
+        window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      } catch {
+        return;
+      }
+      consumeDeepLinks(games);
+    },
+    [consumeDeepLinks, games],
+  );
+
   // Initial boot. Try the authed path first; on 401 (no session) fall back to
   // the anonymous path so visitors land on a populated browse-mode dashboard.
   useEffect(() => {
@@ -852,6 +871,9 @@ export function DataProvider({ children }) {
     // Leaderboard filter (shared by Leaderboard tab + My Picks tab)
     leaderboardFilters,
     applyLeaderboardFilters,
+
+    // Notification deep-link click-through (Tier 19 follow-up).
+    navigateToDeepLink,
   };
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

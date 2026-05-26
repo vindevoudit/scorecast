@@ -88,6 +88,7 @@ function DashboardView() {
     handleChangeGroupOffset,
     handleGroupSelection,
     leaderboardFilters,
+    navigateToDeepLink,
   } = useData();
   const isLeaderboardFiltered = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
   const { games, byDay } = useGames();
@@ -280,7 +281,18 @@ function DashboardView() {
                 }
                 // hasPendingRequest, or secret-by-member fallthrough — no-op.
               }}
-              onSelectGame={() => setView('games')}
+              onSelectGame={(game) => {
+                // Tier 20 Chunk 3 — navigate the calendar to the selected
+                // game's day. Reuses the existing Tier 18 Chunk 6a
+                // deep-link infrastructure: navigateToDeepLink pushes
+                // `?gameId=<id>` to history, then consumeDeepLinks
+                // translates it into a synthetic `?date=YYYY-MM-DD` via
+                // dayKey(game.date) and GamesCalendar reads `?date=` on
+                // its first render (pre-shifting windowIndex if the
+                // target falls outside the default 7-day window).
+                setView('games');
+                navigateToDeepLink(`/?gameId=${game.id}`);
+              }}
             />
           );
 

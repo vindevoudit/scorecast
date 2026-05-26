@@ -9,7 +9,11 @@ const BACK_HREF = '/';
 
 function LegalLayout({ title, lastUpdated, children }) {
   return (
-    <div className="min-h-[100dvh] bg-base text-fg">
+    // Tier 19 Chunk 4a — iOS notch + home indicator safe-area. Mirrors the
+    // sidebar drawer's chrome so the BANTRYX wordmark sits below the Dynamic
+    // Island and the bottom-of-page footer escapes the home indicator. The
+    // 0.5rem floor in both utilities keeps non-notched devices' layout intact.
+    <div className="pt-safe safe-bottom min-h-[100dvh] bg-base text-fg">
       <header className="border-b border-default bg-elevated/80 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
           <a

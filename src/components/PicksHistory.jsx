@@ -196,8 +196,13 @@ function PicksHistory({ picks, games }) {
 
   return (
     <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      {/* Tier 19 Chunk 4d — restructured into two clear rows:
+          Row 1 = title + scope pill (left) + Mine/Friends toggle (right);
+          Row 2 = single horizontal filter rail (status + friend + scope).
+          On `<md` the 5 status pills collapse into a native <select> so the
+          rail fits without wrapping into a 3-line mess. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-2xl font-semibold text-fg">
               {mode === 'mine' ? 'My Picks' : "Friends' Picks"}
@@ -214,67 +219,85 @@ function PicksHistory({ picks, games }) {
               : 'What your friends are picking, with their results.'}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          {/* Tier 18 Chunk 4 — Mine / Friends segmented toggle. Sits above
-              the per-status filter chips so the modal hierarchy reads
-              left-to-right: which set, then which slice of that set. */}
-          <div
-            className="inline-flex rounded-full border border-default bg-elevated/80 p-0.5"
-            role="tablist"
-            aria-label="Pick source"
-          >
-            {[
-              { id: 'mine', label: 'Mine' },
-              { id: 'friends', label: 'Friends' },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                role="tab"
-                aria-selected={mode === opt.id}
-                onClick={() => setMode(opt.id)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                  mode === opt.id ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filter picks">
-            {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                role="tab"
-                aria-selected={filter === f.id}
-                onClick={() => setFilter(f.id)}
-                className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                  filter === f.id
-                    ? 'bg-accent text-accent-fg'
-                    : 'border border-default bg-elevated/80 text-fg hover:border-strong'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+        {/* Mine / Friends segmented toggle — Tier 18 Chunk 4, kept in
+            Row 1 so it reads as "which set" before any per-row filter. */}
+        <div
+          className="inline-flex shrink-0 self-start rounded-full border border-default bg-elevated/80 p-0.5 sm:self-auto"
+          role="tablist"
+          aria-label="Pick source"
+        >
+          {[
+            { id: 'mine', label: 'Mine' },
+            { id: 'friends', label: 'Friends' },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              role="tab"
+              aria-selected={mode === opt.id}
+              onClick={() => setMode(opt.id)}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                mode === opt.id ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Tier 18 Chunk 4 — friend filter (Friends mode only) sits to the
-          left of the league/season scope filter so the two read as a
-          unified "narrow what you're looking at" row. */}
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      {/* Row 2 — unified filter rail. Status filter renders as pills on
+          `md+` (touch-target win on desktop) and as a native <select> on
+          `<md` (compact + thumb-friendly on phones). Friend dropdown only
+          renders in Friends mode. LeaderboardFiltersBar (league/season)
+          mounts on the right. Each control gets `min-h-9` so the rail
+          reads as one row even when items wrap. */}
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        {/* Status filter — pills on md+ */}
+        <div className="hidden flex-wrap gap-2 md:flex" role="tablist" aria-label="Filter picks">
+          {FILTERS.map((f) => (
+            <button
+              key={f.id}
+              role="tab"
+              aria-selected={filter === f.id}
+              onClick={() => setFilter(f.id)}
+              className={`inline-flex min-h-9 items-center rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                filter === f.id
+                  ? 'bg-accent text-accent-fg'
+                  : 'border border-default bg-elevated/80 text-fg hover:border-strong'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {/* Status filter — native select on <md so 5 pills don't blow up
+            the rail on phones. Visually mirrors the friend dropdown so the
+            two read as siblings. */}
+        <label className="inline-flex min-h-9 items-center gap-2 rounded-full border border-default bg-elevated/80 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg md:hidden">
+          <span className="text-fg-muted">Status</span>
+          <span className="sr-only">Filter picks</span>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="bg-transparent text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {FILTERS.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {/* Friend filter (Friends mode only) */}
         {mode === 'friends' ? (
-          <label className="flex flex-wrap items-center gap-3 rounded-2xl bg-overlay/60 px-4 py-3 text-sm text-fg">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
-              Friend
-            </span>
+          <label className="inline-flex min-h-9 items-center gap-2 rounded-full border border-default bg-elevated/80 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg">
+            <span className="text-fg-muted">Friend</span>
             <span className="sr-only">Filter by friend</span>
             <select
               value={friendFilter}
               onChange={(e) => setFriendFilter(e.target.value)}
               disabled={friendOptions.length === 0}
-              className="rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+              className="bg-transparent text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
             >
               <option value="all">All friends</option>
               {friendOptions.map((opt) => (

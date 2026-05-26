@@ -49,10 +49,16 @@ function ThemeToggle() {
   const { theme, setTheme } = useTheme();
 
   return (
+    // Tier 19 Chunk 4c — toggle stretches to its row's full width on mobile
+    // (where the Appearance card uses `flex-col` and the toggle sat as a
+    // small left-aligned pill), then collapses to its natural inline width
+    // on `sm+` where the card is `flex-row` and `justify-between` does the
+    // alignment work. Each radio button gets `flex-1 sm:flex-none` to share
+    // the stretched row evenly without breaking desktop layout.
     <div
       role="radiogroup"
       aria-label="Theme"
-      className="inline-flex items-center gap-1 rounded-2xl border border-default bg-elevated/60 p-1"
+      className="flex w-full items-center gap-1 rounded-2xl border border-default bg-elevated/60 p-1 sm:inline-flex sm:w-auto"
     >
       {OPTIONS.map(({ value, label, Icon }) => {
         const active = theme === value;
@@ -64,7 +70,7 @@ function ThemeToggle() {
             aria-checked={active}
             onClick={() => setTheme(value)}
             className={[
-              'inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:flex-none',
               active ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg',
             ].join(' ')}
           >

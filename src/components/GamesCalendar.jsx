@@ -210,14 +210,21 @@ function GamesCalendar({ byDay }) {
 
         {/* Fixed 7-cell strip with arrow buttons at the ends. Arrows page
             the visible window by ±7 days; chips share the available width
-            equally via `grid grid-cols-7`. No horizontal scroll. */}
-        <div className="mt-4 flex items-stretch gap-1.5" role="tablist" aria-label="Pick a day">
+            equally via `grid grid-cols-7`. No horizontal scroll. Tier 19
+            Chunk 4b — narrowed chip padding + scaled day-num font on mobile
+            so the day number fits on 360-px viewports without truncating the
+            border on the right side of the rightmost chip. */}
+        <div
+          className="mt-4 flex items-stretch gap-1 sm:gap-1.5"
+          role="tablist"
+          aria-label="Pick a day"
+        >
           <ArrowButton
             direction="prev"
             label="Previous 7 days"
             onClick={() => setWindowIndex((prev) => prev - 1)}
           />
-          <div className="grid flex-1 grid-cols-7 gap-1.5">
+          <div className="grid flex-1 grid-cols-7 gap-1 sm:gap-1.5">
             {days.map((day) => {
               const meta = dayMeta.get(day.key) || { count: 0, hasLive: false };
               const isSelected = day.key === selectedKey;
@@ -230,7 +237,7 @@ function GamesCalendar({ byDay }) {
                   role="tab"
                   aria-selected={isSelected}
                   onClick={() => setSelectedKey(day.key)}
-                  className={`flex min-w-0 flex-col items-center gap-0.5 rounded-2xl border px-1 py-2 text-center transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                  className={`flex min-w-0 flex-col items-center gap-0.5 rounded-2xl border px-0.5 py-2 text-center transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:px-1 ${
                     isSelected
                       ? 'border-accent bg-accent/15 text-accent'
                       : isTodayChip
@@ -241,13 +248,14 @@ function GamesCalendar({ byDay }) {
                   <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em]">
                     {isTodayChip ? 'Today' : weekday}
                   </span>
-                  <span
-                    className="text-base font-semibold tabular-nums"
-                    style={{ color: 'rgb(34, 211, 238)' }}
-                  >
+                  {/* Tier 19 Chunk 4b — was inline `style={{ color: 'rgb(34, 211, 238)' }}`
+                      (a Chunk-3 hack to bypass an alleged CSS conflict). Swapped to the
+                      tokenized `text-accent` utility so the day number tracks the active
+                      theme. Revert if the original conflict resurfaces. */}
+                  <span className="text-sm font-semibold tabular-nums text-accent sm:text-base">
                     {dayNum}
                   </span>
-                  <span className="flex h-3 items-center gap-1">
+                  <span className="flex h-3 items-center gap-0.5 sm:gap-1">
                     {meta.hasLive ? (
                       <span className="relative inline-flex h-1.5 w-1.5">
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-75" />

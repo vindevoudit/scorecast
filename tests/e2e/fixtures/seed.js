@@ -86,7 +86,7 @@ async function seedFixtures() {
       // the onboarding pattern above; UI-registered users still go through
       // the checkbox path because RegisterForm gates submit on it.
       termsAcceptedAt: now,
-      termsAcceptedVersion: 1,
+      termsAcceptedVersion: 2,
       // PWA Chunk 6 — explicit empty object so the column matches the
       // post-migration default and api/push.spec.js can rely on "no key =
       // implicitly enabled" semantics from a clean baseline.

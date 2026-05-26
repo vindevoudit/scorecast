@@ -20,7 +20,10 @@ const uuid = z.string().uuid();
 // Bumping this value re-prompts every user with an older recorded
 // version on their next sign-in — so when we change material terms,
 // just bump it.
-const CURRENT_TERMS_VERSION = 1;
+// Tier 20 Chunk 1 — bumped to 2 for the combined change set: dropped the
+// $50 liability floor from §7 and added the 13+ age line to §3 Acceptable
+// Use. Existing users re-prompted via the blocking modal on next visit.
+const CURRENT_TERMS_VERSION = 2;
 const acceptTermsSchema = z
   .object({ version: z.number().int().positive() })
   .openapi('AcceptTermsRequest');
@@ -36,6 +39,13 @@ const registerSchema = z
     // version after we bump the policy.
     acceptedTerms: z.literal(true),
     acceptedTermsVersion: z.literal(CURRENT_TERMS_VERSION),
+    // Tier 20 Chunk 1 — COPPA-style age self-attestation. Literal-validated
+    // like acceptedTerms; not persisted (existence of the registration row
+    // IS the consent record alongside termsAcceptedAt). Bumping the minimum
+    // age would require a new terms version bump to re-collect.
+    confirmedAge: z.literal(true, {
+      errorMap: () => ({ message: 'You must confirm you are at least 13 years old' }),
+    }),
   })
   .openapi('RegisterRequest');
 const loginSchema = z

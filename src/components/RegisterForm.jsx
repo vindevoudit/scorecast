@@ -16,6 +16,14 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
     setTermsChecked(next);
     setAuthData((prev) => ({ ...prev, acceptedTerms: next }));
   };
+  // Tier 20 Chunk 1 — 13+ age self-attestation. Same gating pattern as
+  // the terms checkbox; both must be ticked before Register enables.
+  const [ageChecked, setAgeChecked] = useState(Boolean(authData.confirmedAge));
+  const onToggleAge = (event) => {
+    const next = event.target.checked;
+    setAgeChecked(next);
+    setAuthData((prev) => ({ ...prev, confirmedAge: next }));
+  };
 
   return (
     <Card variant="default" className="p-8 shadow-glow">
@@ -72,6 +80,20 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
         />
         <label className="flex items-start gap-3 text-sm text-fg-muted">
           <input
+            id="register-confirm-age"
+            name="confirmedAge"
+            type="checkbox"
+            checked={ageChecked}
+            onChange={onToggleAge}
+            required
+            className="mt-1 h-4 w-4 shrink-0 rounded border-default bg-overlay/60 text-accent focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          <span>
+            I confirm I am at least 13 years old (or the minimum age required where I live).
+          </span>
+        </label>
+        <label className="flex items-start gap-3 text-sm text-fg-muted">
+          <input
             id="register-accept-terms"
             name="acceptedTerms"
             type="checkbox"
@@ -107,7 +129,7 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
           variant="secondary"
           size="lg"
           className="w-full"
-          disabled={!termsChecked}
+          disabled={!termsChecked || !ageChecked}
         >
           Register
         </Button>

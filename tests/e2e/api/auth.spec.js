@@ -51,7 +51,8 @@ test.describe('POST /api/register', () => {
         password: 'TempPassword123!',
         email: `${username}@example.test`,
         acceptedTerms: true,
-        acceptedTermsVersion: 1,
+        acceptedTermsVersion: 2,
+        confirmedAge: true,
       });
       expectShape(payload, ['user']);
       expect(payload.user.username).toBe(username);
@@ -70,7 +71,8 @@ test.describe('POST /api/register', () => {
           password: 'Whatever1234!',
           email: 'someone-new@example.test',
           acceptedTerms: true,
-          acceptedTermsVersion: 1,
+          acceptedTermsVersion: 2,
+          confirmedAge: true,
         },
       });
       expect(res.status()).toBe(400);
@@ -89,7 +91,8 @@ test.describe('POST /api/register', () => {
           password: 'Whatever1234!',
           email: USERS.alice.email,
           acceptedTerms: true,
-          acceptedTermsVersion: 1,
+          acceptedTermsVersion: 2,
+          confirmedAge: true,
         },
       });
       expect(res.status()).toBe(400);
@@ -253,7 +256,8 @@ test.describe('POST /api/auth/reset-password', () => {
           password: tempPassword,
           email: `${tempUsername}@example.test`,
           acceptedTerms: true,
-          acceptedTermsVersion: 1,
+          acceptedTermsVersion: 2,
+          confirmedAge: true,
         },
       });
       expect(res.ok()).toBe(true);

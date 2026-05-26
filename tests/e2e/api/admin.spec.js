@@ -403,7 +403,8 @@ test.describe('POST /api/admin/users/bulk', () => {
           password: 'TempBulkPw1!',
           email: `${tempUsername}@example.test`,
           acceptedTerms: true,
-          acceptedTermsVersion: 1,
+          acceptedTermsVersion: 2,
+          confirmedAge: true,
         },
       });
       const payload = await res.json();

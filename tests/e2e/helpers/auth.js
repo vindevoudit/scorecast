@@ -43,7 +43,9 @@ async function registerViaUI(page, { username, email, password }) {
   await page.locator('#register-email').fill(email);
   await page.locator('#register-password').fill(password);
   await page.locator('#register-password-confirm').fill(password);
-  // Tier 18 Chunk 6 — RegisterForm gates submit on this checkbox.
+  // Tier 18 Chunk 6 + Tier 20 Chunk 1 — RegisterForm gates submit on BOTH
+  // the 13+ age checkbox and the terms-acceptance checkbox.
+  await page.locator('#register-confirm-age').check();
   await page.locator('#register-accept-terms').check();
   await page.getByRole('button', { name: /^Register$/ }).click();
   await dismissOnboardingTour(page);

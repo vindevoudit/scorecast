@@ -58,6 +58,10 @@ function Terms() {
 
       <H2>3. Acceptable use</H2>
       <P>
+        You must be at least 13 years old to use Bantryx. Some jurisdictions require an older
+        minimum age — you are responsible for confirming the local requirement.
+      </P>
+      <P>
         You agree not to use the service to post content that is unlawful, defamatory, hateful,
         harassing, infringing, or in violation of any third party&apos;s rights. You also agree not
         to:
@@ -115,8 +119,8 @@ function Terms() {
       </P>
       <P>
         To the maximum extent permitted by law, our total liability to you for any claim arising out
-        of or relating to the service is limited to the greater of (a) the total amount you have
-        paid us in the twelve months preceding the claim, or (b) USD $50. We are not liable for
+        of or relating to the service is limited to the total amount you have paid us in the twelve
+        months preceding the claim (which, for the free tier, is zero). We are not liable for
         indirect, incidental, consequential, special, or punitive damages.
       </P>
       <P>

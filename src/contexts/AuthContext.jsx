@@ -23,6 +23,9 @@ const initialAuthData = {
   // Tier 18 Chunk 6 — RegisterForm checkbox; AuthContext.handleRegister
   // sends this + the bundled CURRENT_TERMS_VERSION on POST /api/register.
   acceptedTerms: false,
+  // Tier 20 Chunk 1 — 13+ age self-attestation. Validated server-side as
+  // literal(true) but never persisted (existence of the account = consent).
+  confirmedAge: false,
   forgotEmail: '',
   resetPassword: '',
   resetToken: '',
@@ -167,6 +170,11 @@ export function AuthProvider({ children }) {
         showStatus(termsError.message);
         throw termsError;
       }
+      if (!authData.confirmedAge) {
+        const ageError = new Error('Please confirm you are at least 13 years old to continue.');
+        showStatus(ageError.message);
+        throw ageError;
+      }
       try {
         const data = await apiFetch('/api/register', {
           method: 'POST',
@@ -176,6 +184,7 @@ export function AuthProvider({ children }) {
             email: authData.registerEmail,
             acceptedTerms: true,
             acceptedTermsVersion: CURRENT_TERMS_VERSION,
+            confirmedAge: true,
           }),
         });
         setUser(data.user);
@@ -193,6 +202,7 @@ export function AuthProvider({ children }) {
       authData.registerPasswordConfirm,
       authData.registerEmail,
       authData.acceptedTerms,
+      authData.confirmedAge,
       showStatus,
     ],
   );

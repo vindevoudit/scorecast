@@ -9,7 +9,7 @@ const compression = require('compression');
 const path = require('path');
 const pinoHttp = require('pino-http');
 
-const { initDatabase } = require('./models');
+const { initDatabase, sequelize } = require('./models');
 const logger = require('./lib/logger');
 const requestId = require('./middleware/requestId');
 const sentry = require('./lib/sentry');
@@ -248,13 +248,53 @@ app.use(errorMiddleware);
 (async () => {
   try {
     await initDatabase();
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       logger.info({ port: PORT }, `ScoreCast server is running on http://localhost:${PORT}`);
       // Tier 4b Chunk 2 — bring up cron after the HTTP listener is healthy
       // so /healthz responds immediately even if a job is mid-tick on boot.
-      // Tier 10.5 will move stop() into the SIGTERM graceful-shutdown path.
       scheduler.start();
     });
+
+    // Tier 20 Chunk 7 — graceful SIGTERM drain. Azure Container Apps
+    // sends SIGTERM with a 30s terminationGracePeriod before SIGKILL on
+    // rolling deploys / scale-in. tini (Dockerfile entrypoint) forwards
+    // the signal to the Node process. Shutdown order:
+    //   1. Stop accepting new connections (server.close).
+    //   2. Wait up to 25s for in-flight requests to complete (5s buffer
+    //      under ACA's 30s grace).
+    //   3. Stop the scheduler (kills cron ticks mid-fire — handlers are
+    //      idempotent so a partial tick recovers on the new pod).
+    //   4. Close the Sequelize pool.
+    //   5. process.exit(0).
+    // If the 25s drain times out, exit(1) so the orchestrator surfaces a
+    // failed shutdown in the deploy logs rather than silently dropping
+    // in-flight work.
+    const SHUTDOWN_DRAIN_MS = 25_000;
+    let shuttingDown = false;
+    async function gracefulShutdown(signal) {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      logger.info({ signal }, 'received shutdown signal — draining');
+      try {
+        await Promise.race([
+          new Promise((resolve, reject) => {
+            server.close((err) => (err ? reject(err) : resolve()));
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('drain timeout')), SHUTDOWN_DRAIN_MS),
+          ),
+        ]);
+        scheduler.stop();
+        await sequelize.close();
+        logger.info('graceful shutdown complete');
+        process.exit(0);
+      } catch (err) {
+        logger.error({ err }, 'forced shutdown after drain timeout or close error');
+        process.exit(1);
+      }
+    }
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   } catch (error) {
     logger.fatal({ err: error }, 'failed to initialize database');
     process.exit(1);

@@ -230,9 +230,15 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               failureThreshold: 3
             }
             {
+              // Tier 20 Chunk 7 — readiness pings DB via /readyz so the
+              // ACA load balancer pulls the replica out of rotation
+              // when the DB is unreachable (vs. the prior /healthz
+              // check which only verified the process was up).
+              // Liveness stays on /healthz so transient DB outages
+              // don't trigger container restarts.
               type: 'Readiness'
               httpGet: {
-                path: '/healthz'
+                path: '/readyz'
                 port: 3000
                 scheme: 'HTTP'
               }

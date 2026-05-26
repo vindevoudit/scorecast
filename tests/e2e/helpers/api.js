@@ -277,6 +277,19 @@ async function createAcceptedFriendship(userAId, userBId) {
   });
 }
 
+// Tier 19 Chunk 2 — creates a pending friend-request row directly.
+// Returns the new row's id so tests can assert friendshipId on the
+// `pending-in` viewer's search results.
+async function createPendingFriendship(requesterId, addresseeId) {
+  const { Friendship } = getModels();
+  const row = await Friendship.create({
+    requesterId,
+    addresseeId,
+    status: 'pending',
+  });
+  return row.id;
+}
+
 async function closeDb() {
   if (_models) {
     await _models.sequelize.close();
@@ -298,6 +311,7 @@ module.exports = {
   resetUserLockout,
   insertPasswordResetToken,
   clearFriendships,
+  createPendingFriendship,
   clearPicksAndBadges,
   clearGameResults,
   clearNotifications,

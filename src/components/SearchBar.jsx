@@ -9,6 +9,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
 import { useData } from '../hooks/useData';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { displayTeamName } from '../utils/teamNames';
 
 function formatGameDate(value) {
@@ -29,31 +30,38 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
   // association doesn't collide.
   const inputId = useId();
   const [q, setQ] = useState('');
+  const debouncedQ = useDebouncedValue(q, 250);
   const [results, setResults] = useState({ users: [], groups: [], games: [] });
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const containerRef = useRef(null);
 
+  // Tier 19 Chunk 2 — the inline `setTimeout` debounce previously here
+  // lives in `useDebouncedValue` now. Behavior preserved: fetch only fires
+  // for ≥ 2-char trimmed queries, ≥ 250 ms after the user stops typing.
   useEffect(() => {
-    const term = q.trim();
+    const term = debouncedQ.trim();
     if (term.length < 2) {
       setResults({ users: [], groups: [], games: [] });
       return undefined;
     }
     setLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const data = await request(`/api/search?q=${encodeURIComponent(term)}`);
-        setResults(data);
-      } catch (error) {
-        onError?.(error.message);
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+    request(`/api/search?q=${encodeURIComponent(term)}`)
+      .then((data) => {
+        if (!cancelled) setResults(data);
+      })
+      .catch((error) => {
+        if (!cancelled) onError?.(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [debouncedQ]);
 
   useEffect(() => {
     if (!open) return undefined;

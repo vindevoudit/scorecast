@@ -41,10 +41,20 @@ async function openGroupsTab(page) {
 }
 
 async function sendFriendRequest(page, targetUsername) {
-  // Scope to FriendsList — the same page also has a "Username" label in the
-  // Invite form for groups. The friends-list input has id="friend-username".
-  await page.locator('#friend-username').fill(targetUsername);
-  await page.getByRole('button', { name: 'Send request', exact: true }).click();
+  // Tier 19 Chunk 2 — FriendsList replaced the submit-form input with a
+  // debounced autocomplete dropdown. Flow: type → wait for matching row →
+  // click "Add friend" on that row. Input id is now `friend-search`.
+  await page.locator('#friend-search').fill(targetUsername);
+  // Wait for the result row to surface inside the dropdown panel. The row
+  // is rendered as a <li> containing the username + an Add-friend button.
+  // We scope by the `Add friend` button name + the surrounding text so
+  // we don't pick up an unrelated button elsewhere on the page.
+  const row = page
+    .locator('li')
+    .filter({ hasText: targetUsername })
+    .filter({ has: page.getByRole('button', { name: 'Add friend', exact: true }) })
+    .first();
+  await row.getByRole('button', { name: 'Add friend', exact: true }).click();
 }
 
 test('friend request accept: alice sends → bob accepts → both see each other in Friends', async ({
@@ -155,6 +165,57 @@ test('friend request decline: alice sends → bob declines → both lists clear'
     timeout: 10_000,
   });
   await verifyCtx.close();
+});
+
+test('autocomplete dropdown: per-row CTA flips Add → Request sent after sending; self shows You', async ({
+  page,
+}) => {
+  // Tier 19 Chunk 2 — exercises the new dropdown's friendStatus-driven CTA
+  // states without leaning on the full send→accept→friends flow above.
+  // Three states covered: 'self' (You, disabled), 'none' (Add friend),
+  // 'pending-out' (Request sent, disabled).
+  await loginViaUI(page, USERS.alice);
+  await openGroupsTab(page);
+
+  // 1. Search for self → the You button renders disabled.
+  await page.locator('#friend-search').fill(USERS.alice.username);
+  const selfRow = page
+    .locator('li')
+    .filter({ hasText: USERS.alice.username })
+    .filter({ has: page.getByRole('button', { name: 'You', exact: true }) })
+    .first();
+  await expect(selfRow.getByRole('button', { name: 'You', exact: true })).toBeDisabled({
+    timeout: 5_000,
+  });
+
+  // 2. Clear + search for bob → "Add friend" is enabled. Use a different
+  //    fill value first to force the debounced query to drop and re-fire.
+  await page.locator('#friend-search').fill('');
+  await page.locator('#friend-search').fill(USERS.bob.username);
+  const bobRow = page
+    .locator('li')
+    .filter({ hasText: USERS.bob.username })
+    .filter({ has: page.getByRole('button', { name: 'Add friend', exact: true }) })
+    .first();
+  const addBtn = bobRow.getByRole('button', { name: 'Add friend', exact: true });
+  await expect(addBtn).toBeEnabled({ timeout: 5_000 });
+  await addBtn.click();
+
+  // 3. After Add the dropdown closes + Outgoing section appears.
+  await expect(page.getByRole('heading', { name: 'Outgoing requests' })).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // 4. Re-search bob → CTA is now disabled "Request sent" (pending-out).
+  await page.locator('#friend-search').fill(USERS.bob.username);
+  const bobRowAfter = page
+    .locator('li')
+    .filter({ hasText: USERS.bob.username })
+    .filter({ has: page.getByRole('button', { name: 'Request sent', exact: true }) })
+    .first();
+  await expect(bobRowAfter.getByRole('button', { name: 'Request sent', exact: true })).toBeDisabled(
+    { timeout: 5_000 },
+  );
 });
 
 test('friend request cancel: alice cancels before bob acts → bob has no incoming', async ({

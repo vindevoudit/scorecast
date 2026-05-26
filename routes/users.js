@@ -12,7 +12,8 @@ const { Op } = require('sequelize');
 const { optionalAuth } = require('../middleware/optionalAuth');
 const { publicReadLimiter } = require('../middleware/rateLimit');
 const { getJoinedGroupIds } = require('../lib/groups');
-const { User, Group, Game } = require('../models');
+const { friendStatusFrom } = require('../lib/friends');
+const { User, Group, Game, Friendship } = require('../models');
 const UserService = require('../services/UserService');
 const errors = require('../lib/errors');
 
@@ -35,12 +36,48 @@ router.get('/search', publicReadLimiter, optionalAuth, async (req, res) => {
         },
         limit: 5,
       });
-      results.users = users.map((u) => ({
-        id: u.id,
-        username: u.username,
-        displayName: u.displayName || null,
-        profileVisibility: u.profileVisibility,
-      }));
+      // Tier 19 Chunk 2 — attach per-row `friendStatus` + `friendshipId`
+      // for the authed viewer in ONE batched Friendship query (no N+1).
+      // Values mirror `lib/friends.js friendStatusFrom`: 'self' / 'friends'
+      // / 'pending-out' / 'pending-in' / 'none'. Anon viewers get `null`
+      // for both — FriendsList is anon-hidden anyway, so the fields are
+      // pure UX hints for the dropdown's per-row CTA.
+      const userIds = users.map((u) => u.id);
+      let friendshipByOtherId = new Map();
+      if (viewerId && userIds.length > 0) {
+        const otherIds = userIds.filter((id) => id !== viewerId);
+        if (otherIds.length > 0) {
+          const rows = await Friendship.findAll({
+            where: {
+              [Op.or]: [
+                { requesterId: viewerId, addresseeId: { [Op.in]: otherIds } },
+                { requesterId: { [Op.in]: otherIds }, addresseeId: viewerId },
+              ],
+            },
+          });
+          for (const f of rows) {
+            const other = f.requesterId === viewerId ? f.addresseeId : f.requesterId;
+            friendshipByOtherId.set(other, f);
+          }
+        }
+      }
+      results.users = users.map((u) => {
+        const friendship = friendshipByOtherId.get(u.id) || null;
+        const friendStatus = viewerId ? friendStatusFrom(friendship, viewerId, u.id) : null;
+        // Only surface friendshipId on `pending-in` so the dropdown's
+        // Accept button can call POST /api/friends/:id/accept. Other
+        // states either don't need it (none/friends/self) or shouldn't
+        // expose it as an action (pending-out is render-only).
+        const friendshipId = friendStatus === 'pending-in' && friendship ? friendship.id : null;
+        return {
+          id: u.id,
+          username: u.username,
+          displayName: u.displayName || null,
+          profileVisibility: u.profileVisibility,
+          friendStatus,
+          friendshipId,
+        };
+      });
     }
 
     if (type === 'all' || type === 'groups') {

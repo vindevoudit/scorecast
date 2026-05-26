@@ -119,9 +119,19 @@ const cspConnectSrc = ["'self'", 'https://*.sentry.io', 'https://*.ingest.sentry
 if (process.env.NODE_ENV !== 'production') {
   cspConnectSrc.push('ws://localhost:5173', 'http://localhost:5173');
 }
+// Tier 20 Chunk 6 — SHA-256 hash of the inline JSON-LD <script> block in
+// index.html. CSP scriptSrc requires this exact hash to permit the block;
+// helmet's default `'self'` would otherwise reject it (inline scripts
+// without a hash/nonce are blocked by default). If the JSON-LD body's
+// bytes change AT ALL (any whitespace, added field, value tweak), this
+// hash must be re-computed via:
+//   node -e "const c=require('crypto');console.log('sha256-'+c.createHash('sha256').update('<exact body>').digest('base64'))"
+// The JSON-LD block in index.html is deliberately single-line for this
+// reason — easier to keep byte-stable.
+const JSON_LD_HASH = "'sha256-GhzleH2mfEY14NZF8AZ+UWxx4YN/y6+t46pWTLHVEUo='";
 const cspDirectives = {
   defaultSrc: ["'self'"],
-  scriptSrc: ["'self'"],
+  scriptSrc: ["'self'", JSON_LD_HASH],
   // Google Fonts CSS comes from fonts.googleapis.com (referenced in
   // index.html). Without this entry helmet's default styleSrc would block
   // the stylesheet and the Bebas Neue / Libre Baskerville fonts fall back

@@ -27,6 +27,44 @@
     <link rel="icon" href="/logo.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
 
+    <!-- Tier 20 Chunk 6 — canonical + Open Graph + Twitter Card tags so
+         shared links render a branded preview (image + title +
+         description) on Slack / Discord / WhatsApp / iMessage / FB /
+         LinkedIn / X. og:image is the dedicated 1200×630 PNG emitted by
+         scripts/generate-pwa-assets.mjs from public/og-template.svg. -->
+    <link rel="canonical" href="https://bantryx.com/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Bantryx" />
+    <meta property="og:title" content="Bantryx — Predict football. Climb the leaderboard." />
+    <meta
+      property="og:description"
+      content="Predict football match outcomes, climb the leaderboard, and earn badges with friends. Free to play, 13+."
+    />
+    <meta property="og:url" content="https://bantryx.com/" />
+    <meta property="og:image" content="https://bantryx.com/og-image-1200x630.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Bantryx — Predict football. Climb the leaderboard." />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Bantryx" />
+    <meta
+      name="twitter:description"
+      content="Predict football match outcomes, climb the leaderboard, and earn badges with friends. Free to play."
+    />
+    <meta name="twitter:image" content="https://bantryx.com/og-image-1200x630.png" />
+
+    <!-- Tier 20 Chunk 6 — Organization / WebApplication structured data
+         for Google's Knowledge Graph and SERP rich result. `logo` is the
+         signal Google uses to pick the favicon shown alongside the
+         search result. Inline JSON-LD is the documented format. The
+         block is intentionally formatted as a single line so the
+         SHA-256 hash is byte-stable — server.js CSP scriptSrc
+         whitelists this exact hash; ANY whitespace change here means
+         re-computing the hash in server.js. -->
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Bantryx","url":"https://bantryx.com/","applicationCategory":"GameApplication","operatingSystem":"Any (web browser)","logo":"https://bantryx.com/pwa-512x512.png","image":"https://bantryx.com/og-image-1200x630.png","description":"Predict football match outcomes, climb the leaderboard, and earn badges with friends.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

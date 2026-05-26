@@ -23,6 +23,11 @@ import pngToIco from 'png-to-ico';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = resolve(root, 'public/logo.svg');
 const svg = await readFile(sourcePath, 'utf8');
+// Tier 20 Chunk 6 — separate landscape SVG for the social-card OG image.
+// 1200×630 is the cross-platform sweet spot (FB / LinkedIn / Slack /
+// Discord / Twitter summary_large_image all render this aspect cleanly).
+const ogSourcePath = resolve(root, 'public/og-template.svg');
+const ogSvg = await readFile(ogSourcePath, 'utf8');
 
 // Wrap the mark path in a centered 70% scale group so the visible artwork
 // stays within the maskable safe zone (Android Adaptive Icon spec carves
@@ -45,11 +50,22 @@ async function writePng(target, size, svgString = svg) {
   console.log(`wrote ${target} (${size}px, ${png.length} bytes)`);
 }
 
+// Tier 20 Chunk 6 — OG image is landscape (1200×630), not square. Skip
+// the shared `writePng` helper because it derives height from the SVG's
+// own aspect ratio via fit-to-width; here we want the exact 1200px width
+// from the 1200×630 viewBox to give us 1200×630 output.
+async function writeOgImage(target) {
+  const png = await rasterize(ogSvg, 1200);
+  await writeFile(resolve(root, target), png);
+  console.log(`wrote ${target} (1200×630, ${png.length} bytes)`);
+}
+
 await writePng('public/pwa-64x64.png', 64);
 await writePng('public/pwa-192x192.png', 192);
 await writePng('public/pwa-512x512.png', 512);
 await writePng('public/apple-touch-icon-180x180.png', 180);
 await writePng('public/maskable-icon-512x512.png', 512, maskableSvg);
+await writeOgImage('public/og-image-1200x630.png');
 
 const ico = await pngToIco([await rasterize(svg, 32), await rasterize(svg, 48)]);
 await writeFile(resolve(root, 'public/favicon.ico'), ico);

@@ -113,9 +113,9 @@ function InviteRow({ groupId, onInvite }) {
       {showDropdown ? (
         <div className="absolute left-4 right-4 z-40 mt-2 rounded-3xl border border-default bg-elevated p-3 shadow-glow">
           {loading ? (
-            <p className="text-xs text-fg-subtle">Searching…</p>
+            <p className="text-xs text-fg-muted">Searching…</p>
           ) : !hasResults ? (
-            <p className="text-xs text-fg-subtle">No matches.</p>
+            <p className="text-xs text-fg-muted">No matches.</p>
           ) : (
             <ul className="space-y-1">
               {results.map((entry) => {

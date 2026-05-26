@@ -81,7 +81,7 @@ function GroupLeaderboardCard({
             ) : null}
           </div>
         ) : (
-          <p className="text-sm text-fg-subtle">No group membership found.</p>
+          <p className="text-sm text-fg-muted">No group membership found.</p>
         )}
       </div>
 

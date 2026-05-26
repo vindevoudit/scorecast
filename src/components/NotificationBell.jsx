@@ -117,7 +117,7 @@ function NotificationBell() {
           </div>
           <div ref={listRef} className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
             {items.length === 0 ? (
-              <p className="text-xs text-fg-subtle">No notifications yet.</p>
+              <p className="text-xs text-fg-muted">No notifications yet.</p>
             ) : (
               items.map((n) => (
                 <button

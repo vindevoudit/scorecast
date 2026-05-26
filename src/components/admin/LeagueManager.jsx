@@ -232,7 +232,7 @@ function LeagueManager() {
 
       <div className="mt-5 space-y-3">
         {leagues.length === 0 ? (
-          <p className="text-sm text-fg-subtle">No leagues yet.</p>
+          <p className="text-sm text-fg-muted">No leagues yet.</p>
         ) : (
           leagues.map((league) => (
             <LeagueRow

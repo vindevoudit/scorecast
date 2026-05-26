@@ -586,7 +586,7 @@ function GameManager() {
 
       <div className="mt-5 space-y-3">
         {games.length === 0 ? (
-          <p className="text-sm text-fg-subtle">No games yet.</p>
+          <p className="text-sm text-fg-muted">No games yet.</p>
         ) : (
           games.map((game) => (
             <div key={game.id} className="flex items-start gap-3">

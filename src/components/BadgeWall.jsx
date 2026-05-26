@@ -4,7 +4,7 @@ function BadgeWall({ catalog = [], earned = [] }) {
   const earnedSet = new Set(earned.map((b) => b.slug));
 
   if (!catalog.length) {
-    return <p className="text-sm text-fg-subtle">No badges defined yet.</p>;
+    return <p className="text-sm text-fg-muted">No badges defined yet.</p>;
   }
 
   return (

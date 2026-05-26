@@ -124,7 +124,7 @@ function AuditLog() {
 
       <div className="mt-5 space-y-3">
         {entries.length === 0 ? (
-          <p className="text-sm text-fg-subtle">
+          <p className="text-sm text-fg-muted">
             {loading ? 'Loading audit log…' : 'No audit entries yet.'}
           </p>
         ) : (

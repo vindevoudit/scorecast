@@ -302,7 +302,7 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
         </h3>
         <div className="mt-3 space-y-2">
           {profile.recentPicks.length === 0 ? (
-            <p className="text-sm text-fg-subtle">No picks yet.</p>
+            <p className="text-sm text-fg-muted">No picks yet.</p>
           ) : (
             profile.recentPicks.map((pick) => {
               const status = recentPickStatus(pick);

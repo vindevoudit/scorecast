@@ -421,7 +421,7 @@ function DashboardView() {
                             </select>
                           </label>
                         ) : (
-                          <p className="text-sm text-fg-subtle">
+                          <p className="text-sm text-fg-muted">
                             Join or create a group to see member rankings.
                           </p>
                         )}

@@ -129,18 +129,18 @@ function InstallPrompt() {
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-fg sm:text-base">
+        <p className="text-base font-bold text-fg sm:text-lg">
           {showIos ? 'Add Bantryx to your Home Screen' : 'Install Bantryx'}
         </p>
         {showIos ? (
-          <p className="mt-1 text-xs text-fg-muted sm:text-sm">
+          <p className="mt-1 text-sm text-fg-muted">
             Tap the <IosShareIcon className="inline h-4 w-4 align-text-bottom text-accent" /> Share
             icon in Safari, then choose{' '}
             <span className="font-medium text-fg">Add to Home Screen</span>. You'll get a
             full-screen app with push notifications.
           </p>
         ) : (
-          <p className="mt-1 text-xs text-fg-muted sm:text-sm">
+          <p className="mt-1 text-sm text-fg-muted">
             Full screen, push notifications, and one tap to open from your home screen.
           </p>
         )}

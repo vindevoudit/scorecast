@@ -176,7 +176,7 @@ function UserManager() {
 
       <div className="mt-5 space-y-2">
         {users.length === 0 ? (
-          <p className="text-sm text-fg-subtle">No users.</p>
+          <p className="text-sm text-fg-muted">No users.</p>
         ) : (
           users.map((u) => {
             const isSelf = u.id === currentUserId;

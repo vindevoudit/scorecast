@@ -184,28 +184,37 @@ function GamesCalendar({ byDay }) {
   return (
     <div className="space-y-4">
       <div className="rounded-3xl border border-default bg-elevated/80 p-4 shadow-glow">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.24em] text-fg-muted">
+        {/* Tier 20 Chunk 4 — three-column grid so the count is always
+            right-aligned and the "Back to today" pill centers between the
+            heading and the count whenever it's present. The center column
+            stays reserved (empty) when on today, keeping the heading +
+            count alignment stable. `min-w-0` on the heading + count prevents
+            the long-form fullDayLabel (e.g. "Wednesday, May 27") from
+            blowing out the layout at 360px — it truncates with ellipsis. */}
+        <div className="grid grid-cols-3 items-center gap-2">
+          <h3 className="min-w-0 truncate text-sm font-semibold uppercase tracking-[0.16em] text-fg-muted sm:tracking-[0.24em]">
             {fullDayLabel(selectedDateObj)}
-            <span className="ml-2 text-fg-subtle">
-              {selectedGames.length} {selectedGames.length === 1 ? 'game' : 'games'}
-            </span>
           </h3>
-          {selectedKey !== todayKey ? (
-            <button
-              type="button"
-              onClick={goToToday}
-              className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              {liveToday ? (
-                <span className="relative inline-flex h-2 w-2" aria-label="Live games today">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-danger" />
-                </span>
-              ) : null}
-              Back to today
-            </button>
-          ) : null}
+          <div className="flex justify-center">
+            {selectedKey !== todayKey ? (
+              <button
+                type="button"
+                onClick={goToToday}
+                className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                {liveToday ? (
+                  <span className="relative inline-flex h-2 w-2" aria-label="Live games today">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-danger" />
+                  </span>
+                ) : null}
+                Back to today
+              </button>
+            ) : null}
+          </div>
+          <span className="min-w-0 truncate text-right text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted sm:text-sm sm:tracking-[0.24em]">
+            {selectedGames.length} {selectedGames.length === 1 ? 'game' : 'games'}
+          </span>
         </div>
 
         {/* Fixed 7-cell strip with arrow buttons at the ends. Arrows page
@@ -245,7 +254,21 @@ function GamesCalendar({ byDay }) {
                         : 'border-default bg-overlay/40 text-fg-muted hover:border-strong hover:text-fg'
                   }`}
                 >
-                  <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em]">
+                  {/* Tier 20 Chunk 4 — at < 360px the 7-col grid leaves
+                      ~40px per chip, and "TODAY" with uppercase tracking
+                      eats more horizontal space than weekday labels
+                      ("SAT", "SUN") — the truncate kicked in and showed
+                      "Toda…" which read as a layout bug. Mixed-case
+                      'Today' (no uppercase + no tracking) is narrower
+                      than the uppercase 3-letter weekdays so it fits
+                      cleanly even at the tightest width, while the
+                      uppercase styling is preserved at sm+ where chips
+                      are wider. */}
+                  <span
+                    className={`truncate text-[10px] font-semibold tracking-[0.12em] ${
+                      isTodayChip ? 'normal-case' : 'uppercase'
+                    } sm:uppercase`}
+                  >
                     {isTodayChip ? 'Today' : weekday}
                   </span>
                   {/* The CSS conflict the Chunk-3 inline-style hack was guarding against

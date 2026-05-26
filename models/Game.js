@@ -108,6 +108,19 @@ module.exports = (sequelize) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // Tier 19 Chunk 5 — kickoff-time pick scoring lock. Stamped by either
+      // the `lockPickProbabilities` cron (1-min cadence) OR the in-line
+      // hook in `GameService.applyLiveUpdate` (whichever fires first when
+      // kickoff arrives). At stamp time every Pick row on this game has
+      // its three probability snapshots overwritten with the game's
+      // current values, so every pick on the game scores identically
+      // for a given choice. The PredictionService cascade is gated against
+      // locked games — once stamped, the ML can no longer rewrite this
+      // game's probabilities.
+      pickProbabilitiesLockedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {
       tableName: 'games',

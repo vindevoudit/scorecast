@@ -248,6 +248,14 @@ function PayoutMatrix({ game }) {
         <p className={`${labelClass} mt-1`}>Draw</p>
         <p className={`${valueClass} mt-1 text-right`}>{awayDrawDisplay}</p>
       </div>
+      {/* Tier 19 Chunk 5 — the payout numbers above are the model's current
+          read, NOT what the user has locked. Every pick on the same game
+          re-snaps to the game's probabilities at kickoff, so the
+          displayed payout will be what actually scores for whoever picks
+          this side — regardless of when in the week they picked. */}
+      <p className="mt-2 text-center text-[10px] font-medium normal-case tracking-normal text-fg-muted">
+        Payout locks in at kickoff.
+      </p>
     </div>
   );
 }

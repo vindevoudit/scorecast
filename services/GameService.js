@@ -397,6 +397,15 @@ async function applyLiveUpdate(localGame, apiMatch) {
     // A "transition to finished" is when we are now setting a result for
     // the first time. That's what triggers pick scoring + notifications.
     const transitionedToFinished = fresh.result === null && newResult !== null;
+    // Tier 19 Chunk 5 — kickoff-time pick scoring lock trigger. Captured
+    // here BEFORE the status assignment below, same pattern as the
+    // transitionedToFinished detection. We lock on any transition AWAY
+    // from 'scheduled' (typically into 'in-progress' but could be a direct
+    // scheduled → finished jump if upstream's first observation arrives
+    // after the match is already done) provided the game hasn't already
+    // been locked by a prior tick or the cron.
+    const transitionedOutOfScheduled =
+      fresh.status === 'scheduled' && newStatus !== 'scheduled' && !fresh.pickProbabilitiesLockedAt;
 
     fresh.status = newStatus;
     fresh.homeScore = newHomeScore;
@@ -404,6 +413,27 @@ async function applyLiveUpdate(localGame, apiMatch) {
     fresh.result = newResult;
     fresh.halfTimeReached = newHalfTimeReached;
     fresh.phase = newPhase;
+
+    // Tier 19 Chunk 5 — kickoff-time pick scoring lock (in-line variant).
+    // Rewrites every Pick's three probability snapshots to the game's
+    // current values and stamps pickProbabilitiesLockedAt. Inside the
+    // same FOR UPDATE transaction as the status flip — atomic, never a
+    // partial state where status is not-scheduled but picks aren't
+    // locked. Defense in depth with lib/jobs/lockPickProbabilities.js's
+    // 1-min cron: this path catches games whose upstream live-score
+    // signal beats the next cron tick.
+    if (transitionedOutOfScheduled) {
+      await Pick.update(
+        {
+          pickedHomeProbability: fresh.homeProbability,
+          pickedDrawProbability: fresh.drawProbability,
+          pickedAwayProbability: fresh.awayProbability,
+        },
+        { where: { gameId: fresh.id }, transaction: t },
+      );
+      fresh.pickProbabilitiesLockedAt = new Date();
+    }
+
     await fresh.save({ transaction: t });
 
     // Tier 17 — atomic Elo update on the transition-to-finished moment.

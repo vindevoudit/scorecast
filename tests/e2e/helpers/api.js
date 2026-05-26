@@ -241,6 +241,16 @@ async function updateUserFields(userId, fields) {
   await User.update(fields, { where: { id: userId }, hooks: false });
 }
 
+// Tier 19 Chunk 5 — direct game-row mutation for the lock-cron tests.
+// Bypasses GameService so we can stage states the public API rejects
+// (date in the past, pickProbabilitiesLockedAt populated manually, etc.).
+// `hooks: false` mirrors the existing setUserPassword / updateUserFields
+// pattern so beforeUpdate hooks (if any are added later) don't interfere.
+async function updateGameFields(gameId, fields) {
+  const { Game } = getModels();
+  await Game.update(fields, { where: { id: gameId }, hooks: false });
+}
+
 async function getUserId(username) {
   const { User } = getModels();
   const user = await User.findOne({ where: { username } });
@@ -324,6 +334,7 @@ module.exports = {
   clear2faForUser,
   setUserPassword,
   updateUserFields,
+  updateGameFields,
   getUserId,
   setProfileVisibility,
   createAcceptedFriendship,

@@ -264,10 +264,17 @@ async function rePredictFutureFixtures({ affectedTeams, leagueId }) {
     return { rewritten: 0, skipped: 'no model' };
   }
 
+  // Tier 19 Chunk 5 — extra guard: never rewrite a game whose pick
+  // probabilities have already been locked at kickoff. The existing
+  // `status='scheduled'` filter already covers this (lock fires on the
+  // scheduled → in-progress transition, so a locked game is by then no
+  // longer scheduled), but the paranoid `IS NULL` check makes the
+  // contract explicit and survives any future change to status semantics.
   const games = await Game.findAll({
     where: {
       leagueId,
       status: 'scheduled',
+      pickProbabilitiesLockedAt: null,
       [Op.or]: [{ homeTeam: { [Op.in]: affectedTeams } }, { awayTeam: { [Op.in]: affectedTeams } }],
     },
   });

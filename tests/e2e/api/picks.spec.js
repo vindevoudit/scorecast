@@ -16,6 +16,7 @@ const {
   createAcceptedFriendship,
   setGameResult,
   setProfileVisibility,
+  updateGameFields,
 } = require('../helpers/api');
 const {
   assertOk,
@@ -255,7 +256,15 @@ test.describe('GET /api/picks/friends', () => {
     } finally {
       await bob.dispose();
     }
-    await setGameResult(GAMES.lions.id, 'home');
+    // setGameResult signature requires an admin client as the first arg —
+    // this call was shipped missing it (commit fde76b9 Tier 18 Chunk 4),
+    // making the test fail with `authed.post is not a function`. Fixed here.
+    const admin = await apiLogin(USERS.admin);
+    try {
+      await setGameResult(admin, GAMES.lions.id, 'home');
+    } finally {
+      await admin.dispose();
+    }
     const alice = await apiLogin(USERS.alice);
     try {
       const payload = await assertOk(alice, 'GET', '/api/picks/friends');
@@ -405,5 +414,169 @@ test.describe('DELETE /api/picks/:id', () => {
     } finally {
       await authed.dispose();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 19 Chunk 5 — kickoff-time pick scoring lock
+//
+// Covers the three lock invariants (idempotency, no-op on already-locked,
+// correct probability copy across multiple picks) by invoking the cron's
+// `run()` directly. The cron uses the same Sequelize connection as the
+// helpers, so calling it from inside the test process drives the same code
+// path the scheduler would.
+// ---------------------------------------------------------------------------
+
+test.describe('lockPickProbabilities (kickoff-time pick scoring lock)', () => {
+  // Restore lions after EVERY test in this block. The block mutates date
+  // into the past, status, pickProbabilitiesLockedAt, and probabilities —
+  // any of which would leak into later specs (workers:1 shares state).
+  const lionsBaseline = {
+    date: GAMES.lions.date,
+    homeProbability: GAMES.lions.homeProbability,
+    drawProbability: 0,
+    awayProbability: GAMES.lions.awayProbability,
+    status: 'scheduled',
+    pickProbabilitiesLockedAt: null,
+    result: null,
+  };
+
+  test.beforeEach(async () => {
+    await updateGameFields(GAMES.lions.id, lionsBaseline);
+    await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
+  });
+
+  test.afterEach(async () => {
+    await updateGameFields(GAMES.lions.id, lionsBaseline);
+    await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
+  });
+
+  test('two picks at different odds end up with identical snapshots after lock', async () => {
+    // Alice picks at home=0.5 / away=0.5 (the baseline).
+    const aliceClient = await apiLogin(USERS.alice);
+    try {
+      await assertOk(aliceClient, 'POST', '/api/picks', {
+        gameId: GAMES.lions.id,
+        choice: 'home',
+      });
+    } finally {
+      await aliceClient.dispose();
+    }
+
+    // Admin moves the model's odds (simulating a cascade rewrite).
+    await updateGameFields(GAMES.lions.id, {
+      homeProbability: 0.7,
+      drawProbability: 0,
+      awayProbability: 0.3,
+    });
+
+    // Bob picks at the new odds.
+    const bobClient = await apiLogin(USERS.bob);
+    try {
+      await assertOk(bobClient, 'POST', '/api/picks', {
+        gameId: GAMES.lions.id,
+        choice: 'away',
+      });
+    } finally {
+      await bobClient.dispose();
+    }
+
+    // Move kickoff into the past — eligible for the lock cron.
+    await updateGameFields(GAMES.lions.id, { date: new Date(Date.now() - 60 * 1000) });
+
+    const lockJob = require('../../../lib/jobs/lockPickProbabilities');
+    const result = await lockJob.run();
+    expect(result.locked).toBe(1);
+    expect(result.totalPicksRewritten).toBe(2);
+
+    // Both picks now reflect the game's current probabilities — alice's
+    // 0.5/0.5 snapshot has been overwritten with the same 0.7/0.3 that bob
+    // picked at. Same choice now scores identically regardless of pick time.
+    const aliceList = await (async () => {
+      const c = await apiLogin(USERS.alice);
+      try {
+        return await assertOk(c, 'GET', '/api/picks');
+      } finally {
+        await c.dispose();
+      }
+    })();
+    const alicePick = aliceList.find((p) => p.gameId === GAMES.lions.id);
+    expect(parseFloat(alicePick.pickedHomeProbability)).toBeCloseTo(0.7, 2);
+    expect(parseFloat(alicePick.pickedAwayProbability)).toBeCloseTo(0.3, 2);
+
+    const bobList = await (async () => {
+      const c = await apiLogin(USERS.bob);
+      try {
+        return await assertOk(c, 'GET', '/api/picks');
+      } finally {
+        await c.dispose();
+      }
+    })();
+    const bobPick = bobList.find((p) => p.gameId === GAMES.lions.id);
+    expect(parseFloat(bobPick.pickedHomeProbability)).toBeCloseTo(0.7, 2);
+    expect(parseFloat(bobPick.pickedAwayProbability)).toBeCloseTo(0.3, 2);
+  });
+
+  test('running twice in a row is a no-op on the second run', async () => {
+    await createPick(await apiLogin(USERS.alice), GAMES.lions.id, 'home');
+    await updateGameFields(GAMES.lions.id, { date: new Date(Date.now() - 60 * 1000) });
+
+    const lockJob = require('../../../lib/jobs/lockPickProbabilities');
+    const first = await lockJob.run();
+    expect(first.locked).toBe(1);
+
+    // Second run: the WHERE clause filters out already-locked games, so
+    // the cost-gate short-circuits and `locked` is 0 / `skipped: true`.
+    const second = await lockJob.run();
+    expect(second.skipped).toBe(true);
+    expect(second.reason).toBe('no-relevant-games');
+  });
+
+  test('no-op when game is already locked, even if probabilities later change', async () => {
+    // Alice picks, the game gets manually locked with a stale snapshot,
+    // THEN the admin moves probabilities. The cron must not re-lock —
+    // the original snapshot has to stand because the contract is "locked
+    // is locked." This is the cascade-guard cousin: once locked, no further
+    // probability churn can leak through.
+    const aliceClient = await apiLogin(USERS.alice);
+    try {
+      await assertOk(aliceClient, 'POST', '/api/picks', {
+        gameId: GAMES.lions.id,
+        choice: 'home',
+      });
+    } finally {
+      await aliceClient.dispose();
+    }
+
+    await updateGameFields(GAMES.lions.id, {
+      pickProbabilitiesLockedAt: new Date(),
+      date: new Date(Date.now() - 60 * 1000),
+    });
+
+    // Move probabilities after the lock stamp — simulates a (forbidden,
+    // but possible if the cascade guard ever broke) post-lock cascade.
+    await updateGameFields(GAMES.lions.id, {
+      homeProbability: 0.9,
+      drawProbability: 0,
+      awayProbability: 0.1,
+    });
+
+    const lockJob = require('../../../lib/jobs/lockPickProbabilities');
+    const result = await lockJob.run();
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('no-relevant-games');
+
+    // Alice's snapshot stayed at the original 0.5/0.5 from pick time.
+    const list = await (async () => {
+      const c = await apiLogin(USERS.alice);
+      try {
+        return await assertOk(c, 'GET', '/api/picks');
+      } finally {
+        await c.dispose();
+      }
+    })();
+    const pick = list.find((p) => p.gameId === GAMES.lions.id);
+    expect(parseFloat(pick.pickedHomeProbability)).toBeCloseTo(0.5, 2);
+    expect(parseFloat(pick.pickedAwayProbability)).toBeCloseTo(0.5, 2);
   });
 });

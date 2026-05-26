@@ -44,6 +44,7 @@ const syncFixturesJob = require('./lib/jobs/syncFixtures');
 const syncLiveScoresJob = require('./lib/jobs/syncLiveScores');
 const reconcileInProgressGamesJob = require('./lib/jobs/reconcileInProgressGames');
 const sendKickoffRemindersJob = require('./lib/jobs/sendKickoffReminders');
+const lockPickProbabilitiesJob = require('./lib/jobs/lockPickProbabilities');
 const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
 // Tier 18 Chunk 2 — 30 s live poll (was every minute). Sits comfortably in
 // the 20 req/min TIER_ONE budget (~2 req/min steady state for the global
@@ -58,6 +59,10 @@ const IN_PROGRESS_RECONCILE_CRON = process.env.IN_PROGRESS_RECONCILE_CRON || '*/
 // 'kickoff-reminder' to every user with a pick on a game kicking off in the
 // next 15-30 min. games.kickoffReminderSentAt dedups across ticks.
 const KICKOFF_REMINDER_CRON = process.env.KICKOFF_REMINDER_CRON || '*/15 * * * *';
+// Tier 19 Chunk 5 — every 1 min, locks pick probability snapshots on any
+// scheduled game whose kickoff has passed. Cost-gated by a count() short-
+// circuit, so off-season ticks are near-free.
+const LOCK_PICK_PROBABILITIES_CRON = process.env.LOCK_PICK_PROBABILITIES_CRON || '* * * * *';
 scheduler.register('syncFixtures', FIXTURE_SYNC_CRON, syncFixturesJob.run);
 scheduler.register('syncLiveScores', LIVE_SCORE_SYNC_CRON, syncLiveScoresJob.run);
 scheduler.register(
@@ -66,6 +71,11 @@ scheduler.register(
   reconcileInProgressGamesJob.run,
 );
 scheduler.register('sendKickoffReminders', KICKOFF_REMINDER_CRON, sendKickoffRemindersJob.run);
+scheduler.register(
+  'lockPickProbabilities',
+  LOCK_PICK_PROBABILITIES_CRON,
+  lockPickProbabilitiesJob.run,
+);
 
 const PORT = process.env.PORT || 3000;
 

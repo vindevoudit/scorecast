@@ -248,11 +248,16 @@ function GamesCalendar({ byDay }) {
                   <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em]">
                     {isTodayChip ? 'Today' : weekday}
                   </span>
-                  {/* Tier 19 Chunk 4b — was inline `style={{ color: 'rgb(34, 211, 238)' }}`
-                      (a Chunk-3 hack to bypass an alleged CSS conflict). Swapped to the
-                      tokenized `text-accent` utility so the day number tracks the active
-                      theme. Revert if the original conflict resurfaces. */}
-                  <span className="text-sm font-semibold tabular-nums text-accent sm:text-base">
+                  {/* The CSS conflict the Chunk-3 inline-style hack was guarding against
+                      DID resurface (intermittently, after Chunk 4b swapped to `text-accent`).
+                      Restoring the inline style for highest-specificity guarantee, but
+                      using `rgb(var(--c-accent))` so the day number still tracks the active
+                      theme (the original hardcoded `rgb(34, 211, 238)` would have looked
+                      wrong in light mode). */}
+                  <span
+                    className="text-sm font-semibold tabular-nums sm:text-base"
+                    style={{ color: 'rgb(var(--c-accent))' }}
+                  >
                     {dayNum}
                   </span>
                   <span className="flex h-3 items-center gap-0.5 sm:gap-1">

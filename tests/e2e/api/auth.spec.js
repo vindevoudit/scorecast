@@ -50,6 +50,8 @@ test.describe('POST /api/register', () => {
         username,
         password: 'TempPassword123!',
         email: `${username}@example.test`,
+        acceptedTerms: true,
+        acceptedTermsVersion: 1,
       });
       expectShape(payload, ['user']);
       expect(payload.user.username).toBe(username);
@@ -67,6 +69,8 @@ test.describe('POST /api/register', () => {
           username: USERS.alice.username,
           password: 'Whatever1234!',
           email: 'someone-new@example.test',
+          acceptedTerms: true,
+          acceptedTermsVersion: 1,
         },
       });
       expect(res.status()).toBe(400);
@@ -80,7 +84,13 @@ test.describe('POST /api/register', () => {
     const anon = await apiAnon();
     try {
       const res = await anon.post('/api/register', {
-        data: { username, password: 'Whatever1234!', email: USERS.alice.email },
+        data: {
+          username,
+          password: 'Whatever1234!',
+          email: USERS.alice.email,
+          acceptedTerms: true,
+          acceptedTermsVersion: 1,
+        },
       });
       expect(res.status()).toBe(400);
     } finally {
@@ -242,6 +252,8 @@ test.describe('POST /api/auth/reset-password', () => {
           username: tempUsername,
           password: tempPassword,
           email: `${tempUsername}@example.test`,
+          acceptedTerms: true,
+          acceptedTermsVersion: 1,
         },
       });
       expect(res.ok()).toBe(true);

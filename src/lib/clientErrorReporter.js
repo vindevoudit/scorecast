@@ -35,7 +35,13 @@ function notifyUI(error) {
   try {
     window.dispatchEvent(
       new CustomEvent('scorecast:client-error', {
-        detail: { message: error?.message || 'unknown' },
+        detail: {
+          message: error?.message || 'unknown',
+          // Tier 18 Chunk 6 — true when the throwing code path already
+          // surfaced a user-facing message (4xx responses via useRequest).
+          // NotificationContext suppresses the generic toast in that case.
+          wasHandled: Boolean(error?.wasHandled),
+        },
       }),
     );
   } catch (_) {
@@ -44,6 +50,11 @@ function notifyUI(error) {
 }
 
 export async function reportClientError(error) {
+  // Tier 18 Chunk 6 — 4xx responses carry their own user-facing message
+  // and don't represent a code bug. Skip both the toast AND the
+  // server-side POST: it'd just be log noise for normal request
+  // failures (invalid credentials, validation, etc.).
+  if (error?.wasHandled) return;
   if (!withinThrottle()) return;
   notifyUI(error);
   try {

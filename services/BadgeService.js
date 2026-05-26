@@ -23,6 +23,7 @@ async function awardBadge(userId, slug) {
       'badge',
       `Badge earned: ${meta?.name || slug}`,
       meta?.description || null,
+      '/?view=profile',
     );
     return true;
   } catch (_error) {

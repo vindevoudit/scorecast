@@ -88,10 +88,18 @@ function AuthView() {
   // Wrap the three auth flows that produce a session so the dashboard
   // fetch runs immediately after a successful login/register/2fa.
   const handleLogin = async (event) => {
-    const result = await authLogin(event);
-    if (result?.user) {
-      markReturning();
-      await loadDashboard().catch(() => {});
+    try {
+      const result = await authLogin(event);
+      if (result?.user) {
+        markReturning();
+        await loadDashboard().catch(() => {});
+      }
+    } catch {
+      // AuthContext.handleLogin already surfaced the real message via
+      // showStatus before re-throwing. Swallow here so the rejection
+      // never becomes an unhandled promise → clientErrorReporter would
+      // otherwise clobber the banner with the generic "Something went
+      // wrong" toast (the documented Tier 5.5b race).
     }
   };
 

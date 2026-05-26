@@ -45,6 +45,7 @@ router.post(
         'friend-request',
         `${requester.username} sent you a friend request`,
         'Open Groups → Friends to accept or decline.',
+        '/?view=groups',
       ).catch(() => {});
       res.json({ success: true, friendship });
     } catch (error) {
@@ -70,6 +71,8 @@ router.post('/friends/:id/accept', authMiddleware, async (req, res) => {
       friendship.requesterId,
       'friend-request',
       `${accepter.username} accepted your friend request`,
+      null,
+      '/?view=groups',
     ).catch(() => {});
 
     res.json({ success: true });

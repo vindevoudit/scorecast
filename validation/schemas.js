@@ -13,7 +13,31 @@ const password = z.string().min(8).max(200);
 const email = z.string().trim().toLowerCase().email().max(254);
 const uuid = z.string().uuid();
 
-const registerSchema = z.object({ username, password, email }).openapi('RegisterRequest');
+// Tier 18 Chunk 6 — Terms of Service acceptance.
+//
+// CURRENT_TERMS_VERSION is the integer version of the Terms + Privacy
+// Policy a user must agree to. Stored on users.termsAcceptedVersion.
+// Bumping this value re-prompts every user with an older recorded
+// version on their next sign-in — so when we change material terms,
+// just bump it.
+const CURRENT_TERMS_VERSION = 1;
+const acceptTermsSchema = z
+  .object({ version: z.number().int().positive() })
+  .openapi('AcceptTermsRequest');
+
+const registerSchema = z
+  .object({
+    username,
+    password,
+    email,
+    // Frontend RegisterForm gates submit on the checkbox; this is the
+    // server-side enforcement. Must be literal `true` AND match the current
+    // version — protects against a stale frontend bundle that posts an old
+    // version after we bump the policy.
+    acceptedTerms: z.literal(true),
+    acceptedTermsVersion: z.literal(CURRENT_TERMS_VERSION),
+  })
+  .openapi('RegisterRequest');
 const loginSchema = z
   .object({ username, password: z.string().min(1).max(200) })
   .openapi('LoginRequest');
@@ -287,6 +311,8 @@ module.exports = {
   pushUnsubscribeSchema,
   pushPreferencesSchema,
   PUSH_NOTIFICATION_TYPES,
+  CURRENT_TERMS_VERSION,
+  acceptTermsSchema,
   createGroupSchema,
   inviteSchema,
   pickSchema,

@@ -11,11 +11,17 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useAuth } from './AuthContext';
 import { useNotifications } from './NotificationContext';
 import { useRequest } from '../hooks/useRequest';
+import { dayKey } from '../hooks/useGames';
 
 const DataContext = createContext(null);
 
 const emptyLeaderboard = { overall: [], group: [], groupMeta: null };
 const emptyFriends = { friends: [], incoming: [], outgoing: [] };
+
+// Tier 18 Chunk 6 — notification deep-link guards. Module-scope so the
+// memoized consumeDeepLinks callback stays referentially stable.
+const DEEP_LINK_ALLOWED_VIEWS = ['games', 'mypicks', 'groups', 'leaderboard', 'profile', 'admin'];
+const DEEP_LINK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function DataProvider({ children }) {
   const { user, setUser } = useAuth();
@@ -91,7 +97,9 @@ export function DataProvider({ children }) {
       if (filters.seasonId) params.set('seasonId', filters.seasonId);
       const qs = params.toString() ? `?${params.toString()}` : '';
       const data = await request(`/api/games${qs}`);
-      setGames(data.sort((a, b) => new Date(a.date) - new Date(b.date)));
+      const sorted = data.sort((a, b) => new Date(a.date) - new Date(b.date));
+      setGames(sorted);
+      return sorted;
     },
     [request, gameFilters],
   );
@@ -204,7 +212,7 @@ export function DataProvider({ children }) {
       const { pendingInvites: invites, ...userData } = me;
       setUser(userData);
       setPendingInvites(invites || []);
-      await refreshGames();
+      const gamesData = await refreshGames();
       const groupData = await refreshGroups();
       const initialGroupId =
         selectedGroupId && groupData.some((g) => g.id === selectedGroupId)
@@ -218,6 +226,7 @@ export function DataProvider({ children }) {
         refreshFriends(),
         refreshDiscover(),
       ]);
+      return { games: gamesData, groups: groupData };
     } finally {
       setLoading(false);
     }
@@ -238,16 +247,71 @@ export function DataProvider({ children }) {
   const loadAnonDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([refreshGames(), refreshLeaderboard(''), refreshDiscover()]);
+      const [gamesData] = await Promise.all([
+        refreshGames(),
+        refreshLeaderboard(''),
+        refreshDiscover(),
+      ]);
+      return { games: gamesData };
     } finally {
       setLoading(false);
     }
   }, [refreshGames, refreshLeaderboard, refreshDiscover]);
 
+  // Tier 18 Chunk 6 — notification deep-link consumer. Runs ONCE between the
+  // initial data load and `bootDone` flipping true, so GamesCalendar reads
+  // the synthetic `?date=` we may write here on its very first mount. We
+  // support three params:
+  //   ?view=games|mypicks|groups|leaderboard|profile  → switch tab
+  //   ?gameId=<uuid>                                  → switch to games tab,
+  //                                                     write `?date=` for
+  //                                                     that game's day
+  //   ?groupId=<uuid>                                 → switch to groups tab,
+  //                                                     pre-select the group
+  // Consumed params are stripped via history.replaceState so a refresh
+  // doesn't re-fire the side effects.
+  const consumeDeepLinks = useCallback((gamesList) => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get('view');
+    const gameIdParam = params.get('gameId');
+    const groupIdParam = params.get('groupId');
+    if (!viewParam && !gameIdParam && !groupIdParam) return;
+
+    let viewToSet = null;
+    if (viewParam && DEEP_LINK_ALLOWED_VIEWS.includes(viewParam)) viewToSet = viewParam;
+
+    if (gameIdParam && DEEP_LINK_UUID_RE.test(gameIdParam)) {
+      const game = (gamesList || []).find((g) => g.id === gameIdParam);
+      if (game) {
+        const targetKey = dayKey(new Date(game.date));
+        const todayKey = dayKey(new Date());
+        if (targetKey === todayKey) params.delete('date');
+        else params.set('date', targetKey);
+      }
+      if (!viewToSet) viewToSet = 'games';
+    }
+
+    if (groupIdParam && DEEP_LINK_UUID_RE.test(groupIdParam)) {
+      setSelectedGroupId(groupIdParam);
+      if (!viewToSet) viewToSet = 'groups';
+    }
+
+    if (viewToSet) setView(viewToSet);
+
+    params.delete('view');
+    params.delete('gameId');
+    params.delete('groupId');
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', next);
+  }, []);
+
   // Initial boot. Try the authed path first; on 401 (no session) fall back to
   // the anonymous path so visitors land on a populated browse-mode dashboard.
   useEffect(() => {
     loadDashboard()
+      .then((result) => consumeDeepLinks(result?.games))
       .catch(async (error) => {
         if (
           error.status === 401 ||
@@ -255,7 +319,8 @@ export function DataProvider({ children }) {
           error.message === 'Authentication required'
         ) {
           try {
-            await loadAnonDashboard();
+            const anonResult = await loadAnonDashboard();
+            consumeDeepLinks(anonResult?.games);
           } catch (anonError) {
             if (anonError.message !== 'Session expired') showStatus(anonError.message);
           }

@@ -142,6 +142,7 @@ async function invite({ groupId, inviterId, username }) {
     'invite',
     `You were invited to "${group.name}"`,
     'Open the Groups tab to accept or decline.',
+    `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
   return getGroupById(groupId);
 }
@@ -167,6 +168,8 @@ async function acceptInvite({ groupId, inviteId, userId }) {
       group.ownerId,
       'group-join',
       `${user.username} joined "${group.name}"`,
+      null,
+      `/?view=groups&groupId=${groupId}`,
     ).catch(() => {});
   }
   LeaderboardService.invalidatePrefix(`group:${groupId}`);
@@ -199,6 +202,8 @@ async function joinPublic({ groupId, userId }) {
       group.ownerId,
       'group-join',
       `${joiner.username} joined "${group.name}"`,
+      null,
+      `/?view=groups&groupId=${groupId}`,
     ).catch(() => {});
   }
   return getGroupById(groupId);
@@ -219,6 +224,8 @@ async function leave({ groupId, userId }) {
     group.ownerId,
     'group-join',
     `${leaver.username} left "${group.name}"`,
+    null,
+    `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
 }
 
@@ -242,6 +249,8 @@ async function transferOwnership({ groupId, currentOwnerId, newOwnerId }) {
     newOwner.id,
     'group-join',
     `You are now the owner of "${group.name}"`,
+    null,
+    `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
   return getGroupById(groupId);
 }
@@ -261,10 +270,13 @@ async function deleteGroup({ groupId, requesterId }) {
   LeaderboardService.invalidatePrefix(`group:${groupId}`);
 
   for (const memberId of memberIds) {
+    // Group is gone; deep-link to the groups tab only (no groupId).
     NotificationService.notify(
       memberId,
       'group-join',
       `Group "${groupName}" was deleted by the owner`,
+      null,
+      '/?view=groups',
     ).catch(() => {});
   }
 }

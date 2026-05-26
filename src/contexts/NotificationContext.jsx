@@ -86,7 +86,13 @@ export function NotificationProvider({ children }) {
   );
 
   useEffect(() => {
-    const handler = () => {
+    const handler = (event) => {
+      // Tier 18 Chunk 6 — skip the generic toast for errors that the
+      // throwing code path already surfaced (4xx responses via
+      // useRequest). clientErrorReporter normally suppresses these
+      // upstream; this is a second-line guard for the future case
+      // where an unhandled rejection still carries the flag.
+      if (event?.detail?.wasHandled) return;
       notify({
         description: 'Something went wrong — refresh if things look off.',
         tone: 'danger',

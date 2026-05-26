@@ -97,6 +97,20 @@ module.exports = (sequelize) => {
         allowNull: false,
         defaultValue: {},
       },
+      termsAcceptedAt: {
+        // Tier 18 Chunk 6 — null until the user accepts the Terms + Privacy
+        // Policy. New registrations stamp it on create; existing users get a
+        // blocking modal on next sign-in.
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      termsAcceptedVersion: {
+        // Tier 18 Chunk 6 — compares against the app-defined
+        // CURRENT_TERMS_VERSION (validation/schemas.js). Bumping the
+        // constant triggers a re-prompt for everyone with an older value.
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,

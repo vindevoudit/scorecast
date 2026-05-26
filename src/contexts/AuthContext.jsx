@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { apiFetch } from '../lib/apiClient';
 import { useNotifications } from './NotificationContext';
+import { CURRENT_TERMS_VERSION } from '../lib/terms';
 
 const initialAuthData = {
   loginUsername: '',
@@ -19,6 +20,9 @@ const initialAuthData = {
   registerPassword: '',
   registerPasswordConfirm: '',
   registerEmail: '',
+  // Tier 18 Chunk 6 — RegisterForm checkbox; AuthContext.handleRegister
+  // sends this + the bundled CURRENT_TERMS_VERSION on POST /api/register.
+  acceptedTerms: false,
   forgotEmail: '',
   resetPassword: '',
   resetToken: '',
@@ -151,6 +155,13 @@ export function AuthProvider({ children }) {
         showStatus(mismatchError.message);
         throw mismatchError;
       }
+      if (!authData.acceptedTerms) {
+        const termsError = new Error(
+          'Please accept the Terms of Service and Privacy Policy to continue.',
+        );
+        showStatus(termsError.message);
+        throw termsError;
+      }
       try {
         const data = await apiFetch('/api/register', {
           method: 'POST',
@@ -158,6 +169,8 @@ export function AuthProvider({ children }) {
             username: authData.registerUsername,
             password: authData.registerPassword,
             email: authData.registerEmail,
+            acceptedTerms: true,
+            acceptedTermsVersion: CURRENT_TERMS_VERSION,
           }),
         });
         setUser(data.user);
@@ -174,6 +187,7 @@ export function AuthProvider({ children }) {
       authData.registerPassword,
       authData.registerPasswordConfirm,
       authData.registerEmail,
+      authData.acceptedTerms,
       showStatus,
     ],
   );

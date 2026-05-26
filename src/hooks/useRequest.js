@@ -8,6 +8,19 @@ import { setLastRequestId } from '../lib/clientErrorReporter';
 import { getCookie } from '../lib/cookies';
 import { useAuth } from '../contexts/AuthContext';
 
+// Tier 18 Chunk 6 — wrap server error codes that surface as cryptic
+// machine-readable strings into one-sentence user-facing copy. Returns
+// the original message if it doesn't match a known code (so plain
+// human-readable errors pass through unchanged).
+const FRIENDLY_ERROR_CODES = {
+  football_api_rate_limit: 'Live scores are catching up — try again in a moment.',
+  rate_limited: 'Too many requests — slow down for a moment and try again.',
+};
+function friendlyMessage(raw) {
+  if (typeof raw !== 'string') return raw;
+  return FRIENDLY_ERROR_CODES[raw] || raw;
+}
+
 export function useRequest() {
   const { user, clearSession } = useAuth();
   const userRef = useRef(user);
@@ -77,8 +90,14 @@ export function useRequest() {
           typeof errField === 'string'
             ? errField
             : (errField && errField.message) || 'Request failed';
-        const err = new Error(msg);
+        const err = new Error(friendlyMessage(msg));
         err.reqId = reqId;
+        err.status = response.status;
+        // Tier 18 Chunk 6 — flag so clientErrorReporter skips the generic
+        // "Something went wrong" toast for 4xx responses. The thrower
+        // already has a user-facing message (`msg`); the caller will
+        // showStatus() it themselves.
+        err.wasHandled = true;
         throw err;
       }
       return data;

@@ -402,6 +402,8 @@ test.describe('POST /api/admin/users/bulk', () => {
           username: tempUsername,
           password: 'TempBulkPw1!',
           email: `${tempUsername}@example.test`,
+          acceptedTerms: true,
+          acceptedTermsVersion: 1,
         },
       });
       const payload = await res.json();

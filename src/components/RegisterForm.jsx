@@ -1,11 +1,21 @@
 // Tier 11 Chunk 2 — RegisterForm migrated. ids preserved for Playwright.
 
+import { useState } from 'react';
 import { Button, Card, Input, PasswordInput } from './ui';
 
 function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError }) {
   const mismatch =
     authData.registerPasswordConfirm.length > 0 &&
     authData.registerPassword !== authData.registerPasswordConfirm;
+  // Tier 18 Chunk 6 — Terms acceptance checkbox. Submit is gated on it
+  // being checked; the actual value is wired into AuthContext.handleRegister
+  // via the `acceptedTerms` slot on authData.
+  const [termsChecked, setTermsChecked] = useState(Boolean(authData.acceptedTerms));
+  const onToggleTerms = (event) => {
+    const next = event.target.checked;
+    setTermsChecked(next);
+    setAuthData((prev) => ({ ...prev, acceptedTerms: next }));
+  };
 
   return (
     <Card variant="default" className="p-8 shadow-glow">
@@ -60,7 +70,45 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
           }
           error={mismatch ? 'Passwords do not match' : undefined}
         />
-        <Button type="submit" variant="secondary" size="lg" className="w-full">
+        <label className="flex items-start gap-3 text-sm text-fg-muted">
+          <input
+            id="register-accept-terms"
+            name="acceptedTerms"
+            type="checkbox"
+            checked={termsChecked}
+            onChange={onToggleTerms}
+            required
+            className="mt-1 h-4 w-4 shrink-0 rounded border-default bg-overlay/60 text-accent focus-visible:ring-2 focus-visible:ring-accent"
+          />
+          <span>
+            I have read and agree to the{' '}
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline hover:text-accent-soft"
+            >
+              Terms of Service
+            </a>{' '}
+            and the{' '}
+            <a
+              href="/privacy"
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline hover:text-accent-soft"
+            >
+              Privacy Policy
+            </a>
+            .
+          </span>
+        </label>
+        <Button
+          type="submit"
+          variant="secondary"
+          size="lg"
+          className="w-full"
+          disabled={!termsChecked}
+        >
           Register
         </Button>
       </form>

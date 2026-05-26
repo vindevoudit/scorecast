@@ -59,7 +59,7 @@ const router = express.Router();
 const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10);
 
 router.post('/register', registerLimiter, validate(registerSchema), async (req, res) => {
-  const { username, password, email: emailAddress } = req.body;
+  const { username, password, email: emailAddress, acceptedTermsVersion } = req.body;
 
   const existingUser = await getUserByUsername(username);
   if (existingUser) {
@@ -74,7 +74,16 @@ router.post('/register', registerLimiter, validate(registerSchema), async (req, 
   }
 
   try {
-    const newUser = await User.create({ username, password, email: emailAddress });
+    // Tier 18 Chunk 6 — stamp terms acceptance at create so new users
+    // never see the blocking TermsAcceptanceModal on first dashboard load.
+    // Schema already gated on the literal `true` + current version.
+    const newUser = await User.create({
+      username,
+      password,
+      email: emailAddress,
+      termsAcceptedAt: new Date(),
+      termsAcceptedVersion: acceptedTermsVersion,
+    });
     sendVerificationEmail(newUser).catch((err) => {
       req.log.warn({ err: err.message, userId: newUser.id }, 'failed to send verification email');
     });

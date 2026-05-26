@@ -43,6 +43,8 @@ async function registerViaUI(page, { username, email, password }) {
   await page.locator('#register-email').fill(email);
   await page.locator('#register-password').fill(password);
   await page.locator('#register-password-confirm').fill(password);
+  // Tier 18 Chunk 6 — RegisterForm gates submit on this checkbox.
+  await page.locator('#register-accept-terms').check();
   await page.getByRole('button', { name: /^Register$/ }).click();
   await dismissOnboardingTour(page);
   await expect(page.getByRole('tab', { name: DASHBOARD_SENTINEL }).first()).toBeVisible({

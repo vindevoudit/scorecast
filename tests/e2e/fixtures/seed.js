@@ -81,6 +81,12 @@ async function seedFixtures() {
       // users in tests (e.g. pick-and-result.spec.js) still hit the tour
       // because they're created at runtime without this flag.
       onboardingCompletedAt: now,
+      // Tier 18 Chunk 6 — pre-accept Terms for seed users so the blocking
+      // <TermsAcceptanceModal /> doesn't block existing E2E flows. Mirrors
+      // the onboarding pattern above; UI-registered users still go through
+      // the checkbox path because RegisterForm gates submit on it.
+      termsAcceptedAt: now,
+      termsAcceptedVersion: 1,
       // PWA Chunk 6 — explicit empty object so the column matches the
       // post-migration default and api/push.spec.js can rely on "no key =
       // implicitly enabled" semantics from a clean baseline.

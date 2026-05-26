@@ -188,6 +188,8 @@ async function setResult(gameId, result) {
         pick.userId,
         'pick-scored',
         pickResultTitle(pick, game, result, points),
+        null,
+        `/?gameId=${game.id}`,
       ).catch(() => {});
       BadgeService.evaluateBadges(pick.userId).catch(() => {});
     }
@@ -251,6 +253,8 @@ async function bulkSetResult(ids, result) {
           pick.userId,
           'pick-scored',
           pickResultTitle(pick, game, result, points),
+          null,
+          `/?gameId=${game.id}`,
         ).catch(() => {});
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }
@@ -423,6 +427,8 @@ async function applyLiveUpdate(localGame, apiMatch) {
           pick.userId,
           'pick-scored',
           pickResultTitle(pick, tx.game, tx.newResult, points),
+          null,
+          `/?gameId=${tx.game.id}`,
         ).catch(() => {});
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }

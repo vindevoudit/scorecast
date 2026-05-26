@@ -17,6 +17,8 @@ const {
   totpVerifySchema,
   editProfileSchema,
   pushPreferencesSchema,
+  acceptTermsSchema,
+  CURRENT_TERMS_VERSION,
 } = require('../validation/schemas');
 const { authMiddleware } = require('../middleware/auth');
 const { getUserById } = require('../lib/users');
@@ -49,6 +51,11 @@ router.get('/me', authMiddleware, async (req, res) => {
     // or skips the onboarding tour. Frontend reads this to decide whether
     // to mount <OnboardingTour />.
     onboardingCompletedAt: user.onboardingCompletedAt || null,
+    // Tier 18 Chunk 6 — terms acceptance. Frontend mounts a blocking
+    // <TermsAcceptanceModal /> when termsAcceptedVersion is missing or
+    // lower than the current version baked into the bundle.
+    termsAcceptedAt: user.termsAcceptedAt || null,
+    termsAcceptedVersion: user.termsAcceptedVersion || null,
     // Tier 8.6 — Settings tab renders a radio bound to this value.
     profileVisibility: user.profileVisibility,
     // PWA Chunk 4 — JSONB map of notification-type → boolean. Absent or
@@ -95,6 +102,31 @@ router.post('/me/onboarding-completed', authMiddleware, async (req, res) => {
   } catch (error) {
     req.log.error({ err: error.message }, 'onboarding-completed failed');
     res.status(500).json({ error: 'Failed to update onboarding state' });
+  }
+});
+
+// Tier 18 Chunk 6 — Records that the user has accepted the current Terms +
+// Privacy Policy. The client posts the version it just rendered; the server
+// rejects mismatches so a stale tab can't accept a prior version. Stamps a
+// fresh timestamp on every successful acceptance so we can tell when the
+// user agreed to THIS version, not the previous one.
+router.post('/me/accept-terms', authMiddleware, validate(acceptTermsSchema), async (req, res) => {
+  if (req.body.version !== CURRENT_TERMS_VERSION) {
+    return res.status(400).json({ error: 'Terms version is out of date — please reload' });
+  }
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.termsAcceptedAt = new Date();
+    user.termsAcceptedVersion = CURRENT_TERMS_VERSION;
+    await user.save({ hooks: false });
+    res.json({
+      termsAcceptedAt: user.termsAcceptedAt,
+      termsAcceptedVersion: user.termsAcceptedVersion,
+    });
+  } catch (error) {
+    req.log.error({ err: error.message }, 'accept-terms failed');
+    res.status(500).json({ error: 'Failed to record terms acceptance' });
   }
 });
 

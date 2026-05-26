@@ -3,6 +3,7 @@
 // bloom down via tokens) rather than the inline three-layer style.
 
 import { Button } from './ui';
+import Footer from './Footer';
 
 const FEATURES = [
   {
@@ -186,6 +187,7 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
           ) : null}
         </div>
       </section>
+      <Footer />
     </div>
   );
 }

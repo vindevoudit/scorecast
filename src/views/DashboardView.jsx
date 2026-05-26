@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { lazyWithReload } from '../lib/lazyWithReload';
 import GamesCalendar from '../components/GamesCalendar';
+import Footer from '../components/Footer';
 import LeaderboardCard, { LeaderboardRow } from '../components/LeaderboardCard';
 import GroupCard from '../components/GroupCard';
 import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
@@ -628,6 +629,8 @@ function DashboardView() {
             </div>
           ) : null}
         </section>
+
+        <Footer />
       </main>
 
       <ConfirmModal

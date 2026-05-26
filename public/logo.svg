@@ -12,29 +12,50 @@
       <stop offset="0" stop-color="#67e8f9"/>
       <stop offset="1" stop-color="#06b6d4"/>
     </linearGradient>
+    <linearGradient id="pitchline" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#67e8f9" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#67e8f9" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#67e8f9" stop-opacity="0"/>
+    </linearGradient>
   </defs>
   <rect width="512" height="512" fill="url(#bg)"/>
   <rect width="512" height="512" fill="url(#glow)"/>
+
+  <!-- Tier 20 Chunk 5 — athletic-motif "pitch line" accent. Subtle cyan
+       horizontal stripe at the B's crossbar y-coordinate (y=263), fading
+       from transparent at the edges to ~85% opacity in the middle. Reads
+       as a horizon / pitch-line at large sizes; invisible at favicon
+       sizes (16-32px) where 2px of stripe height vanishes into the
+       cyan bowl pinch. Sits BEHIND the B (rendered first) so the
+       letterform stays crisp. -->
+  <rect x="80" y="263" width="352" height="2" fill="url(#pitchline)"/>
+
+  <!-- Tier 20 Chunk 5 — B path centered on the 512 canvas. Original path
+       spanned x ∈ [152, 410] (midpoint 281, 25px right of canvas center
+       256). Shifted -25 in x so the B now spans x ∈ [127, 385] (midpoint
+       256, true geometric centering). All other coordinates preserved
+       exactly so the letterform is identical to the original — just
+       repositioned. -->
   <path fill="url(#mark)" fill-rule="evenodd" d="
-    M 152 110
-    H 308
-    C 360 110, 396 144, 396 196
-    C 396 228, 378 252, 348 264
-    C 384 274, 410 302, 410 340
-    C 410 388, 372 416, 308 416
-    H 152
+    M 127 110
+    H 283
+    C 335 110, 371 144, 371 196
+    C 371 228, 353 252, 323 264
+    C 359 274, 385 302, 385 340
+    C 385 388, 347 416, 283 416
+    H 127
     Z
-    M 220 162
+    M 195 162
     V 240
-    H 292
-    C 318 240, 336 226, 336 202
-    C 336 178, 318 162, 292 162
+    H 267
+    C 293 240, 311 226, 311 202
+    C 311 178, 293 162, 267 162
     Z
-    M 220 290
+    M 195 290
     V 364
-    H 300
-    C 328 364, 348 350, 348 328
-    C 348 304, 328 290, 300 290
+    H 275
+    C 303 364, 323 350, 323 328
+    C 323 304, 303 290, 275 290
     Z
   "/>
 </svg>

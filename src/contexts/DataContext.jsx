@@ -41,6 +41,11 @@ export function DataProvider({ children }) {
   const [games, setGames] = useState([]);
   const [groups, setGroups] = useState([]);
   const [picks, setPicks] = useState([]);
+  // Tier 18 Chunk 4 — every friend's picks within the last 30 days + future
+  // window. Single bulk load on dashboard login, sliced per-game by GameCard
+  // and rendered flat by PicksHistory's Friends tab. Empty when the viewer
+  // has no friends.
+  const [friendsPicks, setFriendsPicks] = useState([]);
   const [pendingInvites, setPendingInvites] = useState([]);
   const [leaderboard, setLeaderboard] = useState(emptyLeaderboard);
   const [groupOrderBy, setGroupOrderBy] = useState('points');
@@ -65,6 +70,17 @@ export function DataProvider({ children }) {
   const refreshPicks = useCallback(async () => {
     const data = await request('/api/picks');
     setPicks(data);
+  }, [request]);
+
+  // Tier 18 Chunk 4 — friends' picks. Swallowed errors mirror refreshFriends:
+  // a stale session shouldn't blow up the dashboard load.
+  const refreshFriendsPicks = useCallback(async () => {
+    try {
+      const data = await request('/api/picks/friends');
+      setFriendsPicks(data);
+    } catch (error) {
+      if (error.message !== 'Session expired') console.warn(error.message);
+    }
   }, [request]);
 
   const refreshGames = useCallback(
@@ -197,6 +213,7 @@ export function DataProvider({ children }) {
       setSelectedGroupId(initialGroupId);
       await Promise.all([
         refreshPicks(),
+        refreshFriendsPicks(),
         refreshLeaderboard(initialGroupId),
         refreshFriends(),
         refreshDiscover(),
@@ -211,6 +228,7 @@ export function DataProvider({ children }) {
     refreshGames,
     refreshGroups,
     refreshPicks,
+    refreshFriendsPicks,
     refreshFriends,
     refreshDiscover,
   ]);
@@ -256,6 +274,7 @@ export function DataProvider({ children }) {
     if (user) return;
     setGroups([]);
     setPicks([]);
+    setFriendsPicks([]);
     setPendingInvites([]);
     setSelectedGroupId('');
     setView('games');
@@ -296,6 +315,7 @@ export function DataProvider({ children }) {
         refreshGames(),
         refreshGroups(),
         refreshPicks(),
+        refreshFriendsPicks(),
         refreshLeaderboard(),
         refreshFriends(),
         refreshDiscover(),
@@ -317,6 +337,7 @@ export function DataProvider({ children }) {
     refreshGames,
     refreshGroups,
     refreshPicks,
+    refreshFriendsPicks,
     refreshLeaderboard,
     refreshFriends,
     refreshDiscover,
@@ -701,6 +722,7 @@ export function DataProvider({ children }) {
     games,
     groups,
     picks,
+    friendsPicks,
     pendingInvites,
     leaderboard,
     groupOrderBy,
@@ -755,6 +777,7 @@ export function DataProvider({ children }) {
     // Refreshers (exposed for AdminPanel + niche callers)
     refreshGames,
     refreshPicks,
+    refreshFriendsPicks,
     refreshLeaderboard,
 
     // Tier 4b Chunk 3 — league/season picker

@@ -138,4 +138,9 @@ module.exports = {
   invalidate,
   invalidatePrefix,
   stats,
+  // Tier 18 Chunk 4 — reused by PickService.listFriendsPicks so private
+  // friends still show in friend-pick lists (masked) instead of leaking
+  // their username, matching the Tier 8.6 contract.
+  applyMasking,
+  maskedLabelFor,
 };

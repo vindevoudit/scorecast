@@ -3,6 +3,7 @@ import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scori
 import { displayTeamName } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
+import FriendPicksPanel from './FriendPicksPanel';
 import ConfirmModal from './ConfirmModal';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
@@ -444,6 +445,8 @@ function GameCard({ game }) {
           oddsShiftedHint={oddsShiftedHint}
         />
       ) : null}
+
+      <FriendPicksPanel game={game} />
 
       <CommentThread gameId={game.id} />
 

@@ -7,7 +7,16 @@
 const { test, expect } = require('@playwright/test');
 
 const { USERS, GAMES } = require('../fixtures/data');
-const { apiLogin, clearPicksAndBadges, clearGameResults, createPick } = require('../helpers/api');
+const {
+  apiLogin,
+  clearPicksAndBadges,
+  clearGameResults,
+  createPick,
+  clearFriendships,
+  createAcceptedFriendship,
+  setGameResult,
+  setProfileVisibility,
+} = require('../helpers/api');
 const {
   assertOk,
   assertUnauthorized,
@@ -177,6 +186,162 @@ test.describe('GET /api/picks', () => {
 
   test('no auth → 401', async () => {
     await assertUnauthorized('GET', '/api/picks');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/picks/friends — Tier 18 Chunk 4
+// ---------------------------------------------------------------------------
+
+test.describe('GET /api/picks/friends', () => {
+  test.beforeEach(async () => {
+    await clearGameResults([GAMES.lions.id, GAMES.eagles.id]);
+    await clearFriendships([USERS.alice.id, USERS.bob.id]);
+    await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
+    await setProfileVisibility(USERS.bob, 'public');
+  });
+
+  test('no friends → empty array (200)', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/picks/friends');
+      expect(Array.isArray(payload)).toBe(true);
+      expect(payload.length).toBe(0);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('friend has not picked → empty array', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/picks/friends');
+      expect(payload.length).toBe(0);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('friend picked, game not scored → row with points=null', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await createPick(bob, GAMES.lions.id, 'home');
+    } finally {
+      await bob.dispose();
+    }
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(alice, 'GET', '/api/picks/friends');
+      expect(payload.length).toBe(1);
+      const row = payload[0];
+      expect(row.userId).toBe(USERS.bob.id);
+      expect(row.username).toBe(USERS.bob.username);
+      expect(row.choice).toBe('home');
+      expect(row.gameId).toBe(GAMES.lions.id);
+      expect(row.points).toBeNull();
+      expect(row.isMasked).toBeFalsy();
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('friend picked, game scored → points populated', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await createPick(bob, GAMES.lions.id, 'home');
+    } finally {
+      await bob.dispose();
+    }
+    await setGameResult(GAMES.lions.id, 'home');
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(alice, 'GET', '/api/picks/friends');
+      expect(payload.length).toBe(1);
+      // Lions: home=0.5/away=0.5 → winning bet pays (1 - 0.5) * 100 = 50.
+      expect(payload[0].points).toBe(50);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('private friend → username masked, isMasked=true', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await createPick(bob, GAMES.lions.id, 'home');
+    } finally {
+      await bob.dispose();
+    }
+    await setProfileVisibility(USERS.bob, 'private');
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(alice, 'GET', '/api/picks/friends');
+      expect(payload.length).toBe(1);
+      expect(payload[0].isMasked).toBe(true);
+      expect(payload[0].username).not.toBe(USERS.bob.username);
+      // Choice + gameId still visible — only identifying fields are masked.
+      expect(payload[0].choice).toBe('home');
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('friends-only visibility → still visible to friends (not masked)', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await createPick(bob, GAMES.lions.id, 'away');
+    } finally {
+      await bob.dispose();
+    }
+    await setProfileVisibility(USERS.bob, 'friends');
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(alice, 'GET', '/api/picks/friends');
+      expect(payload.length).toBe(1);
+      expect(payload[0].isMasked).toBeFalsy();
+      expect(payload[0].username).toBe(USERS.bob.username);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('?gameId= scopes to one game', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await createPick(bob, GAMES.lions.id, 'home');
+      await createPick(bob, GAMES.eagles.id, 'away');
+    } finally {
+      await bob.dispose();
+    }
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const all = await assertOk(alice, 'GET', '/api/picks/friends');
+      expect(all.length).toBe(2);
+      const scoped = await assertOk(alice, 'GET', `/api/picks/friends?gameId=${GAMES.lions.id}`);
+      expect(scoped.length).toBe(1);
+      expect(scoped[0].gameId).toBe(GAMES.lions.id);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('bad gameId format → 400', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const res = await authed.get('/api/picks/friends?gameId=not-a-uuid');
+      expect(res.status()).toBe(400);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('no auth → 401', async () => {
+    await assertUnauthorized('GET', '/api/picks/friends');
   });
 });
 

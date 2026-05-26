@@ -37,6 +37,30 @@ router.get(
   }),
 );
 
+// Tier 18 Chunk 4 — friends' picks visibility. Single endpoint serves
+// both surfaces: optional ?gameId=<uuid> scopes to one game (used by
+// the GameCard inline expand); omitted form returns every friend pick
+// within the 30-day window (used by DataContext bulk load + the
+// PicksHistory "Friends' Picks" tab). Empty array when viewer has no
+// friends OR friends haven't picked anything in scope.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+router.get(
+  '/picks/friends',
+  authMiddleware,
+  asyncHandler(async (req, res) => {
+    const gameIdRaw = req.query.gameId;
+    let gameId;
+    if (gameIdRaw !== undefined) {
+      if (typeof gameIdRaw !== 'string' || !UUID_RE.test(gameIdRaw)) {
+        return res.status(400).json({ error: 'gameId must be a UUID' });
+      }
+      gameId = gameIdRaw;
+    }
+    const rows = await PickService.listFriendsPicks(req.user.id, { gameId });
+    return res.json(rows);
+  }),
+);
+
 router.delete(
   '/picks/:id',
   pickLimiter,

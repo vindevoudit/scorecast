@@ -185,7 +185,14 @@ ScoreCast/
 │   ├── 20260518000005-games-add-live-phase.js      # Tier 4b Chunk 2: games.halfTimeReached BOOLEAN + games.phase VARCHAR(20) for live-minute estimate
 │   ├── 20260518000006-create-audit-log.js          # Tier 4b Chunk 3: audit_log table (`actorUserId` SET NULL on user delete)
 │   ├── 20260518000007-games-tighten-league-not-null.js  # Tier 4b Chunk 3: games.leagueId NOT NULL (idempotent backfill into "Legacy / Imported" league)
-│   └── 20260518000008-games-add-draw-scoring.js    # draw-scoring tier: games.drawProbability DECIMAL(3,2) NOT NULL DEFAULT 0 + games.result enum extended to ('home','away','draw')
+│   ├── 20260518000008-games-add-draw-scoring.js    # draw-scoring tier: games.drawProbability DECIMAL(3,2) NOT NULL DEFAULT 0 + games.result enum extended to ('home','away','draw')
+│   ├── 20260519000001-picks-add-probability-snapshot.js  # picks.{homeProbabilityAtPick,drawProbabilityAtPick,awayProbabilityAtPick} so payout reflects locked-in odds even when ML cascade rewrites the game's probabilities
+│   ├── 20260520000001-create-push-subscriptions.js # PWA Chunk 4: push_subscriptions table (FK CASCADE; unique on (userId,endpoint)) + users.pushPreferences JSONB DEFAULT '{}'
+│   ├── 20260520000002-games-add-kickoff-reminder-sent-at.js  # PWA Chunk 6: games.kickoffReminderSentAt idempotency flag for the 15-min cron
+│   ├── 20260522000001-create-teams.js              # Tier 17: per-(name,leagueId) Elo state (NUMERIC(8,2)). Bootstrapped by seeders/20260522000001-seed-teams-from-elo-history.js
+│   ├── 20260523000001-games-add-elo-snapshot.js    # Tier 17 PR F: games.{homeEloPre,awayEloPre,appliedResult} for idempotent + reversible Elo cascade
+│   ├── 20260526000001-comments-add-group-scope.js  # Tier 18 Chunk 5: comments.gameId → NULLABLE, add comments.groupId UUID NULLABLE → groups(id) CASCADE, partial index comments_group_idx, CHECK comments_one_scope_chk ((gameId IS NOT NULL)::int + (groupId IS NOT NULL)::int = 1)
+│   └── 20260526000002-users-add-terms-acceptance.js  # Tier 18 Chunk 6: users.{termsAcceptedAt TIMESTAMPTZ, termsAcceptedVersion INT} (both nullable). Existing users land on NULL/NULL → blocking modal on next sign-in
 │
 ├── seeders/                             # Tier 5.1: idempotent seeders
 │   └── 20260513000001-seed-password-backfill.js   # re-hashes any plaintext seed password matching data.json
@@ -628,7 +635,7 @@ Frontend reads the cookie via [src/lib/cookies.js](src/lib/cookies.js) `getCooki
 After Tier 13.2 each domain owns its own router file under [routes/](routes/); [server.js](server.js) mounts them at `/api` in this order:
 
 1. **Auth (Tier 6 expanded + 2026-05-18 security batch)** — [routes/auth.js](routes/auth.js):
-   - `POST /api/register` — accepts `{username, password, email}`. Body response: `{user}` only (auth cookies set via `setAuthCookies`). Fires `sendVerificationEmail` fire-and-forget.
+   - `POST /api/register` — accepts `{username, password, email, acceptedTerms: literal(true), acceptedTermsVersion: literal(CURRENT_TERMS_VERSION)}` (Tier 18 Chunk 6 added the last two — schema rejects with a missing-field error when a stale frontend bundle omits them). Stamps `termsAcceptedAt = NOW()` + `termsAcceptedVersion = <body value>` on create so new users never see the blocking `<TermsAcceptanceModal />`. Body response: `{user}` only (auth cookies set via `setAuthCookies`). Fires `sendVerificationEmail` fire-and-forget.
    - `POST /api/login` — accepts `{username, password}`. On lockout, on bad pw, and on unknown user, returns identical 401 `{error: 'Invalid credentials'}`. Lockout state mutates `users.loginAttempts` / `lockedUntil` (Tier 6.6). If `user.totpEnabledAt` is set, issues `sc_challenge` cookie and returns `{challenge: true}` instead of auth cookies (Tier 6.9). **Constant-time** (security batch H2) — always runs `bcrypt.compare` against either the real hash or `LOGIN_DUMMY_HASH` (generated once at module load), so response time is identical for nonexistent vs existing-wrong-password.
    - **`POST /api/auth/verify-email`** (Tier 6.5) — body `{token}`. Finds the matching `email_verification_tokens` row by SHA-256 hash; sets `users.emailVerifiedAt`; marks the token consumed.
    - **`POST /api/auth/forgot-password`** (Tier 6.4, rate-limited) — body `{email}`. **Always 204** regardless of whether the user exists or is verified. Token INSERT + email dispatch moved to `setImmediate(...)` (security batch M1) so 204 latency is dominated only by the user lookup that runs in all branches — closes the timing-based enumeration channel.
@@ -641,9 +648,11 @@ After Tier 13.2 each domain owns its own router file under [routes/](routes/); [
    - **`POST /api/client-errors`** (Tier 5.4b) — CSRF-exempt; soft-auth (logs `userId` if cookie token is valid, anonymous otherwise); structured-logs `clientError` payload at `error` or `warn` level per `level` field.
 
 3. **Identity / account management** — [routes/me.js](routes/me.js):
-   - `GET /api/me` — returns `{id, username, role, displayName, bio, email, emailVerifiedAt, twoFactorEnabled, profileVisibility, onboardingCompletedAt, joinedGroups, pendingInvites}`. Drives auth-state inference on the client.
+   - `GET /api/me` — returns `{id, username, role, displayName, bio, email, emailVerifiedAt, twoFactorEnabled, profileVisibility, onboardingCompletedAt, termsAcceptedAt, termsAcceptedVersion, pushPreferences, joinedGroups, pendingInvites}`. Drives auth-state inference on the client. `termsAccepted*` fields (Tier 18 Chunk 6) gate the blocking `<TermsAcceptanceModal />` via `needsTermsAcceptance(user)` in [src/lib/terms.js](src/lib/terms.js).
    - `PUT /api/me` — `{displayName?, bio?, profileVisibility?}` edit. Body validated by `editProfileSchema` (display/bio reject bidi-override + zero-width + control codepoints — security batch L6 — while still allowing ZWJ for emoji like 👨‍💻). Invalidates leaderboard cache `'all'` when `displayName` OR `profileVisibility` actually changes (Tier 8.6 masking layer's view of stale visibility).
    - **`POST /api/me/onboarding-completed`** (Tier 11 Chunk 4) — sets `users.onboardingCompletedAt = NOW()` if null (idempotent). Called by both Skip and Done buttons in OnboardingTour.
+   - **`POST /api/me/accept-terms`** (Tier 18 Chunk 6) — body `{version}`. Rejects with 400 if `version !== CURRENT_TERMS_VERSION` (stale-tab guard: a frontend bundle that's been open since before a terms bump can't silently accept an old version). Stamps `termsAcceptedAt = NOW()` + `termsAcceptedVersion = CURRENT_TERMS_VERSION`. Idempotent on the version match (each call refreshes the timestamp). Frontend `TermsAcceptanceModal.handleAccept` POSTs here, then merges the response into `user` so the modal unmounts.
+   - **`PUT /api/me/push-preferences`** (PWA Chunk 4) — body `{prefs}`. Merges into `users.pushPreferences` JSONB (partial update — flipping one type's boolean doesn't clobber the others).
    - **`PATCH /api/me/email`** (Tier 6.5 + security batch H3) — body `{email, currentPassword}`. `currentPassword` required: bcrypt-compares before mutating, so a stolen access JWT alone can't pivot into account takeover. Sends "your email was changed" notification to the OLD address BEFORE overwriting, then updates `users.email`, clears `emailVerifiedAt`, fires fresh `sendVerificationEmail` to the NEW address.
    - **`POST /api/me/password`** (security batch M5) — body `{currentPassword, newPassword}`. Bcrypt-compares `currentPassword`, saves new password (Sequelize `beforeUpdate` re-hashes), calls `revokeAllUserRefreshTokens(userId)`, then `setAuthCookies` again so the calling client stays signed in while every OTHER refresh-bearing device is kicked out.
    - **`POST /api/me/2fa/setup`** (Tier 6.9 + security batch H3) — body `{currentPassword}`. Generates `speakeasy.generateSecret()`, returns `{qrCodeDataUrl, secret, recoveryCodes}`. Stores secret + bcrypt-hashed codes; `totpEnabledAt` stays null.
@@ -656,13 +665,15 @@ After Tier 13.2 each domain owns its own router file under [routes/](routes/); [
    - `GET /api/games/:gameId/comments` — `optionalAuth`; enriches each row with `editedAt`, `reactionCounts`, `yourReactions[]` (empty array for anon).
    - `POST /api/games/:gameId/comments` — authed + `commentLimiter`. Body validated by `commentSchema`.
 
-5. **Picks** — [routes/picks.js](routes/picks.js): `POST /api/picks` + `GET /api/picks` + **`DELETE /api/picks/:id`** (Tier 8 — undo pick).
+5. **Picks** — [routes/picks.js](routes/picks.js): `POST /api/picks` + `GET /api/picks` + **`DELETE /api/picks/:id`** (Tier 8 — undo pick) + **`GET /api/picks/friends?gameId=<uuid>`** (Tier 18 Chunk 4 — every friend's picks within a ±30-day window, capped at 500 rows; optional `gameId` UUID-regex-validated; rows scored server-side via `scorePick` honoring Tier 17 pick-time probability snapshots; passed through Tier 8.6 `applyMasking` so a friend who has flipped to private still appears at their masked label).
 
 6. **Groups** — [routes/groups.js](routes/groups.js), in this order:
    - `GET /api/groups` (authed: caller's joined groups; anon: 401)
    - **`GET /api/groups/discover`** (`optionalAuth` + `publicReadLimiter`) — **must come before `/:groupId`** so Express doesn't match `discover` as a path param. Anon sees all public groups; authed sees public groups they're not in.
    - `GET /api/groups/:groupId` (`optionalAuth`). Anon: 404 if private (avoids leaking existence); public: returns group with `maskMembersForAnon` projection.
    - `POST /api/groups` + invite/accept/decline endpoints + `POST /api/groups/:groupId/join` + `POST /api/groups/:groupId/leave` + `POST /api/groups/:groupId/transfer` + `DELETE /api/groups/:groupId` + `POST /api/groups/:groupId/visibility`.
+   - **`GET /api/groups/:groupId/comments`** (Tier 18 Chunk 5; `optionalAuth` + `publicReadLimiter`) — anon-readable for public groups; **404** (not 403) for non-members of private groups to avoid leaking existence. Returns the same row shape as the game-scoped endpoint: `{id, gameId: null, groupId, userId, username, body, createdAt, editedAt, reactionCounts, yourReactions}`.
+   - **`POST /api/groups/:groupId/comments`** (Tier 18 Chunk 5; authed + CSRF + `commentLimiter`). Membership enforced in `CommentService.create` (403 for non-members even on public groups — write is member-only by design). On success, fires `fanOutGroupComment` (Tier 18 Chunk 5) — every OTHER group member gets a `'group-comment'` push/bell notification with `link: '/?view=groups&groupId=<id>'`.
 
 7. **Leaderboard** — [routes/leaderboard.js](routes/leaderboard.js): `GET /api/leaderboard?groupId=&leagueId=&seasonId=&orderBy=&offset=&limit=` — `optionalAuth` + `publicReadLimiter`. Query validated **inline** via `leaderboardQuerySchema.safeParse(req.query)` (the shared `validate()` middleware only handles `req.body`). Both `LeaderboardService.getOverallForViewer` and `getForGroupForViewer` apply Tier 8.6 masking before responding.
 
@@ -799,6 +810,10 @@ AuthContext:          user, authData, authView, forgotSent, confirmingLogout,
 AuthGateContext:      gateLabel, isGateOpen, gate(label), closeGate
 
 DataContext:          bootDone, loading, view, games, groups, picks, pendingInvites,
+                      friendsPicks       (Tier 18 Chunk 4 — every friend's picks in a ±30d window;
+                                          loaded in loadDashboard + revalidate; sliced per-game by
+                                          GameCard's FriendPicksPanel, rendered flat by PicksHistory's
+                                          Friends tab),
                       leaderboard, groupOrderBy, groupOffset, selectedGroupId,
                       friends, discoverGroups, ownProfile,
                       profileUsername, profile, profileLoading, profileError, profileBusy,
@@ -830,9 +845,34 @@ try `loadDashboard()` (sends cookies)
 **Selector hooks** ([src/hooks/](src/hooks/)) let components import the narrow slice they need:
 
 - `useAuth` / `useData` / `useNotifications` — direct re-exports of the context value
-- `useGames` — `{ games, upcomingGames, liveGames, completedGames, refreshGames }` (the segmentation `useMemo` moved here from App.jsx)
+- `useGames` — `{ games, upcomingGames, liveGames, completedGames, byDay, refreshGames }`. The `byDay` Map (Tier 18 Chunk 3) keys games by `dayKey(date)` (en-CA `YYYY-MM-DD`) so `GamesCalendar` can index without re-walking the list per render. `dayKey` is exported from this hook so other components (DataContext's deep-link consumer) can write matching URL keys.
 - `usePicks` — `{ picks, pickMap, submitPick, removePick }` (pickMap built here)
+- `useFriendsPicks` (Tier 18 Chunk 4) — `{ friendsPicks, byGame }`. `byGame` is a `Map<gameId, FriendPick[]>` so `FriendPicksPanel` per-card lookups are O(1).
 - `useGroups` / `useLeaderboard` / `useFriends` — projections on `useData()`
+
+**Notification deep-link consumer** (Tier 18 Chunk 6a) — `DataContext.consumeDeepLinks(gamesList)` runs ONCE between the initial data load and `bootDone` flipping true. Recognizes three params:
+
+- `?view=games|mypicks|groups|leaderboard|profile|admin` → `setView(...)`
+- `?gameId=<uuid>` → resolves to the game's day via `dayKey(game.date)`, writes the synthetic `?date=YYYY-MM-DD` into the URL via `history.replaceState`, then `setView('games')`. The `?date=` lands BEFORE `GamesCalendar` reads it on its first mount, so the calendar selects the right chip without any inter-component event plumbing. Today's date deletes `?date=` instead of setting it (calendar treats absent `?date=` as today).
+- `?groupId=<uuid>` → `setSelectedGroupId(...)` + `setView('groups')` if no view was supplied.
+
+After consumption, all three params are stripped via `history.replaceState` so refresh / share-link doesn't re-fire side effects. UUIDs are regex-validated (`DEEP_LINK_UUID_RE` at module scope) so a garbage `?gameId=` is ignored without throwing.
+
+The matching server side: every `NotificationService.notify(userId, type, title, body, link)` call site now passes a `link` string. Convention:
+
+| Type                         | Link                         | Producer                                                         |
+| ---------------------------- | ---------------------------- | ---------------------------------------------------------------- |
+| `pick-scored`                | `/?gameId=<id>`              | `GameService.{setResult,bulkSetResult,applyLiveUpdate}`          |
+| `odds-shifted`               | `/?gameId=<id>`              | `GameService.fireOddsShiftedFor`                                 |
+| `kickoff-reminder`           | `/?gameId=<id>`              | `lib/jobs/sendKickoffReminders.js`                               |
+| `badge`                      | `/?view=profile`             | `BadgeService.awardBadge`                                        |
+| `invite`                     | `/?view=groups&groupId=<id>` | `GroupService.invite`                                            |
+| `group-join`                 | `/?view=groups&groupId=<id>` | `GroupService.{acceptInvite,joinPublic,leave,transferOwnership}` |
+| `group-join` (group deleted) | `/?view=groups`              | `GroupService.deleteGroup` (group is gone, no groupId)           |
+| `group-comment`              | `/?view=groups&groupId=<id>` | `CommentService.fanOutGroupComment`                              |
+| `friend-request`             | `/?view=groups`              | `routes/friends.js` (request + accept)                           |
+
+`src/sw.js`'s `notificationclick` handler reads the link from `data.link` and calls `clients.openWindow(targetUrl)` — no SW change was needed for Chunk 6 since the link plumbing was already wired.
 
 > **Note on `pickMap`**: it stores the **full pick object** keyed by `gameId`, not just the choice. This was changed in Tier 8.2 so `GameCard` can pass `existingPickId` to the undo-pick handler. Tier 13 moved this `useMemo` into [src/hooks/usePicks.js](src/hooks/usePicks.js).
 
@@ -972,7 +1012,11 @@ There is **no client-side polling for game state** — live-score updates land v
     <AuthProvider>                         // Tier 13.6 + Tier 11: user, auth flow, browseAsGuest, showAuth
       <AuthGateProvider>                   // Tier 11: anon-action gate (SignInModal mounted here)
         <DataProvider>                     // Tier 13.6: games/picks/groups/leaderboard/friends/filters + handlers
-          <App>                            // Tier 13 Chunk 6: layout shell only (~71 LOC)
+          <App>                            // Tier 13 Chunk 6 + Tier 18 Chunk 6c: layout shell only
+          ├── pathname short-circuit (Tier 18 Chunk 6c) — /terms, /privacy,
+          │   /copyright, /cookies render the matching <LegalLayout> page
+          │   fullscreen, BYPASSING the rest of the App tree. Anon + authed
+          │   users see the same content; no auth gate, no skeleton wait.
           ├── skip-to-content link (a11y, Tier 11 Chunk 4)
           ├── radial gradient + global status banner
           └── body:
@@ -1001,17 +1045,32 @@ There is **no client-side polling for game state** — live-score updates land v
                   │   │
                   │   ├── view === 'games':
                   │   │     <GameFiltersBar>     // ?league=&season= URL sync
+                  │   │     <GamesCalendar>      // Tier 18 Chunk 3 — 7-day fixed window (today-3 → today+3)
+                  │   │       chip strip + ±7-day arrow paging
+                  │   │       URL ?date=YYYY-MM-DD sync via history.replaceState
+                  │   │       "Back to today" pill (cyan w/ live red dot when in-progress today)
+                  │   │       Selected day → list of <GameCard>* for that day only
                   │   │     <GameCard>*          // uses usePicks for submit/remove + pickMap
                   │   │       ├── live pill (status='in-progress'): "Live · 67'" (useMatchMinute)
                   │   │       ├── <PayoutMatrix> // 2×3 preview matrix on upcoming games
-                  │   │       └── <CommentThread>
+                  │   │       ├── <FriendPicksPanel game={game} />  // Tier 18 Chunk 4
+                  │   │       │     Collapsed: "N friends picked" / "No friends picked yet"
+                  │   │       │     Expanded: rows w/ Avatar + side chip + outcome badge
+                  │   │       │       (won = green ✓+pts; draw = warning yellow; missed = "✗ Missed")
+                  │   │       └── <CommentThread scope="game" scopeId={game.id} />  // Tier 18 Chunk 5 generalized
                   │   │             ├── authed: composer + reaction buttons
                   │   │             └── anon:   <InlineGatePanel> composer; reaction click → gate('Sign in to react')
                   │   │     sidebar: <LeaderboardRow>* (clickable → opens drawer; honors entry.isMasked)
                   │   │
                   │   ├── view === 'mypicks':
                   │   │     <LeaderboardFiltersBar>   // ?lbLeague=&lbSeason= URL sync
+                  │   │     mode toggle [Mine] / [Friends] (Tier 18 Chunk 4)
+                  │   │     friend dropdown (Tier 18 Chunk 4 — visible in Friends mode; positioned LEFT of LeaderboardFiltersBar)
                   │   │     <PicksHistory>           // filtered client-side by leaderboardFilters
+                  │   │       Mine: own picks, sorted via comparePicksByPendingThenRecent
+                  │   │       Friends: friendsPicks (from useFriendsPicks), same sort comparator
+                  │   │       Section heading "Friends' Picks" keeps the apostrophe
+                  │   │       (pill label drops it: "Friends")
                   │   │
                   │   ├── view === 'groups':
                   │   │     create form (with visibility radio)
@@ -1021,6 +1080,9 @@ There is **no client-side polling for game state** — live-score updates land v
                   │   │     <FriendsList>             // returns null for anon viewers
                   │   │     pending invites           // authed only
                   │   │     <GroupCard>*
+                  │   │       ├── (header / members / invite row / leave|transfer|delete actions)
+                  │   │       └── <CommentThread scope="group" scopeId={group.id} />  // Tier 18 Chunk 5
+                  │   │             only for members + owner (group-comments are member-only by design)
                   │   │
                   │   ├── view === 'leaderboard':
                   │   │     <LeaderboardFiltersBar>
@@ -1045,15 +1107,33 @@ There is **no client-side polling for game state** — live-score updates land v
                   └── overlays (rendered inside DashboardView):
                       ├── <SignInModal>             // mounted by AuthGateProvider
                       ├── <ConfirmModal>            // logout, deletions, bulk confirmations
-                      ├── <OnboardingTour>          // Tier 11 Chunk 4; gated on !onboardingCompletedAt
+                      ├── <TermsAcceptanceModal>    // Tier 18 Chunk 6c — BLOCKING dialog when
+                      │                              //   user && !browseAsGuest && needsTermsAcceptance(user).
+                      │                              //   Cannot be dismissed via Escape, overlay click,
+                      │                              //   or refresh. Actions: "I accept" (POSTs
+                      │                              //   /api/me/accept-terms) or "Sign out". Suppresses
+                      │                              //   OnboardingTour while open (no dialog stacking).
+                      ├── <OnboardingTour>          // Tier 11 Chunk 4; gated on !onboardingCompletedAt && !showTermsGate
+                      ├── <Footer>                  // Tier 18 Chunk 6c — bottom of <main>:
+                      │                              //   © 2026 Bantryx · Trinidad & Tobago
+                      │                              //   · [Terms] [Privacy] [Copyright] [Cookies]
                       └── <ProfileDrawer>
                             └── <ProfileView>
                                   ├── <Avatar>
                                   └── <BadgeWall>
 
-<CommentThread> renders:
+<CommentThread scope="game"|"group" scopeId={...}> renders:                     // Tier 18 Chunk 5 generalized
   <CommentRow>* — each with <Avatar>, edit form (author only), 5-emoji reaction strip
+  baseUrl: scope==='group' ? `/api/groups/${id}/comments` : `/api/games/${id}/comments`
+  Backwards-compat shim: a caller that still passes `gameId={...}` (no scope prop) is
+  treated as `{scope: 'game', scopeId: gameId}`.
 ```
+
+**Legal pages** (Tier 18 Chunk 6c) live under [src/components/legal/](src/components/legal/):
+
+- `LegalLayout.jsx` — shared chrome (BANTRYX wordmark + "Back to app" link + centered prose container).
+- `Terms.jsx` / `Privacy.jsx` / `Copyright.jsx` / `CookiePolicy.jsx` — each exports a single React component rendered when `App.jsx` matches the corresponding pathname. Operator details (name, email, jurisdiction) live in a `LEGAL_CONTACT` constant at the top of each file for easy maintenance.
+- Copy is **deliberately plain-English** — no cookie-name tables, no exact retention windows, no specific security-mechanism names (bcrypt / SHA-256 / CSP), no named sub-processors. Covers DPA Chapter 22:04 (2011) disclosure requirements without publishing an attacker-friendly inventory of the auth surface.
 
 **Modal z-stacking** (Tier 11): ConfirmModal + SignInModal + ProfileDrawer all `z-50`; toast viewport `z-[100]`; sidebar mobile drawer + NotificationBell dropdown `z-40`; OnboardingTour uses the `<Dialog>` primitive so `z-50` too. When a modal opens on top of the mobile drawer, the drawer's Escape handler is guarded by `drawerRef.contains(document.activeElement)` so Escape closes the modal first; the drawer stays open until focus returns.
 
@@ -1294,24 +1374,27 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 
 #### `users`
 
-| Column                  | Type                                                         | Notes                                                                                                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                    | UUID PK                                                      |                                                                                                                                                                                                                       |
-| `username`              | STRING UNIQUE NOT NULL                                       | Case-insensitive lookup via `iLike`. Regex `^[A-Za-z0-9_]+$` (validation/schemas.js — **underscores yes, hyphens no**; affects ML pipeline service account name)                                                      |
-| `password`              | STRING NOT NULL                                              | bcrypt hash (cost 10); the model's `beforeCreate`/`beforeUpdate` hooks auto-hash anything not already matching `^\$2[aby]\$`                                                                                          |
-| `role`                  | ENUM('user','admin') NOT NULL DEFAULT 'user'                 | Added via migration                                                                                                                                                                                                   |
-| `displayName`           | VARCHAR(60) NULLABLE                                         | Tier 8. Used in place of username everywhere when set                                                                                                                                                                 |
-| `bio`                   | TEXT NULLABLE                                                | Tier 8. Length-capped at 280 by zod, no DB-level constraint                                                                                                                                                           |
-| `email`                 | VARCHAR(254) NULLABLE                                        | Tier 6.5. Private (not exposed except on `GET /api/me`). Functional unique index `users_email_lower_unique` on `LOWER(email) WHERE email IS NOT NULL` for case-insensitive uniqueness that tolerates legacy null rows |
-| `emailVerifiedAt`       | TIMESTAMPTZ NULLABLE                                         | Tier 6.5. Required to be non-null before `/api/auth/forgot-password` will dispatch a reset link                                                                                                                       |
-| `loginAttempts`         | INTEGER NOT NULL DEFAULT 0                                   | Tier 6.6. Incremented per bad password; cleared on success or password reset                                                                                                                                          |
-| `lockedUntil`           | TIMESTAMPTZ NULLABLE                                         | Tier 6.6. When `> NOW()`, login returns generic 401                                                                                                                                                                   |
-| `totpSecret`            | TEXT NULLABLE                                                | Tier 6.9. base32-encoded TOTP secret. Populated by `/api/me/2fa/setup` but enabled only after `/api/me/2fa/confirm`                                                                                                   |
-| `totpEnabledAt`         | TIMESTAMPTZ NULLABLE                                         | Tier 6.9. `IS NOT NULL` ⇔ 2FA is required for this user's logins                                                                                                                                                      |
-| `totpRecoveryCodes`     | JSONB NULLABLE                                               | Tier 6.9. Array of bcrypt-hashed (rounds 8) single-use recovery codes. Used codes are spliced out                                                                                                                     |
-| `profileVisibility`     | ENUM('public','friends','private') NOT NULL DEFAULT 'public' | Tier 8.6. Gates `GET /api/users/:username/profile` (identical 404 for friends-gated-out and private — no friend-graph probing). Drives leaderboard masking via `LeaderboardService.getOverallForViewer`               |
-| `onboardingCompletedAt` | TIMESTAMPTZ NULLABLE                                         | Tier 11 Chunk 4. NULL ⇒ first-run OnboardingTour fires on first valid render condition. Skip + Done both POST `/api/me/onboarding-completed` (idempotent — preserves existing timestamp)                              |
-| `createdAt`             | TIMESTAMPTZ NOT NULL DEFAULT NOW                             |                                                                                                                                                                                                                       |
+| Column                  | Type                                                         | Notes                                                                                                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | UUID PK                                                      |                                                                                                                                                                                                                                              |
+| `username`              | STRING UNIQUE NOT NULL                                       | Case-insensitive lookup via `iLike`. Regex `^[A-Za-z0-9_]+$` (validation/schemas.js — **underscores yes, hyphens no**; affects ML pipeline service account name)                                                                             |
+| `password`              | STRING NOT NULL                                              | bcrypt hash (cost 10); the model's `beforeCreate`/`beforeUpdate` hooks auto-hash anything not already matching `^\$2[aby]\$`                                                                                                                 |
+| `role`                  | ENUM('user','admin') NOT NULL DEFAULT 'user'                 | Added via migration                                                                                                                                                                                                                          |
+| `displayName`           | VARCHAR(60) NULLABLE                                         | Tier 8. Used in place of username everywhere when set                                                                                                                                                                                        |
+| `bio`                   | TEXT NULLABLE                                                | Tier 8. Length-capped at 280 by zod, no DB-level constraint                                                                                                                                                                                  |
+| `email`                 | VARCHAR(254) NULLABLE                                        | Tier 6.5. Private (not exposed except on `GET /api/me`). Functional unique index `users_email_lower_unique` on `LOWER(email) WHERE email IS NOT NULL` for case-insensitive uniqueness that tolerates legacy null rows                        |
+| `emailVerifiedAt`       | TIMESTAMPTZ NULLABLE                                         | Tier 6.5. Required to be non-null before `/api/auth/forgot-password` will dispatch a reset link                                                                                                                                              |
+| `loginAttempts`         | INTEGER NOT NULL DEFAULT 0                                   | Tier 6.6. Incremented per bad password; cleared on success or password reset                                                                                                                                                                 |
+| `lockedUntil`           | TIMESTAMPTZ NULLABLE                                         | Tier 6.6. When `> NOW()`, login returns generic 401                                                                                                                                                                                          |
+| `totpSecret`            | TEXT NULLABLE                                                | Tier 6.9. base32-encoded TOTP secret. Populated by `/api/me/2fa/setup` but enabled only after `/api/me/2fa/confirm`                                                                                                                          |
+| `totpEnabledAt`         | TIMESTAMPTZ NULLABLE                                         | Tier 6.9. `IS NOT NULL` ⇔ 2FA is required for this user's logins                                                                                                                                                                             |
+| `totpRecoveryCodes`     | JSONB NULLABLE                                               | Tier 6.9. Array of bcrypt-hashed (rounds 8) single-use recovery codes. Used codes are spliced out                                                                                                                                            |
+| `profileVisibility`     | ENUM('public','friends','private') NOT NULL DEFAULT 'public' | Tier 8.6. Gates `GET /api/users/:username/profile` (identical 404 for friends-gated-out and private — no friend-graph probing). Drives leaderboard masking via `LeaderboardService.getOverallForViewer`                                      |
+| `onboardingCompletedAt` | TIMESTAMPTZ NULLABLE                                         | Tier 11 Chunk 4. NULL ⇒ first-run OnboardingTour fires on first valid render condition. Skip + Done both POST `/api/me/onboarding-completed` (idempotent — preserves existing timestamp)                                                     |
+| `pushPreferences`       | JSONB NOT NULL DEFAULT '{}'                                  | PWA Chunk 4. Map of notification-type → boolean. Absent or `true` ⇒ deliver; only explicit `false` opts out. Empty `{}` = "deliver everything" implicit default                                                                              |
+| `termsAcceptedAt`       | TIMESTAMPTZ NULLABLE                                         | Tier 18 Chunk 6. New registrations stamp this on create. Existing users at upgrade time land on NULL → blocking `<TermsAcceptanceModal />` on next sign-in                                                                                   |
+| `termsAcceptedVersion`  | INTEGER NULLABLE                                             | Tier 18 Chunk 6. Compared against `CURRENT_TERMS_VERSION` in [validation/schemas.js](validation/schemas.js) (mirrored in [src/lib/terms.js](src/lib/terms.js)). Bumping the constant re-prompts every user with an older value on next visit |
+| `createdAt`             | TIMESTAMPTZ NOT NULL DEFAULT NOW                             |                                                                                                                                                                                                                                              |
 
 **Cascade behavior**: `users` → `badges`, `notifications`, `email_verification_tokens`, `password_reset_tokens`, `refresh_tokens` are `ON DELETE CASCADE` at the DB level. Post-Tier-11 [migration 20260516000002-cascade-user-fks.js](migrations/20260516000002-cascade-user-fks.js) retrofits this on prod DBs where the FKs were stuck at `NO ACTION` due to the original `sync({alter:false})` bootstrap path running before migrations (see CLAUDE.md "Cascade-delete fix-up"). Group ownership (`groups.ownerId`), picks, comments, friendships, group_members, and invites (by username) are **app-level cleanup** in `UserService.cascadeDelete` because they need ordering / disambiguation logic the DB can't express.
 
@@ -1404,16 +1487,19 @@ Composite primary key `(groupId, userId)`. No additional columns.
 
 #### `comments`
 
-| Column      | Type                                          | Notes                                                                                           |
-| ----------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `id`        | UUID PK                                       |                                                                                                 |
-| `gameId`    | UUID NOT NULL → games(id) ON DELETE CASCADE   |                                                                                                 |
-| `userId`    | UUID NOT NULL → users(id) ON DELETE NO ACTION | Cleaned up in admin user-delete                                                                 |
-| `body`      | TEXT NOT NULL                                 | Validation: trim, 1–500 chars                                                                   |
-| `createdAt` | TIMESTAMPTZ DEFAULT NOW                       |                                                                                                 |
-| `editedAt`  | TIMESTAMPTZ NULLABLE                          | Tier 8. Set on every successful `PUT /api/comments/:id`. Frontend renders `(edited)` in the row |
+| Column      | Type                                          | Notes                                                                                                                                                            |
+| ----------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | UUID PK                                       |                                                                                                                                                                  |
+| `gameId`    | UUID NULLABLE → games(id) ON DELETE CASCADE   | Tier 18 Chunk 5: dropped from NOT NULL to NULLABLE. Either `gameId` OR `groupId` must be set (CHECK constraint below); both-set / both-null fail at the DB level |
+| `groupId`   | UUID NULLABLE → groups(id) ON DELETE CASCADE  | Tier 18 Chunk 5. Adds the second comment scope ("group running comments"). One of `gameId` / `groupId` is set per row                                            |
+| `userId`    | UUID NOT NULL → users(id) ON DELETE NO ACTION | Cleaned up in admin user-delete                                                                                                                                  |
+| `body`      | TEXT NOT NULL                                 | Validation: trim, 1–500 chars                                                                                                                                    |
+| `createdAt` | TIMESTAMPTZ DEFAULT NOW                       |                                                                                                                                                                  |
+| `editedAt`  | TIMESTAMPTZ NULLABLE                          | Tier 8. Set on every successful `PUT /api/comments/:id`. Frontend renders `(edited)` in the row                                                                  |
 
-**Index**: `comments_game_idx (gameId)` for fast thread fetch.
+**Indexes**: `comments_game_idx (gameId)` for fast game-thread fetch; `comments_group_idx (groupId) WHERE groupId IS NOT NULL` (Tier 18 Chunk 5) for fast group-thread fetch.
+
+**CHECK constraint** (Tier 18 Chunk 5): `comments_one_scope_chk` enforces `(gameId IS NOT NULL)::int + (groupId IS NOT NULL)::int = 1` — exactly one scope per row. Both `CommentService.list` and `CommentService.create` re-assert this at the service layer (`assertSingleScope({gameId, groupId})`) so a programmer error surfaces as a recognizable 400 instead of a Postgres CHECK violation.
 
 #### `comment_reactions` (Tier 8)
 
@@ -1682,7 +1768,9 @@ notify(userId, type, title, body=null, link=null)
        (errors swallowed with a warn-log)
 ```
 
-`type` is a free-form string (not ENUM). Today's types: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`. Adding a new type is a one-line change at the call site — no schema migration, no frontend change (the bell renders by `title`/`body`/`createdAt`).
+`type` is a free-form string (not ENUM) for the in-app row but constrained to `PUSH_NOTIFICATION_TYPES` in [validation/schemas.js](validation/schemas.js) for the per-type push preferences UI. Current types: `invite`, `pick-scored`, `friend-request`, `group-join`, `badge`, `odds-shifted`, `kickoff-reminder`, `group-comment` (Tier 18 Chunk 5). Adding a new type for a push category requires editing BOTH `PUSH_NOTIFICATION_TYPES` AND `NOTIFICATION_TYPES` in [src/components/PushSettingsPanel.jsx](src/components/PushSettingsPanel.jsx) in the same commit.
+
+**`link` field** (Tier 18 Chunk 6a) — every `notify()` call site now passes a deep-link URL. The SPA's `DataContext.consumeDeepLinks` reads `?view=` / `?gameId=` / `?groupId=` on boot to route the user to the relevant tab + state. Convention table is in §6.2 above; the SW's `notificationclick` handler uses `data.link` to call `clients.openWindow(targetUrl)`.
 
 **Polling**: `NotificationBell` calls `GET /api/notifications` (which returns `{items, unreadCount}`) every 30 s. The unread count drives a red badge on the bell icon. Marking-as-read is local-then-remote: the UI optimistically dims the item and decrements the count, then fires `POST /api/notifications/:id/read`.
 
@@ -1690,25 +1778,54 @@ notify(userId, type, title, body=null, link=null)
 
 ### 8.7 Comments Subsystem
 
-Per-game thread, rendered as a collapsible section at the bottom of every `GameCard`. Pulled lazily: the first open of a thread issues `GET /api/games/:gameId/comments` (newest first, capped at 50). New comments are appended optimistically to the local state.
+**Two scopes, one row shape** (Tier 18 Chunk 5):
+
+| Scope                     | Mounted in                                                                               | Thread URL                               | Composer authz                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------- |
+| `game` (legacy default)   | `GameCard` via `<CommentThread scope="game" scopeId={game.id} />`                        | `GET/POST /api/games/:gameId/comments`   | Any authenticated user                                           |
+| `group` (Tier 18 Chunk 5) | `GroupCard` for members + owner via `<CommentThread scope="group" scopeId={group.id} />` | `GET/POST /api/groups/:groupId/comments` | Group members only (non-member POST → 403 even on public groups) |
+
+The `comments` row carries both `gameId` and `groupId` as NULLABLE columns, gated by a DB-level CHECK (`(gameId IS NOT NULL)::int + (groupId IS NOT NULL)::int = 1`). `CommentService.list({gameId, groupId}, viewerId)` and `CommentService.create({gameId, groupId, userId, body})` each call `assertSingleScope({gameId, groupId})` upfront so a programmer error surfaces as a 400 instead of a Postgres CHECK violation. Legacy `CommentService.listForGame(gameId, viewerId)` is kept as a thin shim so any external caller that imported the old signature keeps working.
+
+**Lazy load**: the first open of a thread (collapsed by default) issues a `GET` (newest first, capped at 50). New comments are appended optimistically to the local state.
 
 The `GET` endpoint enriches every comment row with the Tier 8 reaction summary:
 
+- `gameId`, `groupId` — exactly one is non-null per row (the scope it was posted in)
 - `editedAt` — nullable; frontend shows `(edited)` next to the timestamp when set
 - `reactionCounts: {emoji: N}` — counts across all reactors
 - `yourReactions: [emoji...]` — the _caller's_ reactions only, so the UI can highlight toggled buttons
 
-Authorization:
+Authorization (scope-independent, commentId-only at the API level):
 
-- **Post**: any authenticated user.
+- **Post (game)**: any authenticated user.
+- **Post (group)**: group members + owner only. Owner counts as a member via the `GroupMember` row created on group create. Enforced in `CommentService.create` (403 with `'Only group members can post comments'`).
 - **Edit** (Tier 8): author only via `PUT /api/comments/:id`. Sets `editedAt = NOW`.
 - **Delete**: author **or** any admin. The frontend hides the edit/delete buttons unless `comment.userId === currentUserId`, but the server is the actual gate. Cascades comment_reactions.
+
+**Anonymous read** (Tier 18 Chunk 5):
+
+- Game scope: `GET /api/games/:gameId/comments` is anon-readable (already the case pre-Chunk 5).
+- Group scope: `GET /api/groups/:groupId/comments` is anon-readable for **public** groups. For private groups, non-members get **404** (not 403) to avoid leaking the existence of private groups via response codes (consistent with `GroupService.getVisible` for the group resource itself).
+
+**Group-comment fan-out** (Tier 18 Chunk 5):
+
+`CommentService.fanOutGroupComment({comment, author, group})` runs as fire-and-forget after every successful `CommentService.create({groupId, ...})`. It loads every group member except the author, then `await Promise.all(NotificationService.notify(memberId, 'group-comment', title, body, link))` where:
+
+- `title` = `<author username> commented in <group name>`
+- `body` = the comment body (truncated to 160 chars with `…` to keep push payloads small)
+- `link` = `/?view=groups&groupId=<id>` (consumed by `DataContext.consumeDeepLinks`)
+
+Wrapped in try/catch so a notification outage can never break the comment create. Per-recipient failures are logged inside `NotificationService.notify` itself.
 
 **Reactions** (Tier 8): a fixed palette of 5 emojis — 👍 ❤️ 😂 😮 🔥 — defined as `ALLOWED_EMOJIS` in [validation/schemas.js](validation/schemas.js) and `REACTION_EMOJIS` in [CommentThread.jsx](src/components/CommentThread.jsx). The two arrays must stay in sync.
 
 - `POST /api/comments/:id/reactions` is idempotent: the unique `(commentId, userId, emoji)` constraint catches duplicate inserts and the handler returns 200.
 - `DELETE /api/comments/:id/reactions/:emoji` is a no-op when no such row exists (still returns 200).
 - The frontend [CommentThread.jsx](src/components/CommentThread.jsx) optimistically updates `reactionCounts` and `yourReactions` locally, then issues the request; on failure it calls `load()` to resync.
+- Reaction routes (`/api/comments/:id/reactions`) operate on `commentId` directly — they don't care about scope, so the same routes service both game and group threads with no changes.
+
+**Cascade behavior on group delete** (Tier 18 Chunk 5): `GroupService.cascadeDelete(group, {transaction})` explicitly destroys `Comment` rows (and their `CommentReaction` children) inside the same transaction that drops the group. The FK on `comments.groupId` declares `ON DELETE CASCADE` so SQL alone would handle it, but we follow the post-Tier-11 user-cascade pattern of explicit destroys to guard against any `sync({alter:false})` bootstrap path where the FK might have landed as `NO ACTION`. Same defensive pattern as `UserService.cascadeDelete`.
 
 ### 8.8 Profile Subsystem
 
@@ -2701,6 +2818,153 @@ Mounted unconditionally in DashboardView — visible to both signed-in and anony
 
 **Critical iOS constraint**: iOS Safari only supports Web Push from an installed PWA, on iOS 16.4+. PushSettingsPanel renders an install-first gate (`isIos && !isStandalone`) that points users at the Share menu before the master toggle becomes available.
 
+### 8.24 Games Calendar Viewer (Tier 18 Chunk 3)
+
+Replaces the original three-section "live / upcoming / completed" cascade on the Games tab with a fixed 7-day calendar strip. Surfaces fewer games at once but makes day-by-day navigation trivial — particularly important now that the live-score pipeline keeps in-progress matches visible across days.
+
+**Component**: [src/components/GamesCalendar.jsx](src/components/GamesCalendar.jsx). Lives inside `view === 'games'` in DashboardView.
+
+**Window math**:
+
+- 7 cells visible at a time: today − 3 → today + 3 (center on today on first load).
+- Window index `N` covers days `[N*7 − 3, N*7 + 3]` relative to today; `windowIndex = 0` is the default.
+- Prev/Next arrow buttons at the strip ends page by ±7 days. No horizontal scroll — every chip is `grid grid-cols-7` sized.
+- A `?date=YYYY-MM-DD` query param is read on mount (regex-validated). If the URL date sits outside the default window, `windowIndex` snaps to `Math.round(diffInDays(today, urlDate) / 7)` so the chip is visible on first paint.
+- Selecting a chip writes `?date=` via `history.replaceState`. Selecting today's chip DELETES the param (today is the canonical default).
+
+**`useGames` selector** ([src/hooks/useGames.js](src/hooks/useGames.js)) exports a stable `dayKey(value)` helper (`Intl.DateTimeFormat('en-CA').format(...)` → `YYYY-MM-DD`) and a `byDay: Map<string, Game[]>` memo so per-day lookups are O(1) and consistent with the URL key format. `DataContext.consumeDeepLinks` imports the same `dayKey` so a `?gameId=` resolution writes a key that GamesCalendar will read correctly.
+
+**Chips** carry three signals:
+
+- Day-number rendered in cyan (inline `style={{ color: 'rgb(34, 211, 238)' }}` to bypass any CSS conflicts).
+- Game count + live red pulsing dot when `meta.hasLive` (any game on this day has `status='in-progress'`).
+- Active chip painted with `bg-accent/15` border; today's chip painted with `border-accent/40` even when not selected.
+
+**"Back to today" pill** in the card header — only renders when `selectedKey !== todayKey`. When `liveToday` is true (any in-progress game today, regardless of window position), the pill carries a pulsing red dot so a user paging through the future doesn't miss live action.
+
+**Empty days**: render `EmptyState` with day-aware copy — "Nothing kicking off today. Pick another day…" on today, "Pick another day, or page through with the arrows." on other days.
+
+### 8.25 Friends' Picks Visibility (Tier 18 Chunk 4)
+
+Surfaces every friend's pick on every game inside a ±30-day window. Two consumers: per-card collapsed panel inside `GameCard`, and a global flat list in `PicksHistory`'s new "Friends" tab.
+
+**Endpoint** — `GET /api/picks/friends?gameId=<uuid>` ([routes/picks.js](routes/picks.js)) — authed. Optional `gameId` UUID-regex-validated. Implementation in [services/PickService.js](services/PickService.js) `listFriendsPicks(viewerId, {gameId})`:
+
+```js
+const FRIENDS_PICKS_HORIZON_DAYS = 30;
+const FRIENDS_PICKS_MAX_ROWS = 500;
+```
+
+The query uses an `INNER JOIN` (`required: true`) against `Game` so the date filter and the optional `gameId` filter apply server-side. Each returned row is scored via `lib/scoring.js scorePick(pick, game)`, which honors the Tier 17 pick-time probability snapshots (`homeProbabilityAtPick` / `drawProbabilityAtPick` / `awayProbabilityAtPick`) — so a friend who picked when odds were 0.35 sees +65 even if the ML cascade later rewrote the game's live probabilities. Rows are then passed through `LeaderboardService.applyMasking` so a friend who has flipped to private since accepting the request still appears at their masked label, not their username.
+
+**State** — `DataContext.friendsPicks` is a flat `[FriendPick]` slot loaded in `loadDashboard` and refreshed in `revalidate` (matches the cadence of `picks`, `games`, `leaderboard`). Empty when the viewer has no friends.
+
+**Selector** — [src/hooks/useFriendsPicks.js](src/hooks/useFriendsPicks.js) memoizes `byGame: Map<gameId, FriendPick[]>` so per-`GameCard` lookups are O(1) without re-walking the list on every render.
+
+**Per-card UI** — [src/components/FriendPicksPanel.jsx](src/components/FriendPicksPanel.jsx) mounted at the bottom of every `GameCard` body. Collapsed: "N friends picked" (or "No friends picked yet" if `byGame.get(game.id)` is empty). Expanded: per-row Avatar + username + side chip + outcome badge:
+
+| Game state                                     | Outcome badge  | Tone                                                                                                     |
+| ---------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------- |
+| Pre-result (`game.result == null`)             | side chip only | neutral                                                                                                  |
+| Won (pick.choice === game.result and not draw) | `✓ +<pts>`     | success (green)                                                                                          |
+| Drew (game.result === 'draw')                  | `Drew +<pts>`  | **warning yellow** (not green — important Chunk 4 polish; matches the GameCard outcome badge convention) |
+| Missed (pick.choice !== game.result)           | `✗ Missed`     | danger (red; NOT "+0" — easier to read at a glance)                                                      |
+
+**My Picks tab — Friends mode** ([src/components/PicksHistory.jsx](src/components/PicksHistory.jsx)):
+
+- Segmented `[Mine] [Friends]` toggle at the top (pill label "Friends" has NO apostrophe; section heading "Friends' Picks" keeps the apostrophe — distinct copy choices kept stable for screenreader consistency).
+- Friend dropdown filter (Friends mode only) positioned LEFT of `LeaderboardFiltersBar` with matching `bg-overlay/60 rounded-2xl px-4 py-3` pill styling. Select text is non-uppercase so usernames render naturally.
+- Shared `comparePicksByPendingThenRecent` comparator across both modes: unresolved picks first (kickoff ASC = soonest first), then resolved picks (kickoff DESC = most-recent first). Stops a user from scrolling past last week's games to see what's about to kick off.
+- The Friends mode honors the existing `leaderboardFilters` ({leagueId, seasonId}) by client-side filtering — same pattern as the Mine mode.
+
+### 8.26 Notification Deep-Links + Error Toast Cleanup (Tier 18 Chunk 6a + 6b)
+
+**6a — Deep-link plumbing** is described in full in §6.2 (consumer + link convention table). The server side is just every `NotificationService.notify(...)` call site populating the 5th positional arg (`link`). No new state or endpoints — the SW `notificationclick` handler was already calling `clients.openWindow(targetUrl)` from `data.link`.
+
+**6b — Error toast cleanup** addresses two long-standing UX papercuts:
+
+1. **Login race fix** ([src/views/AuthView.jsx](src/views/AuthView.jsx)). `AuthContext.handleLogin` shows the real status banner ("Invalid credentials") and re-throws. The re-throw used to bubble as an unhandled promise rejection → `clientErrorReporter` fired the generic "Something went wrong" toast and clobbered the banner. The fix wraps the AuthView-level `handleLogin` in try/catch that swallows the rejection — same pattern as the pre-existing `handleRegister`. AuthContext's contract is preserved (callers that want the throw still get it). Documented in `CLAUDE.md` "Frontend login error race" — closed by this chunk.
+
+2. **`wasHandled` flag** ([src/hooks/useRequest.js](src/hooks/useRequest.js) + [src/lib/clientErrorReporter.js](src/lib/clientErrorReporter.js) + [src/contexts/NotificationContext.jsx](src/contexts/NotificationContext.jsx)). Every 4xx response thrown from `useRequest` now carries:
+
+```js
+const err = new Error(friendlyMessage(msg));
+err.reqId = reqId;
+err.status = response.status;
+err.wasHandled = true; // ← Tier 18 Chunk 6b
+throw err;
+```
+
+`reportClientError` short-circuits on `error.wasHandled === true` — skips both the DOM event AND the server-side POST to `/api/client-errors`. Rationale: a 4xx already has a user-facing message (the server's `error` envelope) that the caller will surface via `showStatus(error.message)`; there's nothing useful to log server-side, and the generic toast is actively harmful. `NotificationContext` has a defense-in-depth check on the same flag in its `scorecast:client-error` listener for the edge case where an unhandled rejection still carries it.
+
+3. **Friendly wrappers** for cryptic error codes via `FRIENDLY_ERROR_CODES` in `useRequest`:
+
+```js
+const FRIENDLY_ERROR_CODES = {
+  football_api_rate_limit: 'Live scores are catching up — try again in a moment.',
+  rate_limited: 'Too many requests — slow down for a moment and try again.',
+};
+```
+
+Unknown codes pass through unchanged so plain human-readable messages are unaffected. Add new entries here when an `AppError` factory in `lib/errors.js` surfaces a machine-readable code that ends up in a toast.
+
+### 8.27 Legal Pages + Terms Acceptance (Tier 18 Chunk 6c)
+
+End-to-end consent capture, designed for Trinidad & Tobago jurisdiction. Four user-facing legal pages, one in-app blocking acceptance gate, one versioned acceptance record.
+
+**Legal pages** — [src/components/legal/](src/components/legal/): `LegalLayout.jsx` (shared chrome) + `Terms.jsx` / `Privacy.jsx` / `Copyright.jsx` / `CookiePolicy.jsx`. Each page is a static React component. Operator details live in a `LEGAL_CONTACT` constant at the top of each file (`Bantryx` / `bantryx@gmail.com` / Republic of Trinidad and Tobago, no postal address).
+
+**Routing** — `App.jsx` checks `window.location.pathname` against `/terms`, `/privacy`, `/copyright`, `/cookies` BEFORE any other view logic and returns the matching component (which renders its own `<main id="main">` inside `LegalLayout`). The existing SPA fallback in `server.js` (any non-`/api/*` path → `dist/index.html`) means no backend route changes are needed; the pathname reaches the browser as a normal SPA boot. Trailing slash is normalized via `pathname.replace(/\/+$/, '') || '/'`. Anon and authed users see the same content — no auth gate, no skeleton wait. Direct visits AND clicks from the in-app `<Footer />` both work the same way.
+
+**Copy depth — deliberate trim**: the pages are written for the general public, not for security researchers. We do NOT publish:
+
+- specific cookie names (`sc_access` / `sc_refresh` / etc.) — cookies are described as "authentication" or "security" categories
+- exact retention windows (24h / 1h / 30d) — described as "for as long as we need it"
+- specific security mechanisms (bcrypt / SHA-256 / HttpOnly / CSP) — described as "industry-standard security and storage practices"
+- named sub-processors (Azure / Cloudflare / Resend / Sentry) — described as "third-party providers for hosting, transactional email, and football fixture data"
+
+Rationale: minimize attack-surface disclosure while still satisfying T&T DPA Chapter 22:04 (2011) data subject right-to-be-informed requirements. If a real DPA inquiry ever lands, the operator can name specific providers in a direct response (or via an internal annex) without that detail being indexed on the public site.
+
+**Footer** — [src/components/Footer.jsx](src/components/Footer.jsx) mounted at the bottom of `<Landing />` (below the final CTA) and at the bottom of `DashboardView`'s `<main>`. Compact muted styling: `© <year> Bantryx · Trinidad & Tobago · [Terms] [Privacy] [Copyright] [Cookies]`. Links are plain `<a href="/...">` — clicking triggers a full navigation that goes back through `App.jsx`'s pathname short-circuit.
+
+**Terms acceptance — data model**:
+
+- `users.termsAcceptedAt TIMESTAMPTZ NULLABLE` — set the moment the user accepts (on registration OR via the blocking modal).
+- `users.termsAcceptedVersion INTEGER NULLABLE` — the version they accepted. Compared against `CURRENT_TERMS_VERSION` (bundled into both server and client) to decide whether to re-prompt.
+
+**Version constant** — `CURRENT_TERMS_VERSION = 1`. Lives in two places that **must stay in sync**:
+
+- Server: [validation/schemas.js](validation/schemas.js) — exported alongside `acceptTermsSchema` for use by `routes/auth.js` and `routes/me.js`.
+- Client: [src/lib/terms.js](src/lib/terms.js) — exported alongside `needsTermsAcceptance(user)` for use by `AuthContext`, `TermsAcceptanceModal`, and `App.jsx`.
+
+When we ever change material terms, bump BOTH constants in the same commit. Every user whose recorded `termsAcceptedVersion < CURRENT_TERMS_VERSION` will see the blocking modal on next visit.
+
+**Registration flow**:
+
+1. `RegisterForm` shows a required checkbox: "I have read and agree to the **Terms of Service** and the **Privacy Policy**" (inline links open `/terms` and `/privacy` in a new tab via `target="_blank" rel="noreferrer"`).
+2. Submit button is `disabled` until the box is checked. Client-side guard.
+3. `AuthContext.handleRegister` sends `{username, password, email, acceptedTerms: true, acceptedTermsVersion: CURRENT_TERMS_VERSION}`. If the box wasn't checked, it throws a user-facing error before fetching.
+4. `registerSchema` requires `acceptedTerms: z.literal(true)` AND `acceptedTermsVersion: z.literal(CURRENT_TERMS_VERSION)`. A stale frontend bundle that posts an older version fails the literal check at the schema layer with a recognizable 400.
+5. `routes/auth.js` `POST /api/register` stamps both fields on `User.create` — so the new user never sees the blocking modal on first dashboard load.
+
+**Existing-user flow (blocking modal)**:
+
+1. Migration `20260526000002` adds both columns as NULLABLE. Every existing user lands on NULL/NULL.
+2. `App.jsx` evaluates `showTermsGate = Boolean(user) && !browseAsGuest && needsTermsAcceptance(user)` after every render. `needsTermsAcceptance` returns `true` when the user's recorded version is missing OR less than `CURRENT_TERMS_VERSION`.
+3. When `showTermsGate` is true, [src/components/TermsAcceptanceModal.jsx](src/components/TermsAcceptanceModal.jsx) mounts. It's a Radix Dialog with **all dismissal vectors blocked**:
+   - `onEscapeKeyDown={(e) => e.preventDefault()}`
+   - `onPointerDownOutside={(e) => e.preventDefault()}`
+   - `onInteractOutside={(e) => e.preventDefault()}`
+   - The Dialog's `onOpenChange` is a no-op (`() => {}`).
+4. Only two actions are exposed: **"I accept"** POSTs `/api/me/accept-terms` with `{version: CURRENT_TERMS_VERSION}`. On success, merges `termsAcceptedAt` + `termsAcceptedVersion` into `user`, which trips `needsTermsAcceptance` to false and unmounts the modal. **"Sign out"** calls `performLogout` (clears auth, returns to landing).
+5. `OnboardingTour` is suppressed while `showTermsGate` is open (`showOnboarding` ANDs `!showTermsGate`) so dialogs don't stack.
+
+**Backend endpoint** — `POST /api/me/accept-terms` (authed + CSRF + validated). Returns 400 with `'Terms version is out of date — please reload'` if `req.body.version !== CURRENT_TERMS_VERSION` (stale-tab guard: a frontend bundle open since before a version bump can't silently accept the old version). On success, sets both columns + returns the new values.
+
+**`GET /api/me` returns** the new `termsAcceptedAt` + `termsAcceptedVersion` fields — without them, the client couldn't tell whether to mount the gate.
+
+**Test seeding** — [tests/e2e/fixtures/seed.js](tests/e2e/fixtures/seed.js) pre-accepts terms for the three seed users (mirrors the `onboardingCompletedAt` pattern). [tests/e2e/helpers/auth.js](tests/e2e/helpers/auth.js) `registerViaUI` ticks `#register-accept-terms` before clicking Register. Five API-level `/api/register` calls in `auth.spec.js` + `admin.spec.js` updated to send the new fields. Without these updates the existing E2E suite would 100% fail because (a) registration would 400 without the new payload fields, and (b) seed users would all hit the blocking modal on every sign-in.
+
 ---
 
 ## 9. End-to-End Data Flows
@@ -3192,6 +3456,20 @@ Or in one go: `npm start` (= `vite build && node server.js`). For production it'
 58. **Security batch L5 — Recovery code verify is constant-time**: `Promise.all(codes.map(bcrypt.compare))` instead of an early-exit `for` loop. **Don't "optimize" to early-exit** — the matched slot would become inferrable from response time.
 59. **Per-endpoint API suite — `closeDb()` in afterAll**: spec files MUST NOT call `closeDb()` in `afterAll`. `workers:1` shares the Sequelize pool; closing it stalls every later spec. Each spec only resets the tables it touches via DB helpers in [tests/e2e/helpers/api.js](tests/e2e/helpers/api.js).
 60. **Per-endpoint API suite — Seed CSRF cookie before assertUnauthorized**: `assertUnauthorized` for state-changing routes must seed an `sc_csrf` cookie via a throwaway GET first; otherwise the assertion lands on CSRF (403) rather than auth (401). The helper handles this internally — `apiAnon()` returns a context that already has the cookie set.
+61. **Tier 18 Chunk 5 — `comments` scope is single-valued**: the DB CHECK constraint `comments_one_scope_chk` enforces exactly one of `gameId` / `groupId` is non-null per row. Both `CommentService.list` and `CommentService.create` call `assertSingleScope({gameId, groupId})` first so a programmer error surfaces as a recognizable 400. **Do not write to both columns** — Postgres will reject the INSERT.
+62. **Tier 18 Chunk 5 — Group-comment write is member-only by design**: `CommentService.create` for a `groupId` scope rejects non-members with 403 even on public groups. Anon read of a public group's comments is intentional (mirrors the rest of public-group surface); write requires membership. Don't loosen the write side without a product decision.
+63. **Tier 18 Chunk 5 — Private-group comment GET returns 404**: `assertReadable` in [routes/groups.js](routes/groups.js) returns 404 (not 403) for non-members of a private group's `/comments`. Mirrors `GroupService.getVisible` — distinguishing "private exists" from "doesn't exist" is a group-graph leak vector.
+64. **Tier 18 Chunk 5 — `group-comment` push type is in TWO places**: `PUSH_NOTIFICATION_TYPES` in [validation/schemas.js](validation/schemas.js) AND `NOTIFICATION_TYPES` in [src/components/PushSettingsPanel.jsx](src/components/PushSettingsPanel.jsx). Same dual-update rule as every other push type. The `fanOutGroupComment` consumer reads the user's `pushPreferences[type]` via PushService — absent key OR `true` means deliver; only explicit `false` opts out.
+65. **Tier 18 Chunk 6a — Notification `link` convention**: every `NotificationService.notify(userId, type, title, body, link)` call site MUST populate `link` (see §6.2 table for the per-type convention). Without a link, the SW's `notificationclick` opens `/` and the user lands on the dashboard instead of the relevant context. The deep-link consumer in `DataContext.consumeDeepLinks` only recognizes `?view=`, `?gameId=`, `?groupId=` — new param families need to be added there too.
+66. **Tier 18 Chunk 6a — Deep-link consumer runs ONCE between data-load and bootDone**: the order is critical. `GamesCalendar` reads `?date=` from the URL via `useState` initializer on its first mount. If `consumeDeepLinks` runs AFTER the calendar mounts (e.g. moved into a post-bootDone effect), the calendar will read the user's last-saved date instead of the deep-link target. **Don't move the consumer call** out of the `loadDashboard().then(...)` chain without also making the calendar reactive to URL changes.
+67. **Tier 18 Chunk 6b — `wasHandled` flag is the contract**: `useRequest` sets `err.wasHandled = true` on EVERY 4xx response. `clientErrorReporter.reportClientError` short-circuits on the flag — skips both the DOM event AND the server-side POST. If you add another error path that produces a user-facing message, set the flag too so the generic "Something went wrong" toast doesn't clobber the real message. **Don't remove the defense-in-depth check** in `NotificationContext`'s event listener — it catches the edge case of unhandled rejections that still carry the flag.
+68. **Tier 18 Chunk 6b — AuthView swallows login + register rejections**: both `handleLogin` and `handleRegister` in [src/views/AuthView.jsx](src/views/AuthView.jsx) wrap the AuthContext call in try/catch. The catch is empty (intentionally) because AuthContext already surfaced the message via `showStatus`. The re-throw must not bubble or `clientErrorReporter`'s unhandled-rejection listener fires the generic toast. **If you ever stop re-throwing in AuthContext**, the AuthView catches become dead code — fine to remove, but in lockstep.
+69. **Tier 18 Chunk 6c — Legal pages MUST bypass everything**: `App.jsx`'s pathname short-circuit runs BEFORE the `bootDone` check and the auth view switch. Anon + authed users see the same `/terms`, `/privacy`, `/copyright`, `/cookies` content with no auth gate and no skeleton wait. If you ever move the short-circuit below the boot/auth logic, you'll re-introduce a flash of unauthenticated chrome before the legal copy renders.
+70. **Tier 18 Chunk 6c — Legal copy stays plain-English**: do NOT add specific cookie names, exact retention windows, named sub-processors, or specific security mechanism names to the legal pages. The trim is deliberate to minimize attack-surface disclosure. The previous (verbose) versions exist in git history if a DPA inquiry ever requires that level of detail in a direct response.
+71. **Tier 18 Chunk 6c — `CURRENT_TERMS_VERSION` lives in TWO places**: [validation/schemas.js](validation/schemas.js) (server) and [src/lib/terms.js](src/lib/terms.js) (client). They MUST stay in sync — the server validates `registerSchema` and `acceptTermsSchema` against the server-side value; bumping only the client triggers 400s on every registration. Bump BOTH in the same commit.
+72. **Tier 18 Chunk 6c — Stamp `termsAcceptedAt` + `termsAcceptedVersion` on registration**: `routes/auth.js POST /api/register` stamps both fields on `User.create`. Without this, every new user would see the blocking modal on their first dashboard load — which is a confusing UX (they just accepted via the checkbox seconds ago). The `registerSchema` requires `acceptedTerms: literal(true)` so the consent capture is server-validated; the route just records what was already validated.
+73. **Tier 18 Chunk 6c — Blocking modal is BLOCKING**: `TermsAcceptanceModal` preventDefaults `onEscapeKeyDown`, `onPointerDownOutside`, `onInteractOutside`, and uses a no-op `onOpenChange`. Two actions only: Accept or Sign out. **Don't add a "remind me later" option** — that defeats the consent-capture contract. **Don't soften** any of the preventDefaults — Radix Dialog defaults would otherwise let users dismiss the modal without accepting.
+74. **Tier 18 Chunk 6c — Pre-accept terms for seed users**: [tests/e2e/fixtures/seed.js](tests/e2e/fixtures/seed.js) sets `termsAcceptedAt: now, termsAcceptedVersion: 1` on every seed user. Without this, every E2E spec that signs in as a seed user would hit the blocking modal and fail. UI-registered test users still go through the checkbox path via the `registerViaUI` helper which now ticks `#register-accept-terms`. API-level `/api/register` test calls (in `auth.spec.js` + `admin.spec.js`) send `acceptedTerms: true, acceptedTermsVersion: 1`.
 
 ### 11.5 Backup / Restore
 
@@ -3294,29 +3572,32 @@ Container Apps issues + binds a free Azure managed cert via HTTP-01 ACME validat
 
 ## 12. Known Limitations & Technical Debt
 
-| Area                         | Issue                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Tier                      |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| Tests below E2E              | Playwright covers 270 tests across 22 specs (10 UI/flow + 14 per-endpoint API + 2 panel smokes); no unit / integration tests below the Playwright layer. Tradeoff acknowledged — the API suite hits the real route stack against a real DB, so the unit-test gap is mostly philosophical                                                                                                                                                                         | future                    |
-| Pick types                   | Only winner picks; no spread / over-under / score prediction. Deferred from Tier 4b after live-score UX bedded in. Draws now award partial credit (post-draw-scoring tier) but the pick semantic stays `home`/`away` only                                                                                                                                                                                                                                        | future (post-4b)          |
-| Match minute is approximate  | football-data.org free tier doesn't expose `minute` / `injuryTime`. Client estimates from kickoff + `halfTimeReached` + `phase` signals. Soft by ~5 min around halftime. Swap to paid provider via [lib/footballApi.js](lib/footballApi.js) for an authoritative timer                                                                                                                                                                                           | future (provider swap)    |
-| Upstream filter staleness    | football-data.org's `?status=LIVE,IN_PLAY,PAUSED` filter has been observed to lag the canonical `?ids=` endpoint by 90+ min (incident 2026-05-19, AFC Bournemouth vs Manchester City sourceId 538145 — full postmortem in §8.22). Mitigated by the 5-min `reconcileInProgressGames` job which polls `?ids=` for every local in-progress game; worst-case stuckness ≤5 min. If BOTH endpoints stale simultaneously (rare), admin manual override is the only path | future (provider swap)    |
-| Streaks                      | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits when streak badges become a real product ask)                                                                                                                                                                                                                                                                                                                                      | future                    |
-| Audit log before-state       | Middleware records `after` payload only; `before` for updates/deletes would need per-entity pre-fetch hooks. Auth-failed admin attempts (401/403 thrown before middleware runs) are not audited                                                                                                                                                                                                                                                                  | future                    |
-| Real-time                    | No WebSocket/SSE; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time. Live-score updates land via the 60-s server cron + next-`refreshGames` on the client                                                                                                                                                                                                                                                   | 7                         |
-| Notification spam            | Bulk-setResult + live-score auto-finalization fan-out per-pick on result transition — no batching/dedup. A big upset on a popular fixture produces many notifications in one request                                                                                                                                                                                                                                                                             | 7                         |
-| Cache scope                  | `leaderboardCache` + fixture cache + rate-limit + lockout counters are all in-process Maps. A multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so sessions survive a restart, but the in-memory caches don't. Today the app runs single-instance so this is fine                                                                                                                                                  | Tier 10.4 (Redis backend) |
-| Server-side log shipping     | pino → stdout → Container Apps → Log Analytics workspace (Tier 9.6). Application Insights resource is provisioned but its SDK isn't wired into app code yet. Sentry covers errors but not access logs                                                                                                                                                                                                                                                            | Tier 10.6                 |
-| Health / readiness probes    | `/healthz` exists (Tier 9.4) and is used by Container Apps liveness + readiness probes — but it doesn't ping the DB or Redis. A real readiness check (`/readyz` with DB ping) is still pending                                                                                                                                                                                                                                                                   | Tier 10.1                 |
-| Metrics                      | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters                                                                                                                                                                                                                                                                                                                                                                | Tier 10.3                 |
-| Graceful shutdown            | No SIGTERM drain. `tini` forwards SIGTERM; Node exits when the event loop drains. In-flight requests + scheduler ticks aren't given a grace window                                                                                                                                                                                                                                                                                                               | Tier 10.5                 |
-| Multi-device session listing | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset + in-session password change today                                                                                                                                                                                                              | future                    |
-| Reused-recovery-code warning | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code                                                                                                                                                                                                                                                                                                           | future                    |
-| TypeScript migration         | No TS yet; whole codebase JavaScript + JSX. Parked at end of roadmap                                                                                                                                                                                                                                                                                                                                                                                             | Tier 9.10                 |
-| Storybook                    | No component sandbox. Visual changes verified by running the dev server + Playwright `screenshots/mobile.spec.js`. Parked at end of roadmap                                                                                                                                                                                                                                                                                                                      | Tier 9.11                 |
-| Token-rule lint              | The "components must use design tokens, not raw `slate-*`/`cyan-*` literals" rule is review-only; no ESLint plugin enforces it                                                                                                                                                                                                                                                                                                                                   | future                    |
-| ML — single-league models    | PL only at launch. Architecture supports multi-league via `(name, leagueId)` unique index + per-league `MODEL_PATHS`. La Liga / Bundesliga / Serie A / Ligue 1 each need own CSV corpus + reconcile-map extension + seeder extension + training run                                                                                                                                                                                                              | future                    |
-| ML — no isotonic calibration | Tier 17 dropped Phase 2's calibration to keep the JS runtime zero-dep. Probabilities may be slightly miscalibrated at extremes (>70%). Re-introducing it would mean porting `IsotonicRegression.predict` to JS (binary search through piecewise constants exported as JSON arrays) — ~30 LOC follow-up if it ever matters                                                                                                                                        | future                    |
-| ML — no monotonicity         | Tree models over a 2-feature space can have small non-monotonic kinks across narrow Elo ranges (a 20-pt Elo drop occasionally INCREASES a team's win probability by 1–3pp). Eliminable via `monotone_constraints={'home_elo':1, 'away_elo':-1}` in the Python trainer — one-line config addition if needed                                                                                                                                                       | future                    |
+| Area                               | Issue                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Tier                      |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| Tests below E2E                    | Playwright covers 270 tests across 22 specs (10 UI/flow + 14 per-endpoint API + 2 panel smokes); no unit / integration tests below the Playwright layer. Tradeoff acknowledged — the API suite hits the real route stack against a real DB, so the unit-test gap is mostly philosophical                                                                                                                                                                                                                                         | future                    |
+| Pick types                         | Only winner picks; no spread / over-under / score prediction. Deferred from Tier 4b after live-score UX bedded in. Draws now award partial credit (post-draw-scoring tier) but the pick semantic stays `home`/`away` only                                                                                                                                                                                                                                                                                                        | future (post-4b)          |
+| Match minute is approximate        | football-data.org free tier doesn't expose `minute` / `injuryTime`. Client estimates from kickoff + `halfTimeReached` + `phase` signals. Soft by ~5 min around halftime. Swap to paid provider via [lib/footballApi.js](lib/footballApi.js) for an authoritative timer                                                                                                                                                                                                                                                           | future (provider swap)    |
+| Upstream filter staleness          | football-data.org's `?status=LIVE,IN_PLAY,PAUSED` filter has been observed to lag the canonical `?ids=` endpoint by 90+ min (incident 2026-05-19, AFC Bournemouth vs Manchester City sourceId 538145 — full postmortem in §8.22). Mitigated by the 3-min `reconcileInProgressGames` job (Tier 18 default; was 5-min on free tier) which polls `?ids=` for every local in-progress game; worst-case stuckness ≤3 min. If BOTH endpoints stale simultaneously (rare), admin manual override is the only path                       | future (provider swap)    |
+| Streaks                            | Deferred — concurrent kickoffs make "consecutive correct" ambiguous (revisits when streak badges become a real product ask)                                                                                                                                                                                                                                                                                                                                                                                                      | future                    |
+| Audit log before-state             | Middleware records `after` payload only; `before` for updates/deletes would need per-entity pre-fetch hooks. Auth-failed admin attempts (401/403 thrown before middleware runs) are not audited                                                                                                                                                                                                                                                                                                                                  | future                    |
+| Real-time                          | No WebSocket/SSE; everything is HTTP polling at 30 s. Reaction count changes don't propagate across viewers in real time. Live-score updates land via the 60-s server cron + next-`refreshGames` on the client                                                                                                                                                                                                                                                                                                                   | 7                         |
+| Notification spam                  | Bulk-setResult + live-score auto-finalization fan-out per-pick on result transition — no batching/dedup. A big upset on a popular fixture produces many notifications in one request                                                                                                                                                                                                                                                                                                                                             | 7                         |
+| Cache scope                        | `leaderboardCache` + fixture cache + rate-limit + lockout counters are all in-process Maps. A multi-instance deploy would see stale reads across replicas. Refresh-token rows are in Postgres so sessions survive a restart, but the in-memory caches don't. Today the app runs single-instance so this is fine                                                                                                                                                                                                                  | Tier 10.4 (Redis backend) |
+| Server-side log shipping           | pino → stdout → Container Apps → Log Analytics workspace (Tier 9.6). Application Insights resource is provisioned but its SDK isn't wired into app code yet. Sentry covers errors but not access logs                                                                                                                                                                                                                                                                                                                            | Tier 10.6                 |
+| Health / readiness probes          | `/healthz` exists (Tier 9.4) and is used by Container Apps liveness + readiness probes — but it doesn't ping the DB or Redis. A real readiness check (`/readyz` with DB ping) is still pending                                                                                                                                                                                                                                                                                                                                   | Tier 10.1                 |
+| Metrics                            | No `prom-client` / `/metrics` endpoint; no request-duration histogram, no cache hit/miss counters                                                                                                                                                                                                                                                                                                                                                                                                                                | Tier 10.3                 |
+| Graceful shutdown                  | No SIGTERM drain. `tini` forwards SIGTERM; Node exits when the event loop drains. In-flight requests + scheduler ticks aren't given a grace window                                                                                                                                                                                                                                                                                                                                                                               | Tier 10.5                 |
+| Multi-device session listing       | `refresh_tokens.userAgent` is captured, but there's no UI for "active sessions" or "sign me out of all devices" — the latter is implemented as `revokeAllUserRefreshTokens` but only triggered by password reset + in-session password change today                                                                                                                                                                                                                                                                              | future                    |
+| Reused-recovery-code warning       | A second use of an already-consumed recovery code returns generic 400; no alert/notification to the user that someone else may have used a stolen code                                                                                                                                                                                                                                                                                                                                                                           | future                    |
+| TypeScript migration               | No TS yet; whole codebase JavaScript + JSX. Parked at end of roadmap                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Tier 9.10                 |
+| Storybook                          | No component sandbox. Visual changes verified by running the dev server + Playwright `screenshots/mobile.spec.js`. Parked at end of roadmap                                                                                                                                                                                                                                                                                                                                                                                      | Tier 9.11                 |
+| Token-rule lint                    | The "components must use design tokens, not raw `slate-*`/`cyan-*` literals" rule is review-only; no ESLint plugin enforces it                                                                                                                                                                                                                                                                                                                                                                                                   | future                    |
+| Friends' picks privacy             | `GET /api/picks/friends` (Tier 18 Chunk 4) returns every pick a friend made on a game in the ±30-day window — including picks that have not yet been resolved. A friend who realizes they don't want their pre-result picks visible to friends can't opt out of just this surface; their only lever is `users.profileVisibility = 'friends'` which masks them in leaderboards (not picks). Acceptable today because the social contract of "friends see friends' picks" is the feature; revisit if user feedback shows otherwise | future                    |
+| Terms acceptance version is global | Bumping `CURRENT_TERMS_VERSION` re-prompts every user on next visit. There's no targeted re-prompt for users in a specific jurisdiction or with a specific consent gap. If a future material change only affects EU users (for example), the blunt approach would still prompt everyone. Acceptable today (single jurisdiction, single English-language audience)                                                                                                                                                                | future                    |
+| Legal page versioning is silent    | The "Last updated" date inside the legal pages is hand-edited; there is no consent migration tooling to inspect what version any given user accepted. The `users.termsAcceptedVersion` integer is the only record. Acceptable today because we ship version 1; if multiple bumps stack up we'd want a `terms_versions` audit table that snapshots the full text per version                                                                                                                                                      | future                    |
+| ML — single-league models          | PL only at launch. Architecture supports multi-league via `(name, leagueId)` unique index + per-league `MODEL_PATHS`. La Liga / Bundesliga / Serie A / Ligue 1 each need own CSV corpus + reconcile-map extension + seeder extension + training run                                                                                                                                                                                                                                                                              | future                    |
+| ML — no isotonic calibration       | Tier 17 dropped Phase 2's calibration to keep the JS runtime zero-dep. Probabilities may be slightly miscalibrated at extremes (>70%). Re-introducing it would mean porting `IsotonicRegression.predict` to JS (binary search through piecewise constants exported as JSON arrays) — ~30 LOC follow-up if it ever matters                                                                                                                                                                                                        | future                    |
+| ML — no monotonicity               | Tree models over a 2-feature space can have small non-monotonic kinks across narrow Elo ranges (a 20-pt Elo drop occasionally INCREASES a team's win probability by 1–3pp). Eliminable via `monotone_constraints={'home_elo':1, 'away_elo':-1}` in the Python trainer — one-line config addition if needed                                                                                                                                                                                                                       | future                    |
 
 ---
 
@@ -3352,6 +3633,13 @@ Summary:
 - ✅ **Leaderboard league + season filters** (standalone, shipped 2026-05-18) — `GET /api/leaderboard?leagueId=&seasonId=` scopes overall + per-group blocks. Builders `buildGroupLeaderboard(groupId, {leagueId, seasonId})` + `buildUserSummary({leagueId, seasonId})` add `where: gameWhere` on Game.findAll. In-memory pick loop's existing `if (!gameById.has(pick.gameId)) continue` guard drops out-of-scope picks from both numerator AND denominator → winRate scopes automatically. Cache key extended via `LeaderboardService.buildKey(scope, {leagueId, seasonId})` to `overall:l:<id|*>:s:<id|*>` and `group:<groupId>:l:<id|*>:s:<id|*>`. New `lib/leaderboardCache.js invalidatePrefix(prefix)` required because one logical scope now spans many keys. New [LeaderboardFiltersBar](src/components/LeaderboardFiltersBar.jsx) + `?lbLeague=&lbSeason=` URL keys (separate axis from games-view) + `DataContext.leaderboardFilters` slot. Mounts on Leaderboard + My Picks tabs (one global "stats scope" filter).
 - ✅ **ML probability pipeline (Phase 1–3 history)** — Phase 1 (PL only, manual, shipped 2026-05-17): standalone Python project at [ml/](ml/) producing `(homeProbability, awayProbability)` via Elo + XGBoost. 5-season train (2004/05–2008/09) → 15-season held-out test (2010/11–2024/25, 5,700 OOS matches): mlogloss 0.992 vs baseline 1.065 (-0.073), accuracy 51.9% vs 44.9% (+7pp). Phase 2 (isotonic calibration, shipped 2026-05-17): per-class IsotonicRegression fit on val; clip every class to [0.01, 0.99] before renormalization; 70-80% bucket overconfidence pulled from -7pp to -2pp. Phase 3 (Azure deployment, shipped 2026-05-17 → daily 2026-05-18): `scorecast-ml-job` Container Apps Job on a daily 02:30 UTC cron, image-baked trained bundle, idempotent skip-existing. **All three Phase 1/2/3 deployment-side pieces were retired by Tier 17** (see below).
 - ✅ **Tier 17 — Reactive Elo cascade + JS-native inference + retire Python pipeline** (shipped 2026-05-23 across 6 PRs). Inverts the daily-cron probability writer into an event-driven cascade triggered by every captured result. **PR A** (`teams` table + Elo bootstrap seeder); **PR B** (zero-dep JS XGBoost tree walker + Elo math + normalize, 39 unit tests via `node --test`); **PR C** (`PredictionService.onResultUpdated` + `rePredictFutureFixtures` wired into `GameService.setResult`/`bulkSetResult`/`applyLiveUpdate`); **PR D** (deleted Container Apps Job + ACR repo + `ml-deploy.yml` + `ml-job.bicep` + `ml-pipeline-password` KV secret + `ml_pipeline` DB user + 24 Python files; slimmed trainer to single `train` subcommand emitting `booster.save_model('PL_elo_<date>.json')`); **PR E** (fix XGBoost 2.x hex-encoded `base_score` parse → NaN poisoning every cascade prediction + defensive non-finite guard); **PR F** (idempotent + reversible cascade via per-game pre-match Elo snapshot — `games.{homeEloPre, awayEloPre, appliedResult}`; same result re-saved no-ops; result change reverses prior delta against snapshot + applies new delta against SAME snapshot; result clear reverses and drops snapshot; round-trip is bit-identical). Production model: `lib/ml/models/PL_elo.json` (615 trees, val mlogloss 0.944). Bicep reapply param count dropped 7 → 5. Operator scripts under [scripts/](scripts/): `query-teams.mjs`, `find-game.mjs`, `repair-test-game-elo.mjs`, `backfill-probabilities.mjs`. See §8.17 for the full architecture.
+- ✅ **Tier 18 — UX & trust polish** (shipped 2026-05-23 to 2026-05-26 across 6 chunks). Daily-use friction grab-bag plus the legal/consent foundation.
+  - **Chunk 1** (2026-05-26) — Chrome polish: BANTRYX wordmark becomes a clickable home-button when authed (cyan everywhere, white on hover except on the Games tab where it stays cyan); PWA manifest name shortened to `"Bantryx"` (was `"Bantryx — ScoreCast"`); mobile sidebar drawer + DialogPrimitive content gain `pt-safe` + `safe-bottom` so the iPhone notch + home indicator don't eat content; new `.pt-safe` utility = `max(0.5rem, env(safe-area-inset-top))`.
+  - **Chunk 2** (2026-05-23) — Live-score cadence upgrade for paid football-data.org TIER_ONE plan. `RATE_LIMIT_PER_MINUTE` now env-driven (default 20, was hardcoded 10); `LIVE_SCORE_SYNC_CRON` default flipped to `'*/30 * * * * *'` (30 s, was 1 min); `IN_PROGRESS_RECONCILE_CRON` default flipped to `'*/3 * * * *'` (3 min, was 5 min). Probe of `GET /v4/competitions/PL` confirmed `x-requests-available-minute: 19` after 1 call ⇒ 20/min budget; `minute`/`injuryTime` STILL not exposed at TIER_ONE (client-side `useMatchMinute()` stays in). Cost: €19/mo.
+  - **Chunk 3** (2026-05-26) — `<GamesCalendar />` 7-day fixed window viewer replacing the 3-section "live / upcoming / completed" cascade. URL `?date=YYYY-MM-DD` sync via `history.replaceState`. ±7-day arrow paging. "Back to today" pill with live red dot when in-progress today. `useGames.byDay` Map + exported `dayKey(value)` helper. Picks-history Draws filter chip. Compact `LeaderboardCard` (top-3 + self + friends + "Show all N" toggle) — `friendUserIds` prop wires DataContext.friends into the compact view. See §8.24.
+  - **Chunk 4** (2026-05-26) — Friends' picks visibility. New `GET /api/picks/friends?gameId=<uuid>` endpoint (±30-day horizon, 500-row cap, server-side scored via `scorePick` honoring Tier 17 pick-time snapshots, passed through Tier 8.6 `applyMasking`). New `DataContext.friendsPicks` slot loaded in `loadDashboard` + `revalidate`. New `useFriendsPicks` selector with memoized `byGame` Map. New `<FriendPicksPanel />` mounted in every `GameCard` (won = green ✓+pts; **draw = warning yellow** (not green); missed = "✗ Missed" not "+0"). New `[Mine]/[Friends]` segmented toggle on My Picks tab with shared `comparePicksByPendingThenRecent` comparator (unresolved kickoff ASC then resolved kickoff DESC). Friend dropdown filter positioned LEFT of `LeaderboardFiltersBar`. Pill label "Friends" no apostrophe; section heading "Friends' Picks" keeps apostrophe (deliberate distinction). See §8.25.
+  - **Chunk 5** (2026-05-26) — Group running comments. `comments` schema flips `gameId` to NULLABLE + adds `groupId` UUID NULLABLE → groups(id) CASCADE + partial index `comments_group_idx` + DB-level CHECK `comments_one_scope_chk` enforcing exactly one scope per row. `CommentService` refactored to scope-agnostic `list({gameId, groupId}, viewerId)` + `create({gameId, groupId, userId, body})` with `assertSingleScope` guards at the service layer. Group-comment fan-out via new `fanOutGroupComment({comment, author, group})` — every OTHER group member gets a `'group-comment'` push/bell notification (title `"<author> commented in <group name>"`, body capped at 160 chars, link `/?view=groups&groupId=<id>`). New `GET /api/groups/:id/comments` (anon-readable for public, 404 for non-members of private to avoid existence leak) + `POST /api/groups/:id/comments` (membership enforced in service, 403 for non-members even on public groups — write is member-only by design). `CommentThread` generalized to `{scope, scopeId}` props with backwards-compat `gameId` shim. `GroupCard` mounts `<CommentThread scope="group" scopeId={group.id} />` for members + owner. `GroupService.cascadeDelete` explicitly destroys group comments + reactions inside the transaction (defensive against `sync({alter:false})` bootstrap paths where the FK might have landed as NO ACTION). `PUSH_NOTIFICATION_TYPES` + `PushSettingsPanel` `NOTIFICATION_TYPES` both gain the `group-comment` entry. See §8.7.
+  - **Chunk 6** (2026-05-26) — Notification deep-links + error toast cleanup + legal pages + terms acceptance. **6a deep-links**: every `NotificationService.notify(...)` call site now populates the 5th positional `link` arg (convention table in §6.2); `DataContext.consumeDeepLinks` runs ONCE between data-load and bootDone, recognizes `?view=` / `?gameId=` / `?groupId=`, writes synthetic `?date=` for the gameId path so GamesCalendar picks it up on first mount, strips consumed params via `history.replaceState`. **6b errors**: `useRequest` marks 4xx errors with `err.wasHandled = true`; `clientErrorReporter.reportClientError` short-circuits on the flag (skips both DOM event AND server POST); `NotificationContext` has defense-in-depth listener check; AuthView swallows `handleLogin` re-throw (closes documented Tier 5.5b race that clobbered "Invalid credentials" with the generic toast); `FRIENDLY_ERROR_CODES` wraps `football_api_rate_limit` / `rate_limited` into one-line user-facing copy. **6c legal pages**: new `src/components/legal/` with `LegalLayout` + `Terms` / `Privacy` / `Copyright` / `CookiePolicy` — plain-English copy grounded in app data flows but deliberately trimmed (no cookie-name tables, no exact retention windows, no named sub-processors, no specific security mechanisms) so we're not publishing an attacker-friendly inventory; T&T Data Protection Act 2011 reference. `App.jsx` short-circuits on `/terms` / `/privacy` / `/copyright` / `/cookies` pathnames before any auth/boot logic. New `<Footer />` on Landing + DashboardView. **6c terms acceptance**: migration `20260526000002` adds `users.{termsAcceptedAt, termsAcceptedVersion}` (nullable). `CURRENT_TERMS_VERSION = 1` constant in [validation/schemas.js](validation/schemas.js) + mirrored in [src/lib/terms.js](src/lib/terms.js). `registerSchema` requires literal `acceptedTerms: true` + matching version; `RegisterForm` gates submit on required checkbox with inline `/terms` + `/privacy` links opening in new tab; `routes/auth.js POST /api/register` stamps both columns on `User.create` so new users never see the modal. New `POST /api/me/accept-terms` rejects stale versions with 400. New `<TermsAcceptanceModal />` is a Radix Dialog with ALL dismissal vectors blocked (`onEscapeKeyDown` + `onPointerDownOutside` + `onInteractOutside` all preventDefault'd + no-op `onOpenChange`); only actions are "I accept" or "Sign out"; mounted in App.jsx when `user && !browseAsGuest && needsTermsAcceptance(user)`; suppresses `OnboardingTour` while open. Seed users pre-accepted in `fixtures/seed.js`; `registerViaUI` helper ticks `#register-accept-terms`; 5 API-level `/api/register` calls updated. See §8.26 + §8.27.
 
 ---
 

@@ -438,7 +438,7 @@ A single Node process listens on `PORT` (default `3000`). It does:
 - **JSON API** at `/api/*`.
 - **In-process scheduler** (Tier 4b Chunk 2) — node-cron ticks the daily fixture sync (03:00 UTC) + 60-s live-score poll. Wrapped in `pg_try_advisory_lock(crc32(jobName))` so a future multi-replica deploy only runs each tick once.
 
-There is **no separate worker process**, **no PM2 wrapper**. Restart = lose the in-memory rate-limit counters, lockout counters, leaderboard cache, fixture cache, and any pending in-flight cron tick (next tick recovers — fixture sync is idempotent, live-score self-recovers via the reconcile pass). There is **no graceful SIGTERM shutdown** logic yet (Tier 10.5) — `tini` forwards SIGTERM; the process exits when Node's event loop drains.
+There is **no separate worker process**, **no PM2 wrapper**. Restart = lose the in-memory rate-limit counters, lockout counters, leaderboard cache, fixture cache, and any pending in-flight cron tick (next tick recovers — fixture sync is idempotent, live-score self-recovers via the reconcile pass). **Graceful SIGTERM shutdown** is wired (Tier 20 Chunk 7): SIGTERM → `server.close()` (drain in-flight) → 25s race timeout → `scheduler.stop()` → `sequelize.close()` → `process.exit(0)`. `tini` forwards the signal correctly from the Dockerfile entrypoint. See §8.29.
 
 **Trust proxy** — `app.set('trust proxy', 1)` is set in [server.js](server.js) so `req.ip` resolves to the real client IP through Cloudflare → Azure Container Apps ingress. Without this, every per-IP rate limiter would resolve to the proxy IP and effectively short-circuit. Set to `1` (single hop) deliberately, not `true`, so spoofed `X-Forwarded-For` headers from outside the trusted hop can't bypass limits.
 
@@ -696,7 +696,7 @@ After Tier 13.2 each domain owns its own router file under [routes/](routes/); [
     - **Audit log** (Tier 4b Chunk 3): `GET /api/admin/audit-log?limit=&offset=` (cap 200/page).
     - **Cache stats**: `GET /api/admin/cache-stats` — returns `LeaderboardService.stats()` snapshot for development verification.
 
-15. **Health** — [routes/health.js](routes/health.js): `GET /healthz` (mounted at root, no `/api` prefix). Used by Container Apps liveness + readiness probes. Currently does not ping the DB or Redis — Tier 10.1 will add `/readyz`.
+15. **Health** — [routes/health.js](routes/health.js): `GET /healthz` (mounted at root, no `/api` prefix). Liveness only (no DB ping) — used by Container Apps Liveness probe + Docker HEALTHCHECK. `GET /readyz` (Tier 20 Chunk 7) pings the DB via `SELECT 1` and returns 503 on failure — used by Container Apps Readiness probe. Distinct on purpose: transient DB outage should pull the replica out of rotation (`/readyz` fails → no traffic) but NOT restart the container (`/healthz` still 200).
 
 16. **API docs (dev only)** — [routes/docs.js](routes/docs.js): `GET /api/openapi.json` + `GET /api/docs` (Swagger UI). Mounted ONLY when `NODE_ENV !== 'production'`.
 
@@ -3031,6 +3031,59 @@ When we ever change material terms, bump BOTH constants in the same commit. Ever
 3. **No-op on already-locked**: a game with `pickProbabilitiesLockedAt` set is excluded from the cron's query even if probabilities later move — picks retain their existing snapshot, mirroring the cascade-guard semantic at the cron layer.
 
 New `updateGameFields(gameId, fields)` helper in [tests/e2e/helpers/api.js](tests/e2e/helpers/api.js) bypasses GameService so the tests can stage states the public API rejects (date in past, locked-at populated manually, etc.). `hooks: false` mirrors the existing setUserPassword pattern.
+
+### 8.29 Tier 20 — Polish + Hardening + Tier 10 fold-in
+
+A seven-chunk polish-and-hardening tier with no new infrastructure (explicitly no Redis, no managed services). Items chosen because they were either user-visible debt (legal copy, age gate, mobile overflow, broken share previews) or production-readiness gaps that Tier 10 had been carrying.
+
+**Chunk 1 — Legal hardening + 13+ age gate + terms v2 bump** (see also §8.27). Three changes bundled under one `CURRENT_TERMS_VERSION` bump (1 → 2) so existing users see the blocking modal once, not three times:
+
+1. **Dropped $50 liability floor** ([src/components/legal/Terms.jsx](src/components/legal/Terms.jsx) §7). Original clause capped liability at "the greater of (a) total paid in last 12 months, OR (b) USD $50". Since every user pays $0 on the free tier, the $50 OR-branch was a per-user exposure floor that served no purpose. Now reads "limited to the total amount you have paid us in the twelve months preceding the claim (which, for the free tier, is zero)" — standard structure for free consumer apps.
+2. **Added 13+ age line** to Terms §3 Acceptable Use. "You must be at least 13 years old to use Bantryx. Some jurisdictions require an older minimum age — you are responsible for confirming the local requirement." Pairs with the existing Privacy page disclosure "We do not knowingly collect data from children under 13."
+3. **Added `confirmedAge` literal-validated field** to [validation/schemas.js](validation/schemas.js) registerSchema. RegisterForm gains a second required checkbox (`#register-confirm-age`) above the existing terms checkbox; AuthContext.handleRegister guards both client-side with user-facing toasts before posting. `confirmedAge` is NOT persisted — existence of the registration row + `termsAcceptedAt` ARE the consent record (matches the `acceptedTerms` pattern from Tier 18 Chunk 6c). Bumping the minimum age requires a new terms version bump (which re-collects via the blocking modal).
+
+**Chunk 2 — Profanity filter on 6 surfaces**. Adds [`obscenity`](https://www.npmjs.com/package/obscenity) (MIT, ~17KB, modern English matcher with l33t/repeated-char/zero-width transformers and built-in whitelisting for collision-prone English words like Scunthorpe). Shared `noProfanity` zod `.refine()` in [validation/schemas.js](validation/schemas.js) wired in alongside the existing Tier 5.5b `DANGEROUS_TEXT_CHARS` refine on every user free-text surface:
+
+- `username` (registerSchema)
+- `displayName` + `bio` (editProfileSchema)
+- `commentSchema.body`
+- `createGroupSchema.name`
+- `joinRequestSchema.message` (Tier 19)
+
+The matcher is initialized once at module load. Failed validation returns the standard 400 from the shared `validate()` middleware with the message "Please remove inappropriate language" — symmetric with the bidi/control-character rejection ergonomics. No mask/replace: UX is "fix and resubmit." Three boundary tests in `comments.spec.js` + `me.spec.js` + `groups.spec.js` lock the wiring; one per surface is enough since they all share the same refine function.
+
+**Chunk 3 — Search → calendar deep-link**. DashboardView's SearchBar `onSelectGame` prop changed from `() => setView('games')` to `(game) => { setView('games'); navigateToDeepLink('/?gameId=' + game.id); }`. This reuses the Tier 18 Chunk 6a deep-link consumer infrastructure: `navigateToDeepLink` pushes the URL via `history.pushState`, then `consumeDeepLinks(games)` resolves the gameId against the games list, derives the day via `dayKey(game.date)`, writes a synthetic `?date=YYYY-MM-DD`, and strips the consumed `?gameId=` via `replaceState`. GamesCalendar's first-render useState initializer reads `?date=` and pre-shifts `windowIndex` when the target sits outside the default ±3-day window — so the chip is visible on first paint. Pre-fix, the in-app search surface only switched the tab but dropped the user on today; post-fix it lands them on the kickoff day directly.
+
+**Chunk 4 — GamesCalendar mobile polish** ([src/components/GamesCalendar.jsx](src/components/GamesCalendar.jsx)).
+
+- **Header re-layout**: replaced the flex-wrap `<h3>` + sibling pill with a `grid grid-cols-3 items-center` layout. Heading left (truncates with ellipsis at 360px via `min-w-0 truncate`), "Back to today" pill centered in the middle column (only renders when not on today; the center column stays empty-but-reserved otherwise), count right-aligned in column 3. Tracking tightened from `[0.24em]` to `[0.16em]` at `<sm:` to give long-form labels ("Wednesday, May 27") more room — bumps back to `[0.24em]` at `sm:`.
+- **Today chip overflow fix**: at `<sm:`, the 7-col chip grid leaves ~40px per chip. The word "TODAY" with uppercase + letter-tracking eats more horizontal space than 3-letter weekday labels ("SAT", "SUN") — the `truncate` kicked in and showed "Toda…" which read as a layout bug. Mixed-case `'Today'` (no uppercase, no tracking) is narrower than the uppercase weekday and fits cleanly at the tightest width. Uppercase styling preserved at `sm:` and above where chips have room.
+
+**Chunk 5 — Logo restyle (athletic motif + center)** ([public/logo.svg](public/logo.svg)).
+
+- **Centering**: the original B path spanned `x ∈ [152, 410]` (midpoint 281, 25px right of the 512-canvas center 256). Every M/H/C endpoint shifted `-25` in x so the B now spans `x ∈ [127, 385]` (midpoint 256, true geometric centering). All other coordinates preserved exactly — letterform is bit-identical to the original, just repositioned.
+- **Athletic motif — pitch-line accent**: new horizontal cyan stripe at `y=263` (the B's crossbar / pinch-point y-coordinate), 352px wide centered horizontally, 2px tall, fading from transparent at the edges to ~85% opacity in the middle via a horizontal linear gradient. Reads as a horizon / pitch line at 192px+ icon sizes; vanishes into the cyan bowl pinch at 32-64px favicon sizes so the favicon stays recognizably a B. Renders BEHIND the B (drawn first) so the letterform stays crisp.
+
+[scripts/generate-pwa-assets.mjs](scripts/generate-pwa-assets.mjs) regenerates six PNG/ICO variants from the new SVG with no script change — the resvg-js pipeline picked up the new content unchanged.
+
+**Chunk 6 — SEO + Open Graph + favicon in `<head>`** ([index.html](index.html)). Three problems solved: (a) Google SERP shows no favicon today (no `<link rel="icon">` was anchored against structured data); (b) shared links on Slack / Discord / WhatsApp / iMessage / FB / LinkedIn / X rendered as plain text — no preview image; (c) no schema.org markup for Google's Knowledge Graph.
+
+- **Canonical + Open Graph** (`og:type`, `og:site_name`, `og:title`, `og:description`, `og:url`, `og:image` + `width`/`height`/`alt`) — cross-platform sweet-spot 1200×630 image at `/og-image-1200x630.png`.
+- **Twitter Card** (`summary_large_image` with title / description / image).
+- **Inline JSON-LD** WebApplication structured data — name, url, applicationCategory=GameApplication, logo, image, description, offers (price=0).
+
+The JSON-LD body is INTENTIONALLY single-line formatted so its SHA-256 hash stays byte-stable. [server.js](server.js) `cspDirectives.scriptSrc` whitelists the computed hash explicitly (`'sha256-GhzleH2mfEY14NZF8AZ+UWxx4YN/y6+t46pWTLHVEUo='`) — helmet's default `'self'`-only CSP would reject the inline block otherwise. ANY whitespace or content change to the JSON-LD body means re-computing the hash via the one-liner documented at the top of `cspDirectives` in server.js.
+
+New [public/og-template.svg](public/og-template.svg) — landscape 1200×630 SVG with the centered B (same path as logo.svg) + the BANTRYX wordmark (rendered via a generic Impact / Arial Narrow Bold font-family because resvg-js doesn't load webfonts at rasterization time — closest universal fallback to the live Bebas Neue wordmark) + tagline + URL. Same brand gradient + glow + pitch-line accent.
+
+[scripts/generate-pwa-assets.mjs](scripts/generate-pwa-assets.mjs) extended with a `writeOgImage` step that rasterizes the landscape template at exactly 1200×630 (bypasses the square `writePng` helper which derives height from the SVG aspect ratio via fit-to-width).
+
+**Chunk 7 — Production hygiene (Tier 10.1 + 10.5 fold-in)**.
+
+- **`/readyz`** ([routes/health.js](routes/health.js)) — pings DB via `sequelize.query('SELECT 1')`, returns 503 on failure. `/healthz` stays liveness-only (no DB ping) so transient outages don't restart containers. [infra/modules/app.bicep](infra/modules/app.bicep) Readiness probe now points at `/readyz` (5s initialDelay, 10s period, 3-strike failure threshold); Liveness probe still on `/healthz` (10s initialDelay, 30s period, 3-strike).
+- **Graceful SIGTERM** ([server.js](server.js)) — wraps the existing `app.listen()` return value with a SIGTERM + SIGINT handler. Shutdown order: (1) `server.close()`; (2) 25s drain race (5s buffer under ACA's default 30s `terminationGracePeriodSeconds`); (3) `scheduler.stop()`; (4) `sequelize.close()`; (5) `process.exit(0)`. Drain timeout → exit(1) so the orchestrator surfaces failed shutdown in deploy logs. A `shuttingDown` re-entry guard prevents double-fire. tini (already in Dockerfile) forwards SIGTERM correctly to the Node process — no entrypoint change needed.
+
+**Out of scope (deliberate)**: Tier 10.2 (Sentry server-side) + Tier 10.3 (Prometheus /metrics) NOT folded in — kept Tier 20 focused. Tier 7 (SSE realtime + email/digests + full notification preferences UI) explicitly NOT folded in — SSE only pays off at multi-replica (which needs Redis); email/digest is its own tier-sized scope. Save both for Tier 21 or whenever Tier 10.4 (Redis) lands.
 
 ---
 

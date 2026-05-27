@@ -56,7 +56,11 @@ function fullDayLabel(d) {
   const t = startOfDay(new Date());
   const tomorrow = addDays(t, 1);
   if (startOfDay(d).getTime() === tomorrow.getTime()) return 'Tomorrow';
-  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  // Tier 20 follow-up — dropped the weekday from the long-form label.
+  // The chip strip directly below already carries the weekday for the
+  // selected date, so repeating it in the header was redundant and ate
+  // the limited mobile width. Now just "May 27" (no leading "Wednesday, ").
+  return d.toLocaleDateString([], { month: 'long', day: 'numeric' });
 }
 
 function readDateFromUrl() {
@@ -174,6 +178,29 @@ function GamesCalendar({ byDay }) {
     writeDateToUrl(selectedKey);
   }, [selectedKey]);
 
+  // Tier 20 follow-up — listen for in-app URL changes from
+  // DataContext.consumeDeepLinks (search-tap on a game, in-app
+  // NotificationBell click, etc.). pushState/replaceState don't fire
+  // popstate, so without this listener the GamesCalendar would stay on
+  // its mount-time selectedKey whenever the user is already on the Games
+  // tab when the URL changes. Re-read `?date=` from the URL and snap the
+  // window to the new selection. Cold loads + cross-tab navigation are
+  // unaffected — they still hit the useState initializer above.
+  useEffect(() => {
+    const onUrlChange = () => {
+      const fromUrl = readDateFromUrl();
+      const nextKey = fromUrl || todayKey;
+      setSelectedKey((prev) => (prev === nextKey ? prev : nextKey));
+      const nextDate = new Date(`${nextKey}T00:00:00`);
+      if (!Number.isNaN(nextDate.getTime())) {
+        const nextWindow = windowIndexForOffset(diffInDays(today, nextDate));
+        setWindowIndex((prev) => (prev === nextWindow ? prev : nextWindow));
+      }
+    };
+    window.addEventListener('scorecast:url-changed', onUrlChange);
+    return () => window.removeEventListener('scorecast:url-changed', onUrlChange);
+  }, [today, todayKey]);
+
   const selectedDateObj = useMemo(() => new Date(`${selectedKey}T00:00:00`), [selectedKey]);
 
   const goToToday = () => {
@@ -254,22 +281,19 @@ function GamesCalendar({ byDay }) {
                         : 'border-default bg-overlay/40 text-fg-muted hover:border-strong hover:text-fg'
                   }`}
                 >
-                  {/* Tier 20 Chunk 4 — at < 360px the 7-col grid leaves
-                      ~40px per chip, and "TODAY" with uppercase tracking
-                      eats more horizontal space than weekday labels
-                      ("SAT", "SUN") — the truncate kicked in and showed
-                      "Toda…" which read as a layout bug. Mixed-case
-                      'Today' (no uppercase + no tracking) is narrower
-                      than the uppercase 3-letter weekdays so it fits
-                      cleanly even at the tightest width, while the
-                      uppercase styling is preserved at sm+ where chips
-                      are wider. */}
-                  <span
-                    className={`truncate text-[10px] font-semibold tracking-[0.12em] ${
-                      isTodayChip ? 'normal-case' : 'uppercase'
-                    } sm:uppercase`}
-                  >
-                    {isTodayChip ? 'Today' : weekday}
+                  {/* Tier 20 follow-up — at < 360px the 7-col grid leaves
+                      ~40px per chip and "Today" (any casing) still
+                      overflows the truncate boundary on some viewport /
+                      font combos, surfacing as a clipped "Toda…". The
+                      chip's accent border + accent day-number color
+                      already communicate "this is today" without the
+                      word, so drop it entirely on mobile and keep just
+                      the weekday label. At sm+ the chip is wide enough
+                      that we can put "TODAY" back for explicit
+                      labeling. */}
+                  <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em]">
+                    <span className="sm:hidden">{weekday}</span>
+                    <span className="hidden sm:inline">{isTodayChip ? 'TODAY' : weekday}</span>
                   </span>
                   {/* The CSS conflict the Chunk-3 inline-style hack was guarding against
                       DID resurface (intermittently, after Chunk 4b swapped to `text-accent`).

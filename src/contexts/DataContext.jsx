@@ -305,6 +305,16 @@ export function DataProvider({ children }) {
     const qs = params.toString();
     const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
     window.history.replaceState({}, '', next);
+    // Tier 20 follow-up — pushState/replaceState don't fire popstate, so
+    // components that initialized state from the URL (notably GamesCalendar's
+    // `selectedKey` useState initializer reading `?date=`) won't pick up the
+    // change while they remain mounted. Notify subscribers so they can re-
+    // read. Only fires when something actually changed (we early-returned
+    // above if nothing matched). Cold loads + cross-tab navigation still
+    // work without the listener via the existing useState initializer path.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('scorecast:url-changed'));
+    }
   }, []);
 
   // In-app deep-link navigator (Tier 19 follow-up). Used by the NotificationBell

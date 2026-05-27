@@ -56,6 +56,8 @@ function fullDayLabel(d) {
   const t = startOfDay(new Date());
   const tomorrow = addDays(t, 1);
   if (startOfDay(d).getTime() === tomorrow.getTime()) return 'Tomorrow';
+  const yesterday = addDays(t, -1);
+  if (startOfDay(d).getTime() === yesterday.getTime()) return 'Yesterday';
   // Tier 20 follow-up — dropped the weekday from the long-form label.
   // The chip strip directly below already carries the weekday for the
   // selected date, so repeating it in the header was redundant and ate

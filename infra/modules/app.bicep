@@ -261,7 +261,16 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         // C1 (`rate-limit-redis`); acceptable risk pre-launch because
         // the per-IP windows are tight and App Insights 5xx alerts
         // (Tier 25 A7) catch sustained abuse.
-        minReplicas: 0
+        //
+        // Tier 25 B1 — always-on replica. minReplicas: 0 → 1 kills the
+        // 3-5s cold start on the first request after idle. Critical
+        // for shareable links (a tweet of bantryx.com that cold-starts
+        // bounces visitors). Cost: ~$8-12/mo for one always-on
+        // 0.5 vCPU / 1 GiB replica × 730 hr/mo at Consumption pricing.
+        // If demand is sustained, ACA scales out the additional
+        // replicas exactly as before — B1 just guarantees the first
+        // one is warm.
+        minReplicas: 1
         maxReplicas: 10
         rules: [
           {

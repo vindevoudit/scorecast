@@ -49,7 +49,14 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
     }
     backup: {
       backupRetentionDays: 7
-      geoRedundantBackup: 'Disabled'
+      // Tier 25 B2 — replicate the nightly backup to the paired region
+      // (eastus2 → centralus). Protects against a region-wide Azure
+      // outage; without it the backup lives only in eastus2 and a
+      // regional failure means data loss. NOT HA — Burstable tier
+      // doesn't support HA (that's GP+); recovery is still a manual
+      // point-in-time restore to a new server (minutes to hours).
+      // Cost: ~$3/mo (32 GiB × $0.10/GiB-mo for the geo-replica copy).
+      geoRedundantBackup: 'Enabled'
     }
     network: {
       publicNetworkAccess: 'Enabled'

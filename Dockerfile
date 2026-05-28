@@ -56,6 +56,11 @@ COPY badges ./badges
 COPY config ./config
 COPY routes ./routes
 COPY services ./services
+# Operator scripts (Tier 17 + Tier 24 backfills, ad-hoc queries) — runnable
+# via `az containerapp exec --command "node scripts/<name>.mjs"`. Required
+# because backfills aren't part of `npm run db:migrate`; they have to be
+# invoked explicitly by an operator after CD lands.
+COPY scripts ./scripts
 COPY data.json ./data.json
 
 # Drop root.

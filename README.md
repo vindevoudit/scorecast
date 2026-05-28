@@ -46,10 +46,9 @@ Awarded automatically by server hooks:
 - **HttpOnly cookie auth** — 15-min access JWT + 30-day rotating refresh token. No tokens in localStorage; XSS payloads can't lift a session
 - **Email verification** at register and **password reset** via email-delivered single-use tokens (15-min for reset, 24h for verify)
 - **Account lockout** — 5 wrong-password attempts → 15-min lock. Generic 401 for wrong-pw / unknown-user / locked, so attackers can't enumerate accounts
-- **Opt-in two-factor authentication** (TOTP) via any authenticator app (Google Authenticator, Authy, 1Password, etc.) with 10 single-use recovery codes
 - **CSRF protection** via double-submit cookie on every state-changing request
-- **CORS allowlist + helmet headers** (CSP, HSTS, `X-Frame-Options: DENY`) — server refuses to boot in production without an allowlist
-- **Per-route rate limits** on login, register, password-reset, comments, friend-requests, picks, and client error reports
+- **CORS allowlist + helmet headers** (CSP, HSTS with preload, `X-Frame-Options: DENY`, extended Permissions-Policy denying camera/mic/geo/payment/USB/sensors/FLoC) — server refuses to boot in production without an allowlist
+- **Per-route rate limits** on login, register, password-reset, comments, friend-requests, picks, client error reports, group invites + password-join, account modifications (`/me/password`, `/me/email`), and light writes (`/notifications/*`, profile edits)
 
 ### Quality of life
 
@@ -69,7 +68,7 @@ Awarded automatically by server hooks:
 - **Database**: PostgreSQL 16 with Sequelize 6 ORM; migrations via `sequelize-cli` + `umzug`
 - **ML inference**: JS-native, in-process via [lib/ml/](lib/ml/) — zero-dep XGBoost native JSON tree walker + pure Elo math (parity-tested against [ml/scorecast_ml/elo/engine.py](ml/scorecast_ml/elo/engine.py)) + DECIMAL(3,2) normalize. [services/PredictionService.js](services/PredictionService.js) drives the reactive cascade. Training is a separate offline Python tool — see [ml/README.md](ml/README.md)
 - **External data**: [football-data.org v4](https://www.football-data.org/) free tier (10 req/min) via [lib/footballApi.js](lib/footballApi.js); daily fixture sync + 60-s live-score poll + 5-min reconcile sweep managed by [lib/scheduler.js](lib/scheduler.js)
-- **Auth**: HttpOnly cookie auth — 15-min access JWT + 30-day rotating refresh token, hashed in DB. `bcryptjs` for passwords; `speakeasy` + `qrcode` for TOTP 2FA
+- **Auth**: HttpOnly cookie auth — 15-min access JWT + 30-day rotating refresh token, hashed in DB. `bcryptjs` for passwords. (TOTP 2FA was parked in Tier 22 for the marketing launch; revival path documented in `routes/auth.js`.)
 - **CSRF**: double-submit cookie pattern (`sc_csrf` cookie + `X-CSRF-Token` header)
 - **Security headers**: `helmet` (CSP tuned for Vite + Tailwind + Sentry; HSTS; `X-Frame-Options: DENY`)
 - **Email**: pluggable transport via `lib/email.js` — Resend in production, log-only fallback in dev
@@ -238,12 +237,11 @@ Everything is JSON over `/api/*`. Authentication is via HttpOnly cookies (`sc_ac
 
 Highlights:
 
-- `POST /api/register`, `POST /api/login` — sets auth cookies (rate-limited; login may return `{challenge: true}` when 2FA is enabled)
+- `POST /api/register`, `POST /api/login` — sets auth cookies (rate-limited)
 - `POST /api/auth/refresh` · `/api/auth/logout` — rotate / revoke the refresh chain
 - `POST /api/auth/verify-email` · `/api/auth/forgot-password` · `/api/auth/reset-password` — email-driven account recovery
-- `POST /api/auth/2fa/verify` — complete 2FA challenge after a successful password
-- `POST /api/me/2fa/setup` · `/api/me/2fa/confirm` · `/api/me/2fa/disable` — TOTP lifecycle
-- `GET /api/me` — current user + role + joined groups + pending invites + 2FA / email-verified status
+- `POST /api/me/password` · `PATCH /api/me/email` — in-session credential changes (current password required; revokes other sessions)
+- `GET /api/me` — current user + role + joined groups + pending invites + email-verified status
 - `POST /api/picks` — submit/update; locked at kickoff
 - `GET /api/leaderboard?groupId=` — overall + optional group leaderboard
 - `GET /api/users/:username/profile` — public profile with stats, badges, friend status, head-to-head
@@ -303,7 +301,7 @@ Highlights:
 - **Tier 4b** — external football data (football-data.org v4 client), leagues / seasons, daily fixture sync + 60-s live-score poll + 5-min reconcile sweep, audit log
 - **Tier 5 (core) + 5.4b** — migrations framework, leaderboard cache, transactional cascades, structured logging, N+1 elimination, gzip, frontend error boundary + `/api/client-errors` + Sentry opt-in
 - **Tier 5.5 + 5.5b + per-endpoint API suite** — Playwright E2E (270 tests across 22 specs)
-- **Tier 6** — security hardening: CORS allowlist, helmet headers, account lockout, per-route rate limits, email service abstraction, email verification on register, password reset, HttpOnly cookie auth + rotating refresh tokens, CSRF double-submit, TOTP 2FA
+- **Tier 6** — security hardening: CORS allowlist, helmet headers, account lockout, per-route rate limits, email service abstraction, email verification on register, password reset, HttpOnly cookie auth + rotating refresh tokens, CSRF double-submit. (TOTP 2FA originally shipped here was parked in Tier 22.)
 - **Tier 8.6** — profile privacy (public/friends/private)
 - **Tier 9 (less 9.10 TS + 9.11 Storybook) + 9-followup** — ESLint/Prettier/Husky baseline, frontend code-splitting, OpenAPI docs (dev), Dockerfile + docker-compose, GitHub Actions CI, Bicep IaC for Azure, GitHub Actions CD with OIDC, custom domain `bantryx.com` + Azure managed TLS. **App is live at https://bantryx.com.**
 - **Tier 11 (chunks 1–4)** — design tokens + Radix primitives + sidebar nav + marketing landing + anonymous browse mode + iOS mobile zoom fix + onboarding tour + foundational a11y

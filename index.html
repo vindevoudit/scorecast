@@ -62,7 +62,10 @@
          block is intentionally formatted as a single line so the
          SHA-256 hash is byte-stable — server.js CSP scriptSrc
          whitelists this exact hash; ANY whitespace change here means
-         re-computing the hash in server.js. -->
+         re-computing the hash in server.js. The prettier-ignore
+         directive below keeps `npm run format:check` from reformatting
+         the block and silently invalidating the CSP hash. -->
+    <!-- prettier-ignore -->
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Bantryx","url":"https://bantryx.com/","applicationCategory":"GameApplication","operatingSystem":"Any (web browser)","logo":"https://bantryx.com/pwa-512x512.png","image":"https://bantryx.com/og-image-1200x630.png","description":"Predict football match outcomes, climb the leaderboard, and earn badges with friends.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />

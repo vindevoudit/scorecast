@@ -146,18 +146,46 @@ async function clearFriendships(userIds) {
 }
 
 async function clearPicksAndBadges(userIds) {
-  const { Pick, Badge } = getModels();
+  const { Pick, Badge, UserScore, UserScoreOverall } = getModels();
   await Pick.destroy({ where: { userId: userIds } });
   await Badge.destroy({ where: { userId: userIds } });
+  // Tier 24 — the materialized leaderboard tables are maintained by the
+  // service-layer dual-writer. Direct Pick.destroy bypasses that, so the
+  // helper must reset user_scores / user_scores_overall to keep tests
+  // that reseed picks in-place coherent.
+  await UserScore.destroy({ where: { userId: userIds } });
+  await UserScoreOverall.destroy({ where: { userId: userIds } });
 }
 
 async function clearGameResults(gameIds) {
-  const { Game } = getModels();
+  const { Game, Pick } = getModels();
   // Tier 4b Chunk 2 linked status to result: setResult flips both. The
   // reset must do the same or the games stay in `status: 'finished'` and
   // useGames buckets them as completed, hiding the pick button from any
   // later spec that needs to pick on them.
-  await Game.update({ result: null, status: 'scheduled' }, { where: { id: gameIds } });
+  // Tier 24 — route through GameService.setResult(gameId, null) so the
+  // user_scores reversal + pick.appliedResult/Points clear happen via
+  // the same dual-writer code path the production runtime uses. The
+  // alternative (direct Game.update + manual user_scores math) would
+  // duplicate the matrix logic and drift over time. We still keep the
+  // batch loop one-game-per-iteration to mirror Tier 5.3 (one tx per
+  // entity) instead of bulkSetResult, because tests rely on the helper
+  // being deterministic on per-game timing.
+  const GameService = require('../../../services/GameService');
+  for (const gameId of gameIds) {
+    const game = await Game.findByPk(gameId);
+    if (!game) continue;
+    if (game.result !== null) {
+      await GameService.setResult(gameId, null);
+    } else {
+      // Already cleared; just ensure status mirrors result (defensive
+      // against rows the helper set via a different code path).
+      await Game.update({ status: 'scheduled' }, { where: { id: gameId } });
+    }
+  }
+  // Final consistency sweep for tests that may have inserted Picks
+  // directly (bypassing PickService) with stale sentinels.
+  await Pick.update({ appliedResult: null, appliedPoints: 0 }, { where: { gameId: gameIds } });
 }
 
 async function clearNotifications(userIds) {

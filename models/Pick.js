@@ -37,6 +37,22 @@ module.exports = (sequelize) => {
         type: DataTypes.DECIMAL(3, 2),
         allowNull: true,
       },
+      // Tier 24 — idempotency sentinels for the materialized user_scores
+      // table. `appliedResult` records the game.result value last reflected
+      // in this pick's contribution; `appliedPoints` records the integer
+      // delta currently in user_scores. Together they enable the 8-arm
+      // idempotency/reversibility matrix without re-reading every game row
+      // on every transition. Mirrors Tier 17's
+      // games.{homeEloPre, awayEloPre, appliedResult} pattern.
+      appliedResult: {
+        type: DataTypes.STRING(10),
+        allowNull: true,
+      },
+      appliedPoints: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
       submittedAt: {
         type: DataTypes.DATE,
         allowNull: false,

@@ -15,6 +15,7 @@ const NotificationService = require('./NotificationService');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const PredictionService = require('./PredictionService');
+const UserScoreService = require('./UserScoreService');
 
 // Two-layer noise gate threshold. DECIMAL(3,2) stores at 0.01 resolution;
 // anything below 0.005 rounds to the same value (and so the same rounded
@@ -142,6 +143,30 @@ async function notifyOddsShiftFanOut(game, next) {
 
 async function cascadeDelete(game, { transaction } = {}) {
   const opts = transaction ? { transaction } : {};
+  // Tier 24 — reverse every pick's user_scores contribution BEFORE
+  // destroying. Without this the picks vanish but their applied points
+  // stay in user_scores forever. We load full pick rows (not just ids)
+  // so reversePick can read appliedResult / appliedPoints / choice off
+  // the model instance.
+  if (transaction) {
+    const picksForGame = await Pick.findAll({ where: { gameId: game.id }, transaction });
+    for (const pick of picksForGame) {
+      await UserScoreService.reversePick(transaction, { pick, game });
+    }
+  } else {
+    const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
+    for (const pick of picksForGame) {
+      // Defensive — every call site wraps cascadeDelete in a transaction
+      // (deleteGame + bulkDelete + admin UI). This branch only fires if
+      // a future caller forgets the wrap; surface the bug as a parity
+      // log line instead of silently corrupting user_scores.
+      logger.warn(
+        { gameId: game.id },
+        'cascadeDelete: called without transaction — user_scores reversal may not be atomic with destroy',
+      );
+      await UserScoreService.reversePick(null, { pick, game });
+    }
+  }
   await Pick.destroy({ where: { gameId: game.id }, ...opts });
   await Comment.destroy({ where: { gameId: game.id }, ...opts });
   await game.destroy(opts);
@@ -154,6 +179,7 @@ async function deleteGame(gameId) {
     await cascadeDelete(game, { transaction: t });
   });
   LeaderboardService.invalidate('all');
+  LeaderboardService.assertParity({}).catch(() => {});
 }
 
 async function setResult(gameId, result) {
@@ -181,6 +207,13 @@ async function setResult(gameId, result) {
     if (g.leagueId) {
       cascadeInput = await PredictionService.onResultUpdated(g, { transaction: t });
     }
+    // Tier 24 — apply the idempotency matrix to every pick on this game
+    // inside the same transaction. Loads picks under the result-flip
+    // transaction so a re-fetch after commit sees the stamped sentinels.
+    const picksForGame = await Pick.findAll({ where: { gameId }, transaction: t });
+    for (const pick of picksForGame) {
+      await UserScoreService.applyPickTransition(t, { pick, game: g });
+    }
     return g;
   });
 
@@ -200,6 +233,7 @@ async function setResult(gameId, result) {
   }
 
   LeaderboardService.invalidate('all');
+  LeaderboardService.assertParity({}).catch(() => {});
   if (cascadeInput) {
     PredictionService.rePredictFutureFixtures(cascadeInput).catch((err) =>
       logger.error({ err, gameId }, 'setResult: rePredictFutureFixtures failed'),
@@ -237,6 +271,14 @@ async function bulkSetResult(ids, result) {
       if (g.leagueId) {
         cascadeInput = await PredictionService.onResultUpdated(g, { transaction: t });
       }
+      // Tier 24 — same per-pick idempotency-matrix application as
+      // setResult, inside the per-game transaction. Tier 5.3 invariant:
+      // one transaction per entity in bulk, so a single bad row doesn't
+      // undo the rest.
+      const picksForGame = await Pick.findAll({ where: { gameId: g.id }, transaction: t });
+      for (const pick of picksForGame) {
+        await UserScoreService.applyPickTransition(t, { pick, game: g });
+      }
       // Reload the in-memory `game` so the post-tx notify/score uses the
       // committed values (mostly defensive — result + status are already
       // what we set, but g.result might differ if a hook munged it).
@@ -265,7 +307,10 @@ async function bulkSetResult(ids, result) {
     }
     affected.push(game.id);
   }
-  if (affected.length > 0) LeaderboardService.invalidate('all');
+  if (affected.length > 0) {
+    LeaderboardService.invalidate('all');
+    LeaderboardService.assertParity({}).catch(() => {});
+  }
   for (const [leagueId, teamSet] of affectedByLeague) {
     PredictionService.rePredictFutureFixtures({
       leagueId,
@@ -297,7 +342,10 @@ async function bulkDelete(ids) {
     });
     affected.push(game.id);
   }
-  if (affected.length > 0) LeaderboardService.invalidate('all');
+  if (affected.length > 0) {
+    LeaderboardService.invalidate('all');
+    LeaderboardService.assertParity({}).catch(() => {});
+  }
   return affected;
 }
 
@@ -449,6 +497,24 @@ async function applyLiveUpdate(localGame, apiMatch) {
     if (transitionedToFinished && newResult && fresh.leagueId) {
       cascadeInput = await PredictionService.onResultUpdated(fresh, { transaction: t });
     }
+    // Tier 24 — apply the idempotency matrix to every pick on this game
+    // inside the same FOR UPDATE transaction as the result flip. The
+    // transitionedToFinished check above gates the notify/badge fan-out
+    // but Tier 24 must fire on ANY result change (matrix arms 1-3, 5-7)
+    // — applyPickTransition's short-circuit handles the no-op cases
+    // (matrix arm 4: same result re-saved). Skipped entirely when
+    // newResult is null AND fresh.result was null (no scoring state to
+    // touch — only happens on a non-result-flip changed=true path like
+    // a score-only update).
+    if (newResult !== null || fresh.result !== null) {
+      const picksForGame = await Pick.findAll({
+        where: { gameId: fresh.id },
+        transaction: t,
+      });
+      for (const pick of picksForGame) {
+        await UserScoreService.applyPickTransition(t, { pick, game: fresh });
+      }
+    }
     return { game: fresh, changed: true, transitionedToFinished, newResult, cascadeInput };
   });
 
@@ -475,6 +541,7 @@ async function applyLiveUpdate(localGame, apiMatch) {
       );
     }
     LeaderboardService.invalidate('all');
+    LeaderboardService.assertParity({}).catch(() => {});
     // Tier 17 — cascade probabilities for upcoming fixtures involving
     // either team. Best-effort: a model-load failure must NEVER undo the
     // result commit above. tx.cascadeInput is null when either team is

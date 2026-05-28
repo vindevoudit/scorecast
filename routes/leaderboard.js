@@ -28,10 +28,21 @@ router.get(
         : 'Invalid query parameters';
       return res.status(400).json({ error: summary, issues: parsed.error.issues });
     }
-    const { groupId, orderBy, offset, limit, leagueId, seasonId } = parsed.data;
+    const { groupId, orderBy, offset, limit, overallOffset, overallLimit, leagueId, seasonId } =
+      parsed.data;
     const filterOpts = { leagueId, seasonId };
 
-    const overall = await LeaderboardService.getOverallForViewer(filterOpts, req.user ?? null);
+    // Tier 24 Chunk 4 — overall block is now slim by default. Returns
+    // top-N (default 50) + viewerRow + total, instead of the entire
+    // sorted list. Keeps the response payload small at fresh-launch
+    // 10k users without dropping rank info or the viewer-context. The
+    // legacy `overall` array shape is preserved for backwards-compat
+    // (existing clients consume `data.overall` as a list); we just
+    // populate it from `data.overallMeta.rows`.
+    const overallBlock = await LeaderboardService.getOverallSlimForViewer(
+      { ...filterOpts, overallOffset, overallLimit },
+      req.user ?? null,
+    );
     let groupBlock = {
       rows: [],
       total: 0,
@@ -47,7 +58,12 @@ router.get(
         req.user ?? null,
       );
     }
-    res.json({ overall, group: groupBlock.rows, groupMeta: groupBlock });
+    res.json({
+      overall: overallBlock.rows,
+      overallMeta: overallBlock,
+      group: groupBlock.rows,
+      groupMeta: groupBlock,
+    });
   }),
 );
 

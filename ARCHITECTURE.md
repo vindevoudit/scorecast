@@ -206,8 +206,8 @@ ScoreCast/
 │   ├── emailHelpers.js                  # Tier 13.1: sendVerificationEmail (wraps lib/email)
 │   ├── auth.js                          # Tier 13.1: cookie + token helpers (JWT_SECRET, ACCESS/REFRESH/CHALLENGE cookies, setAuthCookies, clearAuthCookies, hashToken, generateRawToken, revokeAllUserRefreshTokens)
 │   ├── scoring.js                       # Tier 13.1 + draw-scoring tier: scorePick (3-branch: home/away winners + draw partial credit) + sortLeaderboard
-│   ├── users.js                         # Tier 13.1: getUserById, getUserByUsername, buildUserSummary (accepts {leagueId, seasonId} filters post-Tier 4b)
-│   ├── groups.js                        # Tier 13.1: getGroupsForUser, getGroupById, getJoinedGroupIds, getPendingInvites, buildGroupLeaderboard (accepts {leagueId, seasonId} filters post-Tier 4b)
+│   ├── users.js                         # Tier 13.1: getUserById, getUserByUsername, buildUserSummary (legacy aggregation kept for TIER24_LEGACY_LEADERBOARD=1 rollback; production reads now go through services/LeaderboardService.js → user_scores tables)
+│   ├── groups.js                        # Tier 13.1: getGroupsForUser, getGroupById, getJoinedGroupIds, getPendingInvites, buildGroupLeaderboard (same Tier 24 status as buildUserSummary above)
 │   ├── friends.js                       # Tier 13.1: getFriendshipBetween, friendStatusFrom, getViewerFriendIdSet (Tier 8.6 masking layer)
 │   ├── response.js                      # Tier 13.1: attachResponseHelpers middleware (res.ok / res.created / res.noContent)
 │   ├── errors.js                        # Tier 13.1: AppError class + factories (notFound, forbidden, badRequest, conflict, …)
@@ -1995,6 +1995,8 @@ cache.stats(); // { size, hits, misses, keys: [{key, ageMs, ttlRemainingMs}] }
 - **No background refresh**: invalidation is purely mutation-driven; expired entries are rebuilt lazily on the next read.
 - **`viewerRow` is not cached** — it's per-caller, computed downstream of the cached array.
 
+**Tier 24 follow-on**: the cache now sits in front of the materialized `user_scores` / `user_scores_overall` tables instead of the JS aggregation. Reads through the cache are sub-millisecond regardless of user count; the 30s TTL just absorbs concurrent identical requests at near-zero cost. The cross-replica staleness concern is now moot (every replica reads the same materialized state from Postgres). See §8.31.
+
 ### 8.15 Auth & Account Security (Tier 6)
 
 The full auth surface assembled in Tier 6. Each piece is independently optional but interlocks with the others.
@@ -3529,6 +3531,142 @@ All three paths converge on the **server-side structured log** via `POST /api/cl
 **CI integration**: [.github/workflows/ci.yml](.github/workflows/ci.yml) runs the full suite on every PR. Cached Chromium, Postgres service, HTML report + traces uploaded on failure.
 
 **Pre-CSRF-middleware ordering insight**: in the API suite, `assertUnauthorized` seeds an `sc_csrf` cookie via a throwaway GET before the actual assertion call. State-changing routes' auth boundary then lands on `authMiddleware` (401) instead of being absorbed by CSRF (403) — the assertion catches the right layer.
+
+### 8.31 Tier 24 — Materialized Leaderboard Scores
+
+**Problem**: pre-Tier-24, every `GET /api/leaderboard` cache miss recomputed every user's score by re-loading `Pick.findAll()` + `Game.findAll()` and running an O(picks × games × users) JS aggregation. The 30s cache TTL hid the cost at low traffic, but every pick / result / group mutation invalidated the cache — during active match windows the cache thrashed and every replica paid the full rebuild. At launch volume (~10k users × ~50 picks × ~2k games) the rebuild approaches ~1B in-memory operations and risks OOMing the 1 GiB Container App replica.
+
+**Solution**: replace the O(picks × games) JS aggregation with two materialized tables maintained INCREMENTALLY on every score-affecting write, mirroring Tier 17's reactive Elo cascade idempotency pattern.
+
+#### Schema
+
+```sql
+-- user_scores: per-(userId, leagueId, seasonId) row
+CREATE TABLE user_scores (
+  "userId"      UUID NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+  "leagueId"    UUID NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+  "seasonId"    UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+  points        INTEGER NOT NULL DEFAULT 0,
+  "picksScored" INTEGER NOT NULL DEFAULT 0,
+  "picksWon"    INTEGER NOT NULL DEFAULT 0,
+  "updatedAt"   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  PRIMARY KEY ("userId", "leagueId", "seasonId")
+);
+CREATE INDEX user_scores_topn_idx
+  ON user_scores ("leagueId", "seasonId", points DESC, "userId")
+  WHERE points > 0;
+
+-- user_scores_overall: per-userId row across every league/season
+CREATE TABLE user_scores_overall (
+  "userId"      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  points        INTEGER NOT NULL DEFAULT 0,
+  "picksScored" INTEGER NOT NULL DEFAULT 0,
+  "picksWon"    INTEGER NOT NULL DEFAULT 0,
+  "updatedAt"   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX user_scores_overall_topn_idx
+  ON user_scores_overall (points DESC, "userId") WHERE points > 0;
+
+-- Picks gain idempotency sentinels
+ALTER TABLE picks
+  ADD COLUMN "appliedResult" VARCHAR(10) NULL,
+  ADD COLUMN "appliedPoints" INTEGER NOT NULL DEFAULT 0;
+```
+
+Split into two tables (instead of one with a synthetic-UUID sentinel for the unfiltered overall) so the unfiltered read is a single primary-key lookup and the FK CASCADE from users drops both atomically. Partial index on `points > 0` keeps the index small on a fresh-launch corpus where most users haven't scored yet.
+
+#### Idempotency + reversibility matrix
+
+The full 8-arm matrix is implemented in [services/UserScoreService.js](services/UserScoreService.js) `applyPickTransition(transaction, {pick, game})` and mirrors Tier 17's `PredictionService.onResultUpdated` behavior:
+
+| Arm | Trigger                             | Before                 | After                | Action                                                               |
+| --- | ----------------------------------- | ---------------------- | -------------------- | -------------------------------------------------------------------- |
+| 1   | Pick on scheduled game              | `appliedResult = null` | `game.result = null` | No-op; pick row stays at sentinel defaults                           |
+| 2   | First result captured               | `null`                 | non-null             | INCREMENT by `scorePick(pick, game)`; STAMP sentinels                |
+| 3   | First result captured (losing pick) | `null`                 | non-null             | INCREMENT by 0 + counter updates; STAMP sentinels                    |
+| 4   | Same result re-saved                | `X`                    | same `X`             | **Short-circuit no-op** — neither materialized rows nor pick touched |
+| 5   | Result changed (e.g. home → away)   | non-null `X`           | non-null `Y`         | DECREMENT old; INCREMENT new; STAMP `appliedResult = Y`              |
+| 6   | Result changed (e.g. home → draw)   | non-null               | `'draw'`             | DECREMENT old; INCREMENT new (partial credit); STAMP                 |
+| 7   | Result cleared                      | non-null               | `null`               | DECREMENT old; CLEAR `appliedResult = null, appliedPoints = 0`       |
+| 8   | Pick deleted on scored game         | non-null               | (pick gone)          | DECREMENT old BEFORE destroy (via `reversePick`)                     |
+
+Round-trips like `null → home → null` or `home → away → home` return both `user_scores` AND `pick.appliedResult/appliedPoints` to BIT-IDENTICAL state — the snapshot of `appliedPoints` is the source of truth for the reverse delta, NOT a recomputation from current game state. This is the same invariant Tier 17's `games.{homeEloPre, awayEloPre, appliedResult}` carries for the Elo cascade.
+
+#### Dual-writer call sites (7 hooks)
+
+Every score-affecting mutation fires `applyPickTransition` OR `reversePick` inside the SAME transaction as the originating write:
+
+| Site                                           | Operation                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `PickService.createPick`                       | `applyPickTransition(t, {pick, game})` after `Pick.save`                              |
+| `PickService.deletePick`                       | `reversePick(t, {pick, game})` before `pick.destroy`                                  |
+| `GameService.setResult`                        | Loop picks for game; `applyPickTransition` per pick inside the FOR UPDATE tx          |
+| `GameService.bulkSetResult`                    | Same per-game inside the per-entity transaction (Tier 5.3 invariant)                  |
+| `GameService.applyLiveUpdate` (live-score job) | Same inside the FOR UPDATE tx; gated on `newResult !== null OR fresh.result !== null` |
+| `GameService.cascadeDelete` (deleteGame path)  | Loop picks; `reversePick` per pick before `Pick.destroy`                              |
+| `GameService.cascadeDelete` (bulkDelete path)  | Same                                                                                  |
+
+User cascade-delete is handled by FK CASCADE on `users(id)` — `UserScore.destroy` + `UserScoreOverall.destroy` is also called explicitly in `UserService.cascadeDelete` as defense-in-depth against the documented post-Tier-11 sync()-vs-migration FK ordering surprise. Group mutations (join/leave/etc) DO NOT touch `user_scores` because group membership doesn't change a user's overall score — the per-group read JOINs `user_scores` against `group_members` at read time.
+
+#### Concurrency
+
+Two concurrent transactions touching the same `(userId, leagueId, seasonId)` bucket serialize on Postgres's row-level lock during the `INSERT ... ON CONFLICT DO UPDATE`. The arithmetic update (`points = user_scores.points + EXCLUDED.points`) is associative, so concurrent picks on the same scored game converge to the correct sum without explicit locking. Tier 19 Chunk 5's `SELECT ... FOR UPDATE` on `Game.findByPk` already serializes the 30-s `syncLiveScores` cron and the 3-min `reconcileInProgressGames` cron at the game-row level — the dual-writer inherits that serialization for free since it runs inside the same transaction.
+
+#### Read path
+
+[services/LeaderboardService.js](services/LeaderboardService.js) `getOverall(opts)` and `getForGroup(groupId, opts)` are rewritten to read from the materialized tables:
+
+- **Unfiltered overall**: SELECT every user + LEFT-JOIN-style merge against `user_scores_overall` (so users with no scored picks land at `points: 0`)
+- **Filtered (leagueId / seasonId)**: same pattern but joins `user_scores WHERE leagueId = X AND seasonId = Y`
+- **Group**: SELECT the group's member list + JOIN against `user_scores` (or `user_scores_overall` for the unfiltered group view)
+
+The masking layer (Tier 8.6) projects ON TOP of the materialized row shape — no schema change required because `user_scores` row joins carry `username + displayName + profileVisibility` from the User include. The 30s in-process cache stays in front of both reads as a thin per-replica buffer.
+
+A `TIER24_LEGACY_LEADERBOARD=1` env var flips both reads back to the legacy `buildUserSummary` / `buildGroupLeaderboard` paths for one-cycle rollback safety.
+
+#### Slim response shape (Chunk 4)
+
+`GET /api/leaderboard` now returns:
+
+```json
+{
+  "overall": [/* top-50 (default) */],
+  "overallMeta": { "rows": [...], "total": 123, "viewerRow": {...}, "offset": 0, "limit": 50 },
+  "group": [...],
+  "groupMeta": {...}
+}
+```
+
+`overall` array is preserved for backwards compatibility (existing frontend consumes it as a list); `overallMeta` carries the pagination context for "show all" / future pagination. `viewerRow` is always populated regardless of offset/limit so the UI can render "Your rank: 247" even when the viewer is outside the page. `overallOffset` (max 10000) + `overallLimit` (max 500) accepted on the query string.
+
+#### Verification gate (Layer 1-4 in plans/tier24.md)
+
+Pre-launch with zero organic write traffic, the "48h parity-log soak" model from the original tier-24 plan was meaningless — replaced by deterministic synthetic exercise:
+
+- **Layer 1**: existing e2e suite (`picks.spec.js`, `games.spec.js`, `leaderboard.spec.js`, `leaderboard-scoring.spec.js`, `pick-and-result.spec.js`) — all 50/50 green, with `PARITY_LOG_ENABLED=1` enforcing no `tier24.parity_mismatch` warn lines
+- **Layer 2**: new [tests/e2e/api/tier24-user-scores.spec.js](tests/e2e/api/tier24-user-scores.spec.js) — 22 tests covering matrix arms 1-8, pick lifecycle, bulk paths, cascade, round-trips, concurrency, league/season scoping, and global parity (`user_scores_overall === buildUserSummary` after multi-mutation sequences)
+- **Layer 3**: new [scripts/exercise-user-scores.mjs](scripts/exercise-user-scores.mjs) — operator-runnable deterministic exercise; reports `OK: 0 drift across N users × M games × K transitions`
+- **Layer 4**: manual UI smoke covered by existing `pick-and-result.spec.js` (which drives the full LeaderboardCard render path)
+
+Unit tests at [tests/userScore.test.js](tests/userScore.test.js) (18 new tests, 60/60 total) lock the pure-function math for `computePoints` + `deriveCounterDeltas` + round-trip invariants.
+
+#### Operator backfill
+
+After Chunk 1's migration deploys, run [scripts/backfill-user-scores.mjs](scripts/backfill-user-scores.mjs) once via Container Apps Job exec to populate the materialized tables and the `picks.appliedResult` / `picks.appliedPoints` sentinels from existing scored-pick state. Idempotent — re-running produces identical state. With ~zero picks in prod pre-launch, this completes in seconds.
+
+#### What stayed unchanged
+
+- [lib/leaderboardCache.js](lib/leaderboardCache.js) — the 30s in-process cache is preserved as a concurrent-read buffer (Chunk 5 evaluated dropping it; deferred indefinitely)
+- [lib/scoring.js](lib/scoring.js) `scorePick` — unchanged; reused verbatim by the backfill, the dual-writer (`UserScoreService.computePoints`), and the now-rarely-used `buildUserSummary` (kept for rollback)
+- Masking (Tier 8.6), friends-picks scoring (Tier 18 Chunk 4), Tier 17 Elo cascade — all integrate at the row-shape boundary, not the storage boundary, so no edits required
+- Pick-time probability snapshots (Tier 17) — still written at pick-create; kickoff-time lock (Tier 19 Chunk 5) still rewrites them on transition out of `scheduled`. The dual-writer's `scorePick` honors the snapshot via the existing `usesSnapshot = pick.pickedHomeProbability != null` branch
+
+#### Cost impact
+
+- Storage: ~80 bytes per `user_scores` row + ~50 bytes per `user_scores_overall` row. At 10k users × 5 (league, season) combos = ~4 MB total. Negligible.
+- Per-mutation latency: one additional `INSERT ... ON CONFLICT DO UPDATE` per affected pick (single-row lock). On a fresh schema with the partial index in place, ~0.5ms per row.
+- Read latency: top-50 leaderboard read drops from O(picks × games × users) JS to a single B-tree index scan. Sub-millisecond.
+- Eliminates Tier 25 C1 (managed Redis, ~$16/mo) because the cross-replica cache-coherence problem is resolved at the storage layer — every replica reads the same materialized state from Postgres.
 
 ---
 

@@ -23,6 +23,8 @@ const {
   PasswordResetToken,
   RefreshToken,
   PushSubscription,
+  UserScore,
+  UserScoreOverall,
   sequelize,
 } = require('../models');
 const errors = require('../lib/errors');
@@ -195,6 +197,16 @@ async function cascadeDelete(target, { transaction } = {}) {
   // the user-owned rows and survives any future sync()-vs-migration ordering
   // changes.
   await PushSubscription.destroy({ where: { userId: target.id }, ...opts });
+
+  // Tier 24 — explicit destroy mirrors the pattern above. The migration
+  // declares ON DELETE CASCADE on the userId FK, so the cascade would fire
+  // automatically — but a documented prod-DB gotcha (CLAUDE.md "Cascade-
+  // delete fix-up (post-Tier 11)") is that `sync({alter:false})` running
+  // ahead of migrations can leave the synced FK in a different state than
+  // the migrated one. Doing the destroy explicitly inside the transaction
+  // means a future ordering surprise can't break user delete.
+  await UserScore.destroy({ where: { userId: target.id }, ...opts });
+  await UserScoreOverall.destroy({ where: { userId: target.id }, ...opts });
 
   await target.destroy(opts);
 }

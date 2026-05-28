@@ -8,12 +8,13 @@
 // LeaderboardService.invalidate. Tier 5.3: notify/badge calls fire OUTSIDE
 // any wrapping transaction.
 const { Op } = require('sequelize');
-const { Pick, Game, User } = require('../models');
+const { Pick, Game, User, sequelize } = require('../models');
 const errors = require('../lib/errors');
 const { scorePick } = require('../lib/scoring');
 const { getViewerFriendIdSet } = require('../lib/friends');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
+const UserScoreService = require('./UserScoreService');
 
 async function createPick({ userId, gameId, choice }) {
   const game = await Game.findByPk(gameId);
@@ -37,20 +38,41 @@ async function createPick({ userId, gameId, choice }) {
     pickedAwayProbability: game.awayProbability,
   };
 
-  const existingPick = await Pick.findOne({ where: { userId, gameId } });
-  if (existingPick) {
-    existingPick.choice = choice;
-    existingPick.submittedAt = new Date();
-    existingPick.pickedHomeProbability = snapshot.pickedHomeProbability;
-    existingPick.pickedDrawProbability = snapshot.pickedDrawProbability;
-    existingPick.pickedAwayProbability = snapshot.pickedAwayProbability;
-    await existingPick.save();
-  } else {
-    await Pick.create({ userId, gameId, choice, ...snapshot });
-  }
+  // Tier 24 — pick create/update wrapped in a transaction so the
+  // user_scores delta (when the game is already scored) lands atomically
+  // with the pick row. The pre-kickoff guards above mean game.result is
+  // always null at this point in the normal flow; the "create on
+  // already-scored game" branch only applies on the bulk-import or
+  // admin-driven paths (and the matrix arm "Pick created on already-
+  // scored game" in tier24.md).
+  await sequelize.transaction(async (t) => {
+    let pick = await Pick.findOne({ where: { userId, gameId }, transaction: t });
+    if (pick) {
+      // Re-pick: reverse the prior delta (if any) before re-applying. The
+      // pick keeps its row identity; only choice + snapshot + applied*
+      // change. The reverse step is necessary because changing `choice`
+      // can flip won-counter contribution and (post-kickoff edge cases
+      // aside) re-snap probabilities can shift points too.
+      pick.choice = choice;
+      pick.submittedAt = new Date();
+      pick.pickedHomeProbability = snapshot.pickedHomeProbability;
+      pick.pickedDrawProbability = snapshot.pickedDrawProbability;
+      pick.pickedAwayProbability = snapshot.pickedAwayProbability;
+      await pick.save({ transaction: t });
+    } else {
+      pick = await Pick.create({ userId, gameId, choice, ...snapshot }, { transaction: t });
+    }
+    // Idempotency matrix runs regardless — applyPickTransition is a no-op
+    // when game.result is null AND pick.appliedResult is null AND
+    // pick.appliedPoints is 0 (the standard "scheduled game, pre-kickoff"
+    // path). When the game IS scored (admin/bulk-import edge case), the
+    // delta lands inside the same transaction as the pick save.
+    await UserScoreService.applyPickTransition(t, { pick, game });
+  });
 
   BadgeService.evaluateBadges(userId).catch(() => {});
   LeaderboardService.invalidate('all');
+  LeaderboardService.assertParity({ userId }).catch(() => {});
 }
 
 async function listForUser(userId) {
@@ -148,8 +170,19 @@ async function deletePick({ pickId, userId }) {
     }
   }
 
-  await pick.destroy();
+  // Tier 24 — reverse the user_scores contribution before destroying the
+  // row. On a pre-kickoff delete (the normal path with the guards above)
+  // pick.appliedResult is null + appliedPoints is 0 so reversePick is a
+  // no-op. The reverse branch is load-bearing for admin / cascade paths
+  // where the pick existed on a scored game.
+  await sequelize.transaction(async (t) => {
+    if (game) {
+      await UserScoreService.reversePick(t, { pick, game });
+    }
+    await pick.destroy({ transaction: t });
+  });
   LeaderboardService.invalidate('all');
+  LeaderboardService.assertParity({ userId }).catch(() => {});
 }
 
 module.exports = { createPick, listForUser, listFriendsPicks, deletePick, scorePick };

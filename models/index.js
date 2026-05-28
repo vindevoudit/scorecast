@@ -49,6 +49,8 @@ const Season = require('./Season')(sequelize);
 const Team = require('./Team')(sequelize);
 const AuditLog = require('./AuditLog')(sequelize);
 const PushSubscription = require('./PushSubscription')(sequelize);
+const UserScore = require('./UserScore')(sequelize);
+const UserScoreOverall = require('./UserScoreOverall')(sequelize);
 
 // Define associations.
 //
@@ -159,6 +161,25 @@ Team.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
 // on actorUserId. AuditLog deliberately has no hasMany hooked from User
 // because the history is a flat append-only stream, not user-owned data.
 AuditLog.belongsTo(User, { foreignKey: 'actorUserId', as: 'actor' });
+
+// Tier 24 — Materialized leaderboard scores. CASCADE on every axis so a
+// deleted user / league / season drops its rows atomically. No belongsTo
+// from the parent side because reads always start from user_scores (top-N
+// by points DESC) and join Users in for the masking projection — no
+// reverse-direction traversal exists. The cascade-fix post-Tier-11
+// invariant (sync()-vs-migration order) is satisfied because these tables
+// are NEW — they don't exist in the synced shape before the migration
+// runs, so the migration is the one and only path that creates them.
+UserScore.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(UserScore, { foreignKey: 'userId', as: 'userScores', onDelete: 'CASCADE' });
+UserScore.belongsTo(League, { foreignKey: 'leagueId', as: 'league' });
+UserScore.belongsTo(Season, { foreignKey: 'seasonId', as: 'season' });
+UserScoreOverall.belongsTo(User, { foreignKey: 'userId' });
+User.hasOne(UserScoreOverall, {
+  foreignKey: 'userId',
+  as: 'overallScore',
+  onDelete: 'CASCADE',
+});
 
 // Initialize database
 async function initDatabase() {
@@ -309,6 +330,8 @@ module.exports = {
   Team,
   AuditLog,
   PushSubscription,
+  UserScore,
+  UserScoreOverall,
   initDatabase,
   runMigrations,
 };

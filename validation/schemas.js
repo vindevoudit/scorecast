@@ -410,6 +410,12 @@ const leaderboardQuerySchema = z
     orderBy: z.enum(['points', 'winRate', 'username']).optional(),
     offset: z.coerce.number().int().min(0).max(10000).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
+    // Tier 24 Chunk 4 — slim the overall block at the route layer. Default
+    // is 50 rows; callers can ask for more or paginate via `overallOffset`.
+    // The viewerRow is always included separately, so the caller can render
+    // the viewer's row even when they're outside the top-N.
+    overallOffset: z.coerce.number().int().min(0).max(10000).optional(),
+    overallLimit: z.coerce.number().int().min(1).max(500).optional(),
     leagueId: uuid.optional(),
     seasonId: uuid.optional(),
   })

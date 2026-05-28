@@ -23,6 +23,7 @@
     "test:e2e:ui": "playwright test --project=chromium --ui",
     "test:e2e:seed": "node tests/e2e/fixtures/seed.js",
     "test:screenshots": "playwright test --project=mobile-iphone-se --project=mobile-iphone-13 --project=mobile-pixel-5",
+    "capture:help": "playwright test --project=mobile-iphone-13 tests/e2e/screenshots/help.spec.js",
     "generate-pwa-assets": "node scripts/generate-pwa-assets.mjs"
   },
   "lint-staged": {

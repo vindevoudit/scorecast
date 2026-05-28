@@ -31,6 +31,32 @@ function TocLink({ href, children }) {
   );
 }
 
+// Embedded mobile screenshot. Captured at iPhone-13 native resolution from
+// tests/e2e/screenshots/help.spec.js; assets ship under public/help/.
+// Mobile: fills container width. Desktop: constrained to a reasonable
+// phone-preview height so the prose still dominates the page.
+function Screenshot({ src, alt, caption }) {
+  return (
+    <figure className="my-4 flex flex-col items-center">
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className="w-full max-w-[260px] rounded-2xl border border-default shadow-glow"
+      />
+      {caption ? (
+        <figcaption className="mt-2 max-w-[280px] text-center text-xs uppercase tracking-[0.18em] text-fg-muted">
+          {caption}
+        </figcaption>
+      ) : null}
+    </figure>
+  );
+}
+
+function ScreenshotPair({ children }) {
+  return <div className="my-4 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">{children}</div>;
+}
+
 function Help() {
   return (
     <LegalLayout title="Getting started">
@@ -91,6 +117,18 @@ function Help() {
       </nav>
 
       <H2 id="quick-start">Quick start</H2>
+      <ScreenshotPair>
+        <Screenshot
+          src="/help/01-landing.png"
+          alt="Bantryx landing page"
+          caption="The landing page"
+        />
+        <Screenshot
+          src="/help/02-register-form.png"
+          alt="Bantryx registration form filled in"
+          caption="Create your account"
+        />
+      </ScreenshotPair>
       <OL>
         <li>
           Visit <strong>bantryx.com</strong>.
@@ -159,6 +197,11 @@ function Help() {
       </P>
 
       <H2 id="picks">Making your first pick</H2>
+      <Screenshot
+        src="/help/03-games-calendar.png"
+        alt="Games tab with 7-day calendar strip"
+        caption="The Games tab and 7-day calendar"
+      />
       <OL>
         <li>
           Open the <strong>Games</strong> tab from the sidebar.
@@ -176,6 +219,18 @@ function Help() {
           again or using the <strong>Undo</strong> button.
         </li>
       </OL>
+      <ScreenshotPair>
+        <Screenshot
+          src="/help/04-pick-buttons.png"
+          alt="Match card with Pick buttons"
+          caption="Before — tap a team to pick"
+        />
+        <Screenshot
+          src="/help/05-pick-locked.png"
+          alt="Match card with the pick locked in"
+          caption="After — your pick is locked"
+        />
+      </ScreenshotPair>
       <P>You cannot pick after kickoff. Picks lock when the match starts.</P>
 
       <h3 className="text-lg font-semibold text-fg">A note on draws</h3>
@@ -186,6 +241,11 @@ function Help() {
       </P>
 
       <H2 id="scoring">How scoring works</H2>
+      <Screenshot
+        src="/help/06-result-card.png"
+        alt="A finished match card showing the result and the points earned"
+        caption="A scored match with a winning pick"
+      />
       <P>
         Every match has three probabilities — home win, draw, away win — that sum to 100%. Your
         payout depends on how unlikely the outcome you picked was at <strong>kickoff</strong>.
@@ -212,6 +272,11 @@ function Help() {
       <P>You can see the potential payout for each outcome on the match card&apos;s payout grid.</P>
 
       <H2 id="leaderboards">Leaderboards</H2>
+      <Screenshot
+        src="/help/08-leaderboard.png"
+        alt="Rankings tab showing overall and group leaderboards"
+        caption="Overall and group leaderboards"
+      />
       <P>
         Open the <strong>Rankings</strong> tab to see how you stack up.
       </P>
@@ -235,6 +300,27 @@ function Help() {
 
       <H2 id="groups">Groups</H2>
       <P>Groups are private (or public) competitions with friends or strangers.</P>
+      <Screenshot
+        src="/help/09-groups-page.png"
+        alt="Groups tab showing create form, discover, friends, and your groups"
+        caption="The Groups tab"
+      />
+
+      <h3 className="text-lg font-semibold text-fg">Create a group</h3>
+      <OL>
+        <li>
+          Open the <strong>Groups</strong> tab → <strong>Create a new group</strong>.
+        </li>
+        <li>
+          Choose a name, visibility (public / password / invite-only), and an optional join message.
+        </li>
+        <li>Invite friends by username, or share the password if you set one.</li>
+      </OL>
+      <Screenshot
+        src="/help/10-create-group-form.png"
+        alt="Create group form with a name typed in"
+        caption="Create a new group"
+      />
 
       <h3 className="text-lg font-semibold text-fg">Join a group</h3>
       <UL>
@@ -251,23 +337,22 @@ function Help() {
           and in the Groups tab.
         </li>
       </UL>
-
-      <h3 className="text-lg font-semibold text-fg">Create a group</h3>
-      <OL>
-        <li>
-          Open the <strong>Groups</strong> tab → <strong>Create a new group</strong>.
-        </li>
-        <li>
-          Choose a name, visibility (public / password / invite-only), and an optional join message.
-        </li>
-        <li>Invite friends by username, or share the password if you set one.</li>
-      </OL>
+      <Screenshot
+        src="/help/11-discover-groups.png"
+        alt="Discover public groups list with a Join button"
+        caption="Browse and join public groups"
+      />
       <P>
         Groups can have up to <strong>2000 members</strong>. Each group has its own running comment
         thread for trash talk.
       </P>
 
       <H2 id="friends">Friends</H2>
+      <Screenshot
+        src="/help/12-search-friend.png"
+        alt="Search dropdown matching a user by name"
+        caption="Find someone to add as a friend"
+      />
       <P>
         The <strong>Groups</strong> tab also handles friends.
       </P>
@@ -305,6 +390,11 @@ function Help() {
       </P>
 
       <H2 id="notifications">Notifications</H2>
+      <Screenshot
+        src="/help/07-notifications.png"
+        alt="Notification bell open with a pick-scored alert and badges"
+        caption="Tap the bell to see your alerts"
+      />
       <P>
         The <strong>bell icon</strong> in the top bar shows in-app notifications:
       </P>

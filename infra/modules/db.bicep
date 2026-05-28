@@ -49,14 +49,20 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
     }
     backup: {
       backupRetentionDays: 7
-      // Tier 25 B2 — replicate the nightly backup to the paired region
-      // (eastus2 → centralus). Protects against a region-wide Azure
-      // outage; without it the backup lives only in eastus2 and a
-      // regional failure means data loss. NOT HA — Burstable tier
-      // doesn't support HA (that's GP+); recovery is still a manual
-      // point-in-time restore to a new server (minutes to hours).
-      // Cost: ~$3/mo (32 GiB × $0.10/GiB-mo for the geo-replica copy).
-      geoRedundantBackup: 'Enabled'
+      // Tier 25 B2 (attempted 2026-05-28, reverted) — geoRedundantBackup
+      // is a SERVER-CREATION-TIME-ONLY setting on Postgres Flexible
+      // Server. Tried to flip via Bicep apply (commit d47e415 set this
+      // to 'Enabled') — ARM accepted the value with no error, but the
+      // underlying field stayed 'Disabled'. The Azure CLI doesn't even
+      // expose `--geo-redundant-backup` on `az postgres flexible-server
+      // update`; it's only on `create`. To enable, the server must be
+      // recreated with the flag set at creation time.
+      //
+      // B2 is therefore folded into Tier 25 C3 (Burstable → GP D2ds_v5).
+      // C3 recreates the server for the SKU bump anyway, so we'll set
+      // geoRedundantBackup: 'Enabled' as part of that migration. Don't
+      // try to flip this on the existing server.
+      geoRedundantBackup: 'Disabled'
     }
     network: {
       publicNetworkAccess: 'Enabled'

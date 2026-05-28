@@ -16,7 +16,7 @@ Everything code-side for Tier 25 Phases 1 + 2 is already in `main`. The remainin
 
 ### Step 1 — Bicep reapply (applies A5 + B1 + B2 to live config)
 
-The IaC truth-source in `infra/` already carries A5 (maxReplicas 10), B1 (minReplicas 1), and B2 (geoRedundantBackup Enabled). Day-to-day CD only does `az containerapp update --image` — it never touches scale config or DB backup config. To apply, run a full Bicep reapply once:
+The IaC truth-source in `infra/` carries A5 (maxReplicas 10) and B1 (minReplicas 1). Day-to-day CD only does `az containerapp update --image` — it never touches scale config. To apply, run a full Bicep reapply once:
 
 ```powershell
 # Discover the current live values that Bicep needs as input
@@ -58,14 +58,15 @@ az deployment group create `
 
 - A5 (maxReplicas 3 → 10) — instant, no traffic disruption
 - B1 (minReplicas 0 → 1) — one always-on replica spins up, cold starts disappear, billing starts at ~$8-12/mo
-- B2 (geoRedundantBackup Disabled → Enabled) — backup config flip; first geo-replica snapshot happens with the next nightly backup window. Billing starts at ~$3/mo.
+- ~~B2 (geoRedundantBackup Disabled → Enabled)~~ — **Folded into C3.** geoRedundantBackup is a server-creation-time-only setting on Postgres Flexible Server; the Bicep apply silently no-ops it post-creation. The Bicep code reflects `'Disabled'` to match reality. B2 will land when C3 (Burstable → GP D2ds_v5) recreates the server. See tier25.md C3.
 
-**Total added cost from this reapply: ~$13/mo recurring**. (A5 itself is $0 unless traffic uses the additional replicas.)
+**Total added cost from this reapply: ~$10/mo recurring** (B1 only; A5 itself is $0 unless traffic uses the additional replicas).
+
+**Bonus side-effect**: the readiness probe (`scorecast-app.properties.template.containers[0].probes[1].httpGet.path`) flips from `/healthz` → `/readyz`. This is the Tier 20 Chunk 7 design that wasn't live until this reapply — a replica with a dead DB connection will now be pulled out of ACA's rotation correctly.
 
 **Rollback**: If anything looks wrong, edit the matching field in the Bicep module and re-apply. The previous values were:
 
 - `infra/modules/app.bicep` — `minReplicas: 0`, `maxReplicas: 3`
-- `infra/modules/db.bicep` — `geoRedundantBackup: 'Disabled'`
 
 ### Step 2 — Configure App Insights alerts (Tier 25 A7)
 
@@ -141,19 +142,21 @@ az containerapp replica list `
   --query "length(@)"
 # Expect: 1
 
-# 6. Postgres geo-redundant backup enabled (B2 effect)
+# 6. Postgres geo-redundant backup — STAYS Disabled until C3
+# (geoRedundantBackup is create-time-only; can't be flipped on existing
+# Burstable. Folded into C3's GP migration. See tier25.md.)
 az postgres flexible-server show `
-  --name scorecast-db-p3aaelev7xp52 `
+  --name scorecast-pg-p3aaelev7xp52 `
   --resource-group scorecast-prod `
   --query "backup.geoRedundantBackup" -o tsv
-# Expect: Enabled
+# Expect: Disabled (will flip to Enabled when C3 ships)
 ```
 
 ---
 
 ## Phase 2 — Day 1 of marketing (one-time when ready to push traffic)
 
-**Nothing more to do code-side.** Phase 1's Bicep reapply already shipped B1 + B2, so cold starts are dead and geo-redundant backup is live from before the marketing push.
+**Nothing more to do code-side.** Phase 1's Bicep reapply already shipped B1 (always-on replica) and aligned the readiness probe with Tier 20 Chunk 7. Cold starts are dead. B2 (geo backup) was attempted but is folded into C3 — see notes in Step 1 above.
 
 The remaining operator actions for Day 1:
 
@@ -249,22 +252,22 @@ Free tier supports up to 5 rules; these fit.
 
 ## Quick reference — what each Tier 25 lever costs
 
-| Lever                             | One-time effort        | Recurring cost               | Status                                     |
-| --------------------------------- | ---------------------- | ---------------------------- | ------------------------------------------ |
-| A1 Sequelize pool max=20          | 1 line × 2 files       | $0                           | **Live** (commit `e532008`)                |
-| A2 Cache-Control on static assets | ~15 lines in server.js | $0                           | **Live** (commit `e532008`)                |
-| A4 trust proxy: 1                 | —                      | $0                           | **Live** (Tier 22)                         |
-| A5 maxReplicas 3 → 10             | 1 line Bicep           | $0 at idle / +$15-40 at peak | **In IaC; effective after Step 1 reapply** |
-| A6 LOG_LEVEL=warn                 | env var                | $0 (saves overage)           | Parked                                     |
-| A7 App Insights alerts            | 3 portal rules         | $0                           | **Step 2 above**                           |
-| B1 minReplicas 0 → 1              | 1 line Bicep           | **+$8-12/mo**                | **In IaC; effective after Step 1 reapply** |
-| B2 geo-redundant backup           | 1 line Bicep           | **+$3/mo**                   | **In IaC; effective after Step 1 reapply** |
-| B3 /readyz + SIGTERM              | —                      | $0                           | **Live** (Tier 20 Chunk 7)                 |
-| C1 Managed Redis                  | Tier 10.4 work         | +$16/mo                      | Parked, trigger-driven                     |
-| C2 Postgres B2s                   | 1 line Bicep           | +$15/mo                      | Parked, trigger-driven                     |
-| C3 GP Postgres                    | 1 line Bicep           | +$112/mo                     | Parked, trigger-driven                     |
-| C4 N+1 leaderboard fix            | —                      | —                            | **Live** (Tier 24, `23789bb`)              |
-| C5 SSE realtime                   | Tier 7 work            | $0 (uses C1)                 | Parked, trigger-driven                     |
+| Lever                             | One-time effort        | Recurring cost               | Status                                                                                         |
+| --------------------------------- | ---------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| A1 Sequelize pool max=20          | 1 line × 2 files       | $0                           | **Live** (commit `e532008`)                                                                    |
+| A2 Cache-Control on static assets | ~15 lines in server.js | $0                           | **Live** (commit `e532008`)                                                                    |
+| A4 trust proxy: 1                 | —                      | $0                           | **Live** (Tier 22)                                                                             |
+| A5 maxReplicas 3 → 10             | 1 line Bicep           | $0 at idle / +$15-40 at peak | **In IaC; effective after Step 1 reapply**                                                     |
+| A6 LOG_LEVEL=warn                 | env var                | $0 (saves overage)           | Parked                                                                                         |
+| A7 App Insights alerts            | 3 portal rules         | $0                           | **Step 2 above**                                                                               |
+| B1 minReplicas 0 → 1              | 1 line Bicep           | **+$8-12/mo**                | **In IaC; effective after Step 1 reapply**                                                     |
+| B2 geo-redundant backup           | —                      | —                            | **Folded into C3** (create-time-only on Postgres Flex; will land when C3 recreates the server) |
+| B3 /readyz + SIGTERM              | —                      | $0                           | **Live** (Tier 20 Chunk 7)                                                                     |
+| C1 Managed Redis                  | Tier 10.4 work         | +$16/mo                      | Parked, trigger-driven                                                                         |
+| C2 Postgres B2s                   | 1 line Bicep           | +$15/mo                      | Parked, trigger-driven                                                                         |
+| C3 GP Postgres                    | 1 line Bicep           | +$112/mo                     | Parked, trigger-driven                                                                         |
+| C4 N+1 leaderboard fix            | —                      | —                            | **Live** (Tier 24, `23789bb`)                                                                  |
+| C5 SSE realtime                   | Tier 7 work            | $0 (uses C1)                 | Parked, trigger-driven                                                                         |
 
 **Total recurring cost after Step 1 Bicep reapply**: ~$45-65/mo (current ~$30-50 baseline + ~$13 from B1 + B2). A5 stays $0 until traffic uses the additional replicas.
 

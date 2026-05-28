@@ -1,20 +1,28 @@
 'use strict';
 
 // Tier 13 Chunk 1 — auth + session routes extracted from server.js. Covers
-// register, login (with optional 2FA challenge issuance), email verification,
-// password reset, refresh-token rotation, logout, and 2FA verification.
+// register, login, email verification, password reset, refresh-token
+// rotation, and logout.
 //
 // CSRF exempt list in middleware/csrf.js already covers /api/login,
 // /api/register, /api/auth/refresh, /api/auth/verify-email,
 // /api/auth/forgot-password, /api/auth/reset-password.
 //
-// Tier 6.6 lockout, Tier 6.8 rotating refresh, Tier 6.9 2FA challenge cookie:
-// all invariants preserved.
+// Tier 6.6 lockout + Tier 6.8 rotating refresh invariants preserved.
+//
+// Tier 22 — 2FA was parked for the marketing launch window. The user model
+// fields (totpSecret / totpEnabledAt / totpRecoveryCodes), the
+// CHALLENGE_COOKIE constants in lib/auth.js, and the migration history are
+// all intact so a future `git revert` of the removal commit restores 2FA
+// end-to-end without a schema change. Audit `users.totpEnabledAt != null`
+// before revival to decide whether to enforce 2FA for those users
+// immediately or wipe the columns and treat everyone as opt-in. (Note: the
+// earlier `20260514000001-disable-all-2fa.js` migration already cleared the
+// columns for every existing user, so a fresh revival starts from a clean
+// slate today.)
 const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const speakeasy = require('speakeasy');
 const { Op } = require('sequelize');
 
 const { validate } = require('../validation/middleware');
@@ -23,15 +31,10 @@ const {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
-  totpVerifySchema,
 } = require('../validation/schemas');
 const { loginLimiter, registerLimiter, forgotPasswordLimiter } = require('../middleware/rateLimit');
 const {
-  JWT_SECRET,
   REFRESH_COOKIE,
-  CHALLENGE_COOKIE,
-  CHALLENGE_TTL_MS,
-  COOKIE_SECURE,
   generateRawToken,
   hashToken,
   setAuthCookies,
@@ -123,20 +126,6 @@ router.post('/login', loginLimiter, validate(loginSchema), async (req, res) => {
     user.loginAttempts = 0;
     user.lockedUntil = null;
     await user.save({ hooks: false });
-  }
-
-  if (user.totpEnabledAt) {
-    const challengeJwt = jwt.sign({ id: user.id, type: '2fa-pending' }, JWT_SECRET, {
-      expiresIn: Math.floor(CHALLENGE_TTL_MS / 1000),
-    });
-    res.cookie(CHALLENGE_COOKIE, challengeJwt, {
-      httpOnly: true,
-      secure: COOKIE_SECURE,
-      sameSite: 'lax',
-      path: '/api/auth',
-      maxAge: CHALLENGE_TTL_MS,
-    });
-    return res.json({ challenge: true });
   }
 
   await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
@@ -308,66 +297,6 @@ router.post('/auth/logout', async (req, res) => {
   }
   clearAuthCookies(res);
   res.status(204).end();
-});
-
-router.post('/auth/2fa/verify', validate(totpVerifySchema), async (req, res) => {
-  const challengeToken = req.cookies?.[CHALLENGE_COOKIE];
-  if (!challengeToken) {
-    return res.status(401).json({ error: 'No 2FA challenge in progress' });
-  }
-  let payload;
-  try {
-    payload = jwt.verify(challengeToken, JWT_SECRET, { algorithms: ['HS256'] });
-    if (payload?.type !== '2fa-pending') throw new Error('not a challenge');
-  } catch (_) {
-    res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });
-    return res.status(401).json({ error: 'Challenge invalid or expired' });
-  }
-  try {
-    const user = await User.findByPk(payload.id);
-    if (!user || !user.totpEnabledAt || !user.totpSecret) {
-      res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });
-      return res.status(400).json({ error: 'No 2FA enabled' });
-    }
-    const { code, recoveryCode } = req.body;
-    let valid = false;
-    let usedRecoveryIndex = -1;
-    if (typeof code === 'string') {
-      valid = speakeasy.totp.verify({
-        secret: user.totpSecret,
-        encoding: 'base32',
-        token: code,
-        window: 1,
-      });
-    } else if (typeof recoveryCode === 'string') {
-      const normalized = recoveryCode.trim().toUpperCase();
-      const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
-      // Always run every bcrypt.compare regardless of an early match — an
-      // early-exit loop leaks the matched index via response time. The
-      // index itself is information-free (codes are equivalent) but it
-      // shouldn't be observable. Parallelize via Promise.all so total
-      // latency stays at one bcrypt rather than N.
-      const matches = await Promise.all(codes.map((hash) => bcrypt.compare(normalized, hash)));
-      const matchIndex = matches.indexOf(true);
-      if (matchIndex >= 0) {
-        valid = true;
-        usedRecoveryIndex = matchIndex;
-      }
-    }
-    if (!valid) return res.status(400).json({ error: 'Code did not match' });
-    if (usedRecoveryIndex >= 0) {
-      const codes = [...user.totpRecoveryCodes];
-      codes.splice(usedRecoveryIndex, 1);
-      user.totpRecoveryCodes = codes;
-      await user.save({ hooks: false });
-    }
-    res.clearCookie(CHALLENGE_COOKIE, { path: '/api/auth' });
-    await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
-    res.json({ user: { id: user.id, username: user.username } });
-  } catch (error) {
-    req.log.error({ err: error.message }, '2fa verify failed');
-    res.status(500).json({ error: '2FA verification failed' });
-  }
 });
 
 module.exports = router;

@@ -85,32 +85,49 @@ const setPasswordSchema = z
   .object({ currentPassword, newPassword: password })
   .openapi('SetPasswordRequest');
 
-const totpSetupSchema = z.object({ currentPassword }).openapi('TotpSetupRequest');
-
-const totpConfirmSchema = z
-  .object({ code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits') })
-  .openapi('TotpConfirmRequest');
-const totpVerifySchema = z
-  .object({
-    code: z
-      .string()
-      .regex(/^\d{6}$/)
-      .optional(),
-    recoveryCode: z.string().trim().min(8).max(60).optional(),
-  })
-  .refine((d) => Boolean(d.code) || Boolean(d.recoveryCode), {
-    message: 'Provide either code or recoveryCode',
-  })
-  .openapi('TotpVerifyRequest');
+// Tier 22 — 2FA schemas (totpSetupSchema / totpConfirmSchema / totpVerifySchema)
+// were removed alongside the route handlers. Re-add here when reviving 2FA;
+// the original shapes live in git history.
 
 // PWA Chunk 4 — Web Push. The browser's PushSubscription.toJSON() output is
 // `{endpoint, keys: {p256dh, auth}}`. Endpoint URLs from FCM / Apple WebPush /
 // Mozilla autopush range up to ~500 chars; the upper bound here is loose
 // (2048) so a future provider doesn't break us. p256dh + auth are base64url
 // fixed-length blobs.
+//
+// Tier 22 H4 — host allowlist. Without it the endpoint can point at any URL
+// and web-push.sendNotification will POST encrypted payloads to it on every
+// notification fan-out, turning the app into an unwitting HTTP client (SSRF
+// against internal infra, request smuggling against third parties). The
+// allowlist covers the four mainstream push providers; new providers need a
+// schema bump. The .endsWith() check uses a leading dot so `evilfcm.googleapis.com`
+// doesn't match `fcm.googleapis.com`.
+const PUSH_ENDPOINT_HOSTS = [
+  'fcm.googleapis.com',
+  'web.push.apple.com',
+  'updates.push.services.mozilla.com',
+];
+const PUSH_ENDPOINT_HOST_SUFFIXES = [
+  '.push.apple.com', // Apple uses sharded subdomains (web.push.apple.com is the public one but they rotate)
+  '.notify.windows.com', // Edge / Windows Notification Service
+];
+function isAllowedPushEndpoint(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (PUSH_ENDPOINT_HOSTS.includes(parsed.hostname)) return true;
+  return PUSH_ENDPOINT_HOST_SUFFIXES.some((s) => parsed.hostname.endsWith(s));
+}
+
 const pushSubscribeSchema = z
   .object({
-    endpoint: z.string().url().max(2048),
+    endpoint: z.string().url().max(2048).refine(isAllowedPushEndpoint, {
+      message: 'Endpoint host is not a recognized push provider',
+    }),
     keys: z.object({
       p256dh: z.string().min(64).max(200),
       auth: z.string().min(16).max(100),
@@ -119,7 +136,11 @@ const pushSubscribeSchema = z
   .openapi('PushSubscribeRequest');
 
 const pushUnsubscribeSchema = z
-  .object({ endpoint: z.string().url().max(2048) })
+  .object({
+    endpoint: z.string().url().max(2048).refine(isAllowedPushEndpoint, {
+      message: 'Endpoint host is not a recognized push provider',
+    }),
+  })
   .openapi('PushUnsubscribeRequest');
 
 // PWA Chunk 4 — known notification types that the per-type preferences UI
@@ -401,9 +422,6 @@ module.exports = {
   resetPasswordSchema,
   setEmailSchema,
   setPasswordSchema,
-  totpSetupSchema,
-  totpConfirmSchema,
-  totpVerifySchema,
   pushSubscribeSchema,
   pushUnsubscribeSchema,
   pushPreferencesSchema,

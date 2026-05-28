@@ -43,6 +43,32 @@ const BCRYPT_ROUNDS = 10;
 // from the same user on the same group.
 const JOIN_REQUEST_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
+// Tier 22 M4 — cap on group membership. Without this the leaderboard cache
+// per-group can grow unboundedly: a 10k-member group serializes 10k rows
+// every time the cache rebuilds. The cap is loose enough to never bite a
+// legitimate friend-group but tight enough that the leaderboard payload
+// stays comfortably under ~50 KB. Bumping this requires re-thinking the
+// leaderboard pagination path.
+//
+// MAX_GROUP_MEMBERS env override exists so operators can dial it down for a
+// staging environment to exercise the cap without seeding 500 fake users.
+// Default 500; clamps to [10, 5000] so a typo can't disable the limit or
+// blow the cache.
+const MAX_GROUP_MEMBERS = (() => {
+  const raw = Number(process.env.MAX_GROUP_MEMBERS);
+  if (!Number.isFinite(raw) || raw <= 0) return 500;
+  return Math.max(10, Math.min(5000, Math.floor(raw)));
+})();
+
+async function assertCanAddMember(groupId) {
+  const count = await GroupMember.count({ where: { groupId } });
+  if (count >= MAX_GROUP_MEMBERS) {
+    throw errors.badRequest(
+      `Group has reached its member limit (${MAX_GROUP_MEMBERS}). Ask the owner to create a sibling group.`,
+    );
+  }
+}
+
 async function cascadeDelete(group, { transaction } = {}) {
   const opts = transaction ? { transaction } : {};
   // Tier 18 Chunk 5 — explicitly destroy group comments + their reactions
@@ -228,6 +254,7 @@ async function acceptInvite({ groupId, inviteId, userId }) {
 
   const isAlreadyMember = await GroupMember.findOne({ where: { groupId, userId } });
   if (!isAlreadyMember) {
+    await assertCanAddMember(groupId);
     await GroupMember.create({ groupId, userId });
   }
 
@@ -270,6 +297,7 @@ async function joinPublic({ groupId, userId }) {
 
   const existing = await GroupMember.findOne({ where: { groupId, userId } });
   if (existing) throw errors.badRequest('Already a member');
+  await assertCanAddMember(groupId);
 
   await GroupMember.create({ groupId, userId });
   LeaderboardService.invalidatePrefix(`group:${groupId}`);
@@ -307,6 +335,7 @@ async function joinWithPassword({ groupId, userId, password }) {
   const ok = await bcrypt.compare(password, group.passwordHash);
   if (!ok) throw errors.unauthorized('Incorrect password');
 
+  await assertCanAddMember(groupId);
   await GroupMember.create({ groupId, userId });
   // Sweep any stale pending request from the same user — no point keeping
   // it once they're already in via the password path.
@@ -453,6 +482,7 @@ async function approveJoinRequest({ groupId, requestId, ownerId }) {
     where: { groupId, userId: request.requesterId },
   });
   if (!existing) {
+    await assertCanAddMember(groupId);
     await GroupMember.create({ groupId, userId: request.requesterId });
   }
   // Approve == destroy (no cooldown after a positive resolution).

@@ -126,6 +126,45 @@ test.describe('POST /api/push/subscribe', () => {
       await authed.dispose();
     }
   });
+
+  // Tier 22 H4 — host allowlist. Endpoints pointing at localhost or arbitrary
+  // third-party hosts must be rejected at the validation layer, before any
+  // outbound web-push attempt could turn the app into an SSRF probe.
+  test('endpoint on localhost → 400 (Tier 22 H4)', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertValidationError(authed, 'POST', '/api/push/subscribe', {
+        ...makeSubscription(),
+        endpoint: 'https://localhost/push',
+      });
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('endpoint on arbitrary third-party host → 400 (Tier 22 H4)', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertValidationError(authed, 'POST', '/api/push/subscribe', {
+        ...makeSubscription(),
+        endpoint: 'https://evil.example.com/push',
+      });
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('endpoint over plain http → 400 (Tier 22 H4)', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertValidationError(authed, 'POST', '/api/push/subscribe', {
+        ...makeSubscription(),
+        endpoint: 'http://fcm.googleapis.com/fcm/send/whatever-aaaaaaaaaa',
+      });
+    } finally {
+      await authed.dispose();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

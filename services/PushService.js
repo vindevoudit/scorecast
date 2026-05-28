@@ -79,10 +79,43 @@ async function removeSubscription({ userId, endpoint }) {
   return { removed };
 }
 
+// Tier 22 H4 — block sends to private/loopback/link-local addresses. The
+// pushSubscribeSchema's host allowlist (validation/schemas.js) already
+// rejects these at write time, but a row could have been inserted before
+// that landed OR a future provider's hostname could resolve via DNS rebind
+// to an internal IP. Belt-and-braces: drop the subscription on the spot if
+// the hostname is a literal private/loopback address. Hostname-based check
+// — we don't resolve DNS here (sync), so dynamic-DNS attacks still need
+// the webpush library's own SSRF posture; this catches the literal-IP case.
+const BLOCKED_HOST_PATTERNS = [
+  /^localhost$/i,
+  /^127\./, // 127.0.0.0/8 loopback
+  /^10\./, // RFC1918
+  /^192\.168\./, // RFC1918
+  /^172\.(1[6-9]|2[0-9]|3[01])\./, // RFC1918 172.16/12
+  /^169\.254\./, // link-local incl. Azure IMDS 169.254.169.254
+  /^0\./, // 0.0.0.0/8
+  /^::1$/, // IPv6 loopback
+  /^fc/i, // IPv6 unique-local (fc00::/7)
+  /^fe80/i, // IPv6 link-local
+];
+function isBlockedHost(hostname) {
+  return BLOCKED_HOST_PATTERNS.some((re) => re.test(hostname));
+}
+
 // Send a payload to a single subscription, handling Gone (410/404) by
 // dropping the row and other errors by incrementing failureCount.
 async function sendToSubscription(sub, body) {
   try {
+    const { hostname } = new URL(sub.endpoint);
+    if (isBlockedHost(hostname)) {
+      logger.warn(
+        { subscriptionId: sub.id, userId: sub.userId, hostname },
+        'PushService: refusing to send to private/loopback host — dropping subscription',
+      );
+      await sub.destroy();
+      return { ok: false, pruned: true };
+    }
     await webpush.sendNotification(
       {
         endpoint: sub.endpoint,

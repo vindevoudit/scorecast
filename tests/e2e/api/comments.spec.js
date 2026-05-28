@@ -284,3 +284,83 @@ test.describe('DELETE /api/comments/:id/reactions/:emoji', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 22 H3 — group-scoped comment edit/delete must re-check membership.
+// Without this, a user who leaves a group can still PUT-rewrite or DELETE
+// their own historical comments inside it (the create-side membership gate
+// is bypassed because the row already exists).
+// ---------------------------------------------------------------------------
+
+test.describe('Tier 22 H3 — group-comment edit/delete checks current membership', () => {
+  test('after leaving a group, PUT /api/comments/:id → 403', async () => {
+    const owner = await apiLogin(USERS.alice);
+    let groupId;
+    let commentId;
+    try {
+      // Owner creates a public group, bob joins, bob comments.
+      const grpRes = await owner.post('/api/groups', {
+        data: { name: `tier22-h3-edit-${Date.now()}`, visibility: 'public' },
+      });
+      groupId = (await grpRes.json()).id;
+
+      const bob = await apiLogin(USERS.bob);
+      try {
+        await assertOk(bob, 'POST', `/api/groups/${groupId}/join`);
+        const cRes = await bob.post(`/api/groups/${groupId}/comments`, {
+          data: { body: 'bob comment in group' },
+        });
+        commentId = (await cRes.json()).id;
+
+        // Bob leaves the group.
+        await assertOk(bob, 'POST', `/api/groups/${groupId}/leave`);
+
+        // Bob tries to edit his old comment. Membership gate must reject.
+        const editRes = await bob.put(`/api/comments/${commentId}`, {
+          data: { body: 'rewritten after leaving' },
+        });
+        expect(editRes.status()).toBe(403);
+      } finally {
+        await bob.dispose();
+      }
+    } finally {
+      // Cleanup: owner deletes the group.
+      if (groupId) {
+        await owner.delete(`/api/groups/${groupId}`).catch(() => {});
+      }
+      await owner.dispose();
+    }
+  });
+
+  test('after leaving a group, DELETE /api/comments/:id → 403 (for non-admin)', async () => {
+    const owner = await apiLogin(USERS.alice);
+    let groupId;
+    let commentId;
+    try {
+      const grpRes = await owner.post('/api/groups', {
+        data: { name: `tier22-h3-delete-${Date.now()}`, visibility: 'public' },
+      });
+      groupId = (await grpRes.json()).id;
+
+      const bob = await apiLogin(USERS.bob);
+      try {
+        await assertOk(bob, 'POST', `/api/groups/${groupId}/join`);
+        const cRes = await bob.post(`/api/groups/${groupId}/comments`, {
+          data: { body: 'bob to delete after leaving' },
+        });
+        commentId = (await cRes.json()).id;
+        await assertOk(bob, 'POST', `/api/groups/${groupId}/leave`);
+
+        const delRes = await bob.delete(`/api/comments/${commentId}`);
+        expect(delRes.status()).toBe(403);
+      } finally {
+        await bob.dispose();
+      }
+    } finally {
+      if (groupId) {
+        await owner.delete(`/api/groups/${groupId}`).catch(() => {});
+      }
+      await owner.dispose();
+    }
+  });
+});

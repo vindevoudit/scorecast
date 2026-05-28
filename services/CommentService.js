@@ -139,10 +139,23 @@ async function create({ gameId, groupId, userId, body }) {
   };
 }
 
+// Tier 22 H3 — for group-scoped comments, verify the editor is still a
+// member. Without this, a user who leaves the group can still rewrite
+// their own history inside it, defeating the membership gate that create()
+// enforces on the write side.
+async function assertStillMember(comment, userId) {
+  if (!comment.groupId) return;
+  const membership = await GroupMember.findOne({
+    where: { groupId: comment.groupId, userId },
+  });
+  if (!membership) throw errors.forbidden('Not a group member');
+}
+
 async function edit({ commentId, userId, body }) {
   const comment = await Comment.findByPk(commentId);
   if (!comment) throw errors.notFound('Comment not found');
   if (comment.userId !== userId) throw errors.forbidden();
+  await assertStillMember(comment, userId);
   comment.body = body;
   comment.editedAt = new Date();
   await comment.save();
@@ -154,6 +167,12 @@ async function remove({ commentId, viewer }) {
   if (!comment) throw errors.notFound('Comment not found');
   if (comment.userId !== viewer.id && viewer.role !== 'admin') {
     throw errors.forbidden();
+  }
+  // Admins always can; otherwise apply the same still-member gate. (An admin
+  // who has left a group can still moderate a comment in it — admin scope
+  // outranks group membership.)
+  if (viewer.role !== 'admin') {
+    await assertStillMember(comment, viewer.id);
   }
   await CommentReaction.destroy({ where: { commentId: comment.id } });
   await comment.destroy();

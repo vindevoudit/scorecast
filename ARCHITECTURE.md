@@ -3095,6 +3095,77 @@ The `scorecast:url-changed` pattern is the durable take-away — any future comp
 
 ---
 
+### 8.30 Tier 22 — Park 2FA + Pre-Launch Security Hardening
+
+Tier 22 is a two-thread tier: (1) parking 2FA cleanly so revival is a `git revert` away, and (2) closing the audit gaps surfaced by a three-agent security scan ahead of the marketing launch. Both threads ship in one PR (`sec/launch-hardening`) as 3 commits + 1 cleanup, organized so each commit is independently revertible.
+
+**Thread 1 — Park 2FA** (commit `b2bd286`). The 4 route handlers (`POST /auth/2fa/verify` + `/me/2fa/{setup,confirm,disable}`), the login challenge-cookie branch in `routes/auth.js`, three zod schemas (`totpSetupSchema`/`totpConfirmSchema`/`totpVerifySchema`), and the entire frontend surface (`TwoFactorSetup.jsx`, `TwoFactorChallenge.jsx`, AuthContext handlers `handle2faVerify`/`handle2faSetup`/`handle2faConfirm`/`handle2faDisable`, ProfileView panel, AuthView `twofa` branch) were deleted.
+
+Deliberately preserved so revival is friction-free:
+
+- `users.{totpSecret, totpEnabledAt, totpRecoveryCodes}` columns — schema-level, no migration needed to bring them back.
+- Every `migrations/*` file mentioning totp — invariant of the project, never delete a migration.
+- `lib/auth.js CHALLENGE_COOKIE` + `CHALLENGE_TTL_MS` constants — tiny footprint, used only by the dormant 2FA flow.
+- The `twoFactorEnabled` boolean on `GET /api/me` (always `false` post-removal) — keeps the API shape stable for the revival commit.
+- `speakeasy` + `qrcode` npm deps — leaving them means revival is literally `git revert` with no `npm install`.
+
+Marker comments at the top of `routes/auth.js` and `routes/me.js` carry the revival recipe. 4 regression e2e tests assert each of the 4 endpoints returns 404 so a future inadvertent re-mount fails CI.
+
+**The 20260514000001-disable-all-2fa.js migration already cleared every user's totp columns in May 2026**, so the removal lands on a clean data slate — nobody loses access. If 2FA is ever revived, the operator should audit `SELECT COUNT(*) FROM users WHERE "totpEnabledAt" IS NOT NULL` first (should be 0 today) before deciding whether to enforce 2FA for those users immediately or wipe + treat as opt-in.
+
+**Thread 2 — Security patches** (commits `362a3a6` + `545688e` cleanup + `4c0c234`). Twelve verified findings from a three-Explore-agent audit:
+
+| ID  | Severity | Patch                                                                                                                                                                                                                       |
+| --- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C3  | HIGH     | `npm audit fix` — `js-cookie ≤3.0.5` prototype hijack (`GHSA-qjx8-664m-686j`, CVSS 7.5).                                                                                                                                    |
+| H1  | HIGH     | `sensitiveAccountLimiter` (10/hr/IP) on `/me/password` + `/me/email`; `lightWriteLimiter` (60/min/IP) on `/me/{push-preferences,onboarding-completed,accept-terms}` + PUT `/me` + `/notifications/{:id/read,read-all}`.     |
+| H2  | HIGH     | `inviteLimiter` (5/min/IP) on `POST /groups/:id/invite`. Per-group pending-invite cap deferred (low real-world abuse risk; existing notification fan-out is bounded).                                                       |
+| H3  | HIGH     | `CommentService.edit/remove` `assertStillMember()` re-check on group-scoped comments. Admin override on remove preserved (admin > group). Two e2e tests in `comments.spec.js`.                                              |
+| H4  | HIGH     | `pushSubscribeSchema.endpoint` refine() against FCM/Apple/Mozilla/Edge allowlist + HTTPS-only. `PushService.sendToSubscription` defensive private/loopback-IP block (drops sub on send). Three e2e tests in `push.spec.js`. |
+| H5  | MOD      | `npm audit fix` — `qs 6.11.1–6.15.1` DoS (`GHSA-q8mj-m7cp-5q26`).                                                                                                                                                           |
+| H6  | MOD      | `overrides.uuid: ^11.1.1` in package.json (resolves `GHSA-w5hq-g745-h8pq` buffer-bounds via sequelize transitive without a semver-major sequelize bump).                                                                    |
+| M1  | MED      | `/healthz` body shrunk to `{ ok: true }` exactly; e2e asserts `payload.uptime === undefined`.                                                                                                                               |
+| M2  | MED      | CORS non-prod fallback locked to localhost (`['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173']`); was `true`.                                                                                     |
+| M3  | MED      | Explicit `hsts: { maxAge: 63072000, includeSubDomains: true, preload: true }` (was helmet default w/o preload). Eligible for HSTS preload list after 30 days of prod traffic.                                               |
+| M4  | MED      | `MAX_GROUP_MEMBERS = 500` (env-overridable, clamps [10, 5000]) enforced in 4 add-member paths in `GroupService.js` (`joinPublic`, `joinWithPassword`, `acceptInvite`, `approveJoinRequest`).                                |
+| L4  | LOW      | Extended Permissions-Policy beyond camera/mic/geo/payment to also deny `usb, fullscreen, accelerometer, gyroscope, magnetometer, interest-cohort`. Defense-in-depth.                                                        |
+
+**Drive-by fix** during verification: a pre-existing regression in `pushPreferencesSchema` where Zod 4's `z.record(z.enum([...]), z.boolean())` requires every enum key to be present, breaking the documented partial-update merge contract (`PushService.updatePreferences` does a JSONB merge). Switched to `z.record(z.string(), z.boolean())` + a refine that gates keys against `PUSH_NOTIFICATION_TYPE_SET`. Confirmed pre-existing by checking out main and reproducing the failure before the fix.
+
+**Group cap (M4) e2e test was deliberately skipped** — cap=500 makes direct e2e impractical without seeding 500 fake users (the `group_members` table FK to `users.id` blocks the direct-SQL workaround). The cap is a single readable predicate (`count >= MAX_GROUP_MEMBERS`) easily verified by code review; the env override exists so a future staging test can dial it down to a testable value.
+
+**Defense-in-depth recommendations** (operational, not code-shipped):
+
+1. Cloudflare WAF managed ruleset (OWASP Core, paranoia 1).
+2. Cloudflare Bot Fight Mode.
+3. Cloudflare edge rate limits on `/api/login`, `/api/register`, `/api/auth/forgot-password` — backstop the app-level limiters.
+4. Sentry alerts on any 5xx from `/api/auth/*` + spikes in 401s + `client-errors` POST rate.
+5. Postgres connection ceiling check (Sequelize pool 5 × ACA max 3 replicas = 15 connections, B1ms cap ≈ 50).
+6. Backup restore drill before launch.
+7. Secrets rotation drill — `JWT_SECRET`, `RESEND_API_KEY`, `FOOTBALL_DATA_API_KEY`, `VAPID_PRIVATE_KEY`.
+8. Publish `security@bantryx.com` or `/.well-known/security.txt` for external researchers.
+9. Audit-log weekly digest cron emailing admin.
+10. Verify `NODE_ENV=production` on the Container App — if it ever drops to dev, `/api/openapi.json` would leak the entire attack surface.
+
+**Accepted-risk items** (documented in CLAUDE.md):
+
+- Postgres firewall `AllowAllAzureServices` — cost-gated; Tier 10.4 will move to VNet integration.
+- No CAPTCHA on register — `registerLimiter` (3/hr/IP) + Resend's own quotas cover abuse for now.
+- No file upload surface today — avatars are deterministic from username. If avatar upload is ever added, redo the audit.
+
+**Pre-existing UI-spec flake during verification**: the full e2e sweep showed 342 pass + 6 fail. All 6 failures (admin-panel, comment-reaction, group-lifecycle, pick-and-result, picks-snapshot ×2) are pre-existing on main — confirmed by checking out main and reproducing the same "Pick Test Lions to win button not found" failure with the same test. Root cause: seed data dates (5/29-5/31) sit on calendar chips that the test doesn't navigate to from the default `today=5/28` selection (a Tier 18 Chunk 3 calendar widget change). Out of scope for Tier 22; should be fixed as a separate flake fix (either seed dates that include today, or test helpers that navigate to the right calendar chip).
+
+**Verification matrix**:
+
+- ESLint clean (2 pre-existing warnings unchanged across the 3 commits).
+- 42/42 unit tests green.
+- `npm audit --omit=dev --audit-level=high` reports zero vulnerabilities (the 2 remaining moderates are in `vite`/`esbuild` devDependencies — never reach the production image).
+- API spec subset: 189/189 across health + auth + me + picks + groups + comments + push.
+- 9 new boundary tests (4 Tier 22 2FA-routes-removed regressions, 3 push-SSRF, 2 comment-IDOR-after-leave).
+- Full plan at `C:\Users\vinde\.claude\plans\tier22.md`.
+
+---
+
 ## 9. End-to-End Data Flows
 
 ### 9.1 Login → Dashboard Load

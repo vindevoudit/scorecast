@@ -162,21 +162,44 @@ app.use(
   helmet({
     contentSecurityPolicy: { directives: cspDirectives },
     frameguard: { action: 'deny' },
+    // Tier 22 M3 — explicit HSTS with preload. Helmet's default omits
+    // `preload`, which means every first-visit-on-new-device is still a
+    // one-shot MITM downgrade window. Two-year max-age + preload lets us
+    // submit bantryx.com to https://hstspreload.org after ~30 days of
+    // production traffic, hardcoding HTTPS in every modern browser.
+    hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
     crossOriginEmbedderPolicy: false,
     crossOriginOpenerPolicy: false,
     crossOriginResourcePolicy: false,
   }),
 );
-// Helmet doesn't set Permissions-Policy. Deny camera / microphone / geolocation
-// / payment outright — the app uses none of these and an opt-out header keeps
-// any future embedded iframe or compromised dependency from prompting users.
+// Helmet doesn't set Permissions-Policy. Deny the dangerous-feature set
+// outright — the app uses none of these and an opt-out header keeps any
+// future embedded iframe or compromised dependency from prompting users.
+// Tier 22 L4 — extended beyond camera/mic/geo/payment to cover USB /
+// fullscreen / motion sensors (accel/gyro/magnetometer) / FLoC
+// (interest-cohort). Defense-in-depth.
 app.use((_req, res, next) => {
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader(
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(), accelerometer=(), gyroscope=(), magnetometer=(), interest-cohort=()',
+  );
   next();
 });
+// Tier 22 M2 — CORS fallback hardening. Production throws above when
+// CORS_ORIGINS is empty, so this fallback only fires in dev/test. The
+// previous `true` (allow any origin) would silently accept credentialed
+// requests from any host if a future staging env forgot to set
+// CORS_ORIGINS — credential-theft risk via a malicious origin. Lock to
+// localhost only; a future staging env MUST set CORS_ORIGINS explicitly.
+const FALLBACK_CORS_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+];
 app.use(
   cors({
-    origin: corsOrigins.length ? corsOrigins : true,
+    origin: corsOrigins.length ? corsOrigins : FALLBACK_CORS_ORIGINS,
     credentials: true,
   }),
 );

@@ -18,8 +18,13 @@ const { sequelize } = require('../models');
 
 const router = express.Router();
 
+// Tier 22 M1 — dropped `uptime` from the response. process.uptime() tells
+// an attacker when the container last restarted (useful for inferring
+// deploy schedule, scaling behavior, whether a previous probe crashed the
+// process). Azure Container Apps metrics already carry this info for
+// legitimate operators.
 router.get('/healthz', (req, res) => {
-  res.json({ ok: true, uptime: process.uptime() });
+  res.json({ ok: true });
 });
 
 router.get('/readyz', async (req, res) => {

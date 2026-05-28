@@ -3,7 +3,6 @@ import LoginForm from '../components/LoginForm';
 import RegisterForm from '../components/RegisterForm';
 import ForgotPasswordForm from '../components/ForgotPasswordForm';
 import ResetPasswordForm from '../components/ResetPasswordForm';
-import TwoFactorChallenge from '../components/TwoFactorChallenge';
 import Landing from '../components/Landing';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
@@ -47,8 +46,6 @@ function AuthView() {
     handleRegister: authRegister,
     handleForgotPassword,
     handleResetPassword,
-    handle2faVerify: auth2faVerify,
-    initialAuthData,
   } = useAuth();
   const { loadDashboard } = useData();
   const [registerErrors, setRegisterErrors] = useState({});
@@ -65,12 +62,12 @@ function AuthView() {
   // flip them from outside AuthView. Default = `sc_visited === '1'` (set on
   // successful auth) so returning users skip the marketing Landing.
 
-  // Any time we leave the landing for a forgot/reset/2FA flow (typically
-  // via a `/?resetToken=…` deep-link), pin showAuth=true so that when the
-  // flow finishes and authView returns to 'auth', we land on the login +
-  // register grid rather than dropping the user back on the marketing page.
+  // Any time we leave the landing for a forgot/reset flow (typically via
+  // a `/?resetToken=…` deep-link), pin showAuth=true so that when the flow
+  // finishes and authView returns to 'auth', we land on the login + register
+  // grid rather than dropping the user back on the marketing page.
   useEffect(() => {
-    if (authView === 'forgot' || authView === 'reset' || authView === 'twofa') {
+    if (authView === 'forgot' || authView === 'reset') {
       setShowAuth(true);
     }
   }, [authView, setShowAuth]);
@@ -121,28 +118,10 @@ function AuthView() {
     }
   };
 
-  const handle2faVerify = async (payload) => {
-    const result = await auth2faVerify(payload);
-    if (result?.user) {
-      markReturning();
-      await loadDashboard().catch(() => {});
-    }
-  };
-
   // Tier 11 Chunk 4 — every AuthView branch returns inside a `<main id="main">`
   // so the skip-to-content link in App.jsx has a valid target on every view.
   let body;
-  if (authView === 'twofa') {
-    body = (
-      <TwoFactorChallenge
-        onSubmit={handle2faVerify}
-        onCancel={() => {
-          setAuthView('auth');
-          setAuthData(initialAuthData);
-        }}
-      />
-    );
-  } else if (authView === 'reset') {
+  if (authView === 'reset') {
     body = (
       <div className="mx-auto max-w-lg">
         <ResetPasswordForm

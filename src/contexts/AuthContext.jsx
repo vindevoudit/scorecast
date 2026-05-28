@@ -1,10 +1,13 @@
 'use strict';
 
 // Tier 13 Chunk 3 — AuthContext. Owns user state + the auth flow:
-// register / login (with optional 2FA challenge) / logout / forgot-password
-// / reset-password / 2FA setup / confirm / disable / verify. Also consumes
-// verifyToken / resetToken from the URL on first mount and routes to the
-// appropriate view.
+// register / login / logout / forgot-password / reset-password. Also
+// consumes verifyToken / resetToken from the URL on first mount and routes
+// to the appropriate view.
+//
+// Tier 22 — 2FA flow handlers (handle2faVerify / handle2faSetup /
+// handle2faConfirm / handle2faDisable) + the login `challenge: true` branch
+// were removed. See routes/auth.js header for the revival recipe.
 //
 // /api/auth/* paths are CSRF-exempt + skip the refresh-retry path, so this
 // context calls apiClient directly rather than going through useRequest.
@@ -139,11 +142,6 @@ export function AuthProvider({ children }) {
             password: authData.loginPassword,
           }),
         });
-        if (data?.challenge) {
-          setAuthData((prev) => ({ ...prev, loginPassword: '' }));
-          setAuthView('twofa');
-          return { challenge: true };
-        }
         setUser(data.user);
         setAuthData(initialAuthData);
         return { user: data.user };
@@ -241,26 +239,6 @@ export function AuthProvider({ children }) {
     [authData.resetToken, authData.resetPassword, showStatus],
   );
 
-  const handle2faVerify = useCallback(async (payload) => {
-    const data = await apiFetch('/api/auth/2fa/verify', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setUser(data.user);
-    setAuthData(initialAuthData);
-    setAuthView('auth');
-    return data;
-  }, []);
-
-  const handle2faSetup = useCallback(
-    async (currentPassword) =>
-      apiFetch('/api/me/2fa/setup', {
-        method: 'POST',
-        body: JSON.stringify({ currentPassword }),
-      }),
-    [],
-  );
-
   const handleChangePassword = useCallback(
     async ({ currentPassword, newPassword }) => {
       await apiFetch('/api/me/password', {
@@ -284,26 +262,6 @@ export function AuthProvider({ children }) {
       // an "unverified" badge until the user clicks the link.
       setUser((u) => (u ? { ...u, email: data?.email ?? email, emailVerifiedAt: null } : u));
       showStatus('Email updated. Check your new inbox for a verification link.');
-      return true;
-    },
-    [showStatus],
-  );
-
-  const handle2faConfirm = useCallback(
-    async (code) => {
-      await apiFetch('/api/me/2fa/confirm', { method: 'POST', body: JSON.stringify({ code }) });
-      setUser((u) => (u ? { ...u, twoFactorEnabled: true } : u));
-      showStatus('Two-factor authentication enabled.');
-      return true;
-    },
-    [showStatus],
-  );
-
-  const handle2faDisable = useCallback(
-    async (payload) => {
-      await apiFetch('/api/me/2fa/disable', { method: 'POST', body: JSON.stringify(payload) });
-      setUser((u) => (u ? { ...u, twoFactorEnabled: false } : u));
-      showStatus('Two-factor authentication disabled.');
       return true;
     },
     [showStatus],
@@ -350,10 +308,6 @@ export function AuthProvider({ children }) {
     handleRegister,
     handleForgotPassword,
     handleResetPassword,
-    handle2faVerify,
-    handle2faSetup,
-    handle2faConfirm,
-    handle2faDisable,
     handleChangePassword,
     handleChangeEmail,
     performLogout,

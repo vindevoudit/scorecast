@@ -1,20 +1,17 @@
 'use strict';
 
 // Tier 13 Chunk 1 — current-user routes extracted from server.js. Covers
-// /me, /me/2fa/{setup,confirm,disable}, and /me/email. All require auth.
+// /me, /me/email, /me/password. All require auth.
+//
+// Tier 22 — 2FA setup/confirm/disable handlers were removed. See routes/auth.js
+// header for the revival recipe.
 const express = require('express');
-const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const speakeasy = require('speakeasy');
-const qrcode = require('qrcode');
 
 const { validate } = require('../validation/middleware');
 const {
   setEmailSchema,
   setPasswordSchema,
-  totpSetupSchema,
-  totpConfirmSchema,
-  totpVerifySchema,
   editProfileSchema,
   pushPreferencesSchema,
   acceptTermsSchema,
@@ -165,103 +162,6 @@ router.put('/me', authMiddleware, validate(editProfileSchema), async (req, res) 
   } catch (error) {
     req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to update profile' });
-  }
-});
-
-router.post('/me/2fa/setup', authMiddleware, validate(totpSetupSchema), async (req, res) => {
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.totpEnabledAt) {
-      return res
-        .status(400)
-        .json({ error: '2FA is already enabled — disable it first to regenerate' });
-    }
-    // Password re-auth so a stolen 15-min access JWT alone can't enable 2FA
-    // and lock the victim out of their own account.
-    const passwordValid = await bcrypt.compare(req.body.currentPassword, user.password);
-    if (!passwordValid) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
-    }
-    const secret = speakeasy.generateSecret({ name: `Bantryx:${user.username}`, length: 20 });
-    const qrCodeDataUrl = await qrcode.toDataURL(secret.otpauth_url);
-    const recoveryCodes = Array.from({ length: 10 }, () => {
-      const raw = crypto.randomBytes(5).toString('hex').toUpperCase();
-      return `${raw.slice(0, 5)}-${raw.slice(5, 10)}`;
-    });
-    const hashedRecoveryCodes = await Promise.all(recoveryCodes.map((c) => bcrypt.hash(c, 8)));
-    user.totpSecret = secret.base32;
-    user.totpEnabledAt = null;
-    user.totpRecoveryCodes = hashedRecoveryCodes;
-    await user.save({ hooks: false });
-    res.json({ qrCodeDataUrl, secret: secret.base32, recoveryCodes });
-  } catch (error) {
-    req.log.error({ err: error.message }, '2fa setup failed');
-    res.status(500).json({ error: '2FA setup failed' });
-  }
-});
-
-router.post('/me/2fa/confirm', authMiddleware, validate(totpConfirmSchema), async (req, res) => {
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user || !user.totpSecret) {
-      return res.status(400).json({ error: 'No pending 2FA setup' });
-    }
-    if (user.totpEnabledAt) {
-      return res.status(400).json({ error: '2FA already enabled' });
-    }
-    const valid = speakeasy.totp.verify({
-      secret: user.totpSecret,
-      encoding: 'base32',
-      token: req.body.code,
-      window: 1,
-    });
-    if (!valid)
-      return res
-        .status(400)
-        .json({ error: 'Code did not match — try the next one in your authenticator' });
-    user.totpEnabledAt = new Date();
-    await user.save({ hooks: false });
-    res.json({ ok: true, totpEnabledAt: user.totpEnabledAt });
-  } catch (error) {
-    req.log.error({ err: error.message }, '2fa confirm failed');
-    res.status(500).json({ error: '2FA confirm failed' });
-  }
-});
-
-router.post('/me/2fa/disable', authMiddleware, validate(totpVerifySchema), async (req, res) => {
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user || !user.totpEnabledAt) {
-      return res.status(400).json({ error: '2FA is not enabled' });
-    }
-    const { code, recoveryCode } = req.body;
-    let valid = false;
-    if (typeof code === 'string') {
-      valid = speakeasy.totp.verify({
-        secret: user.totpSecret,
-        encoding: 'base32',
-        token: code,
-        window: 1,
-      });
-    } else if (typeof recoveryCode === 'string') {
-      const normalized = recoveryCode.trim().toUpperCase();
-      const codes = Array.isArray(user.totpRecoveryCodes) ? user.totpRecoveryCodes : [];
-      // Run every bcrypt.compare in parallel rather than early-exit so the
-      // total latency doesn't leak whether the match was first or last in
-      // the list (mirrors /auth/2fa/verify).
-      const matches = await Promise.all(codes.map((hash) => bcrypt.compare(normalized, hash)));
-      if (matches.some(Boolean)) valid = true;
-    }
-    if (!valid) return res.status(400).json({ error: 'Code did not match' });
-    user.totpSecret = null;
-    user.totpEnabledAt = null;
-    user.totpRecoveryCodes = null;
-    await user.save({ hooks: false });
-    res.json({ ok: true });
-  } catch (error) {
-    req.log.error({ err: error.message }, '2fa disable failed');
-    res.status(500).json({ error: '2FA disable failed' });
   }
 });
 

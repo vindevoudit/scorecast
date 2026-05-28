@@ -212,15 +212,10 @@ async function deleteUserByUsername(username) {
   if (user) await user.destroy();
 }
 
-// Reset a user's TOTP fields so the 2FA-spec teardown leaves the seed user
-// in its baseline state regardless of which step failed in the middle.
-async function clear2faForUser(userId) {
-  const { User } = getModels();
-  await User.update(
-    { totpSecret: null, totpEnabledAt: null, totpRecoveryCodes: null },
-    { where: { id: userId }, hooks: false },
-  );
-}
+// Tier 22 — clear2faForUser helper was removed alongside the 2FA route
+// handlers. The schema columns (totpSecret / totpEnabledAt /
+// totpRecoveryCodes) still exist; the earlier 20260514000001-disable-all-2fa
+// migration already zeroed them for every existing user.
 
 // Force a user's password back to a known value (bcrypt-hashed via the model
 // hook). Used by reset-password / change-password specs to restore the seed
@@ -331,7 +326,6 @@ module.exports = {
   clearLeaguesByName,
   clearAuditLog,
   deleteUserByUsername,
-  clear2faForUser,
   setUserPassword,
   updateUserFields,
   updateGameFields,

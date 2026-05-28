@@ -13,7 +13,7 @@ const DASHBOARD_SENTINEL = /Upcoming Matches/;
 // and "Sign in" CTAs reveal the same login + register grid; we click
 // "Get started" here because it's the visually-primary CTA and renders
 // first in DOM order. The wait is bounded by the standard expect timeout
-// so deep-link flows (forgot/reset/2fa) that bypass the landing don't
+// so deep-link flows (forgot/reset) that bypass the landing don't
 // stall here.
 async function dismissLanding(page) {
   const cta = page.getByRole('button', { name: /Get started/i }).first();

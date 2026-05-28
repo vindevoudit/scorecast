@@ -1,18 +1,20 @@
 'use strict';
 
 // Per-endpoint boundary suite for routes/me.js. Covers GET /api/me, PUT /me,
-// POST /me/onboarding-completed, POST /me/password, PATCH /me/email, and
-// the three 2FA endpoints (setup / confirm / disable).
+// POST /me/onboarding-completed, POST /me/password, PATCH /me/email.
+//
+// Tier 22 — the 2FA setup/confirm/disable describe block was removed
+// alongside the route handlers. A regression at the bottom asserts each of
+// the three routes returns 404 so a future inadvertent re-mount fails CI.
 //
 // All routes require authMiddleware. State-changing routes also require
-// CSRF (none of /api/me/* are on the EXEMPT_PATHS list). Password / email /
-// 2fa/setup additionally require currentPassword.
+// CSRF (none of /api/me/* are on the EXEMPT_PATHS list). Password / email
+// additionally require currentPassword.
 
 const { test, expect } = require('@playwright/test');
-const speakeasy = require('speakeasy');
 
 const { USERS } = require('../fixtures/data');
-const { apiLogin, setUserPassword, updateUserFields, clear2faForUser } = require('../helpers/api');
+const { apiLogin, setUserPassword, updateUserFields } = require('../helpers/api');
 const {
   assertOk,
   assertUnauthorized,
@@ -37,6 +39,8 @@ test.describe('GET /api/me', () => {
         'displayName',
         'email',
         'emailVerifiedAt',
+        // twoFactorEnabled stays in the response (always false post-Tier-22)
+        // until 2FA is revived; expectShape just checks the listed keys.
         'twoFactorEnabled',
         'onboardingCompletedAt',
         'profileVisibility',
@@ -327,123 +331,40 @@ test.describe('PATCH /api/me/email', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/me/2fa/setup → /me/2fa/confirm → /me/2fa/disable
-//
-// Lifecycle suite. afterAll clears alice's TOTP fields so the rest of the
-// e2e suite is unaffected.
+// Tier 22 — 2FA routes removed. Regression test to catch inadvertent
+// re-mount; all three should land on the /api 404 sentinel.
 // ---------------------------------------------------------------------------
 
-test.describe('POST /api/me/2fa/{setup,confirm,disable}', () => {
-  test.afterEach(async () => {
-    await clear2faForUser(USERS.alice.id);
-  });
-
-  test('setup happy path → 200 with secret + recovery codes', async () => {
+test.describe('Tier 22 — 2FA routes removed', () => {
+  test('POST /api/me/2fa/setup → 404', async () => {
     const authed = await apiLogin(USERS.alice);
     try {
-      const payload = await assertOk(authed, 'POST', '/api/me/2fa/setup', {
-        currentPassword: USERS.alice.password,
+      const res = await authed.post('/api/me/2fa/setup', {
+        data: { currentPassword: USERS.alice.password },
       });
-      expectShape(payload, ['qrCodeDataUrl', 'secret', 'recoveryCodes']);
-      expect(payload.recoveryCodes).toHaveLength(10);
+      expect(res.status()).toBe(404);
     } finally {
       await authed.dispose();
     }
   });
 
-  test('setup with wrong currentPassword → 401', async () => {
+  test('POST /api/me/2fa/confirm → 404', async () => {
     const authed = await apiLogin(USERS.alice);
     try {
-      const res = await authed.post('/api/me/2fa/setup', { data: { currentPassword: 'wrong' } });
-      expect(res.status()).toBe(401);
-    } finally {
-      await authed.dispose();
-    }
-  });
-
-  test('setup missing currentPassword → 400', async () => {
-    const authed = await apiLogin(USERS.alice);
-    try {
-      await assertValidationError(authed, 'POST', '/api/me/2fa/setup', {});
-    } finally {
-      await authed.dispose();
-    }
-  });
-
-  test('confirm with valid code → 200 + sets totpEnabledAt', async () => {
-    const authed = await apiLogin(USERS.alice);
-    try {
-      const setup = await assertOk(authed, 'POST', '/api/me/2fa/setup', {
-        currentPassword: USERS.alice.password,
-      });
-      const code = speakeasy.totp({ secret: setup.secret, encoding: 'base32' });
-      const confirm = await assertOk(authed, 'POST', '/api/me/2fa/confirm', { code });
-      expect(confirm.ok).toBe(true);
-      expect(confirm.totpEnabledAt).toBeTruthy();
-    } finally {
-      await authed.dispose();
-    }
-  });
-
-  test('confirm with garbage code → 400', async () => {
-    const authed = await apiLogin(USERS.alice);
-    try {
-      await assertOk(authed, 'POST', '/api/me/2fa/setup', {
-        currentPassword: USERS.alice.password,
-      });
       const res = await authed.post('/api/me/2fa/confirm', { data: { code: '000000' } });
-      expect(res.status()).toBe(400);
+      expect(res.status()).toBe(404);
     } finally {
       await authed.dispose();
     }
   });
 
-  test('disable after enable → 200', async () => {
+  test('POST /api/me/2fa/disable → 404', async () => {
     const authed = await apiLogin(USERS.alice);
     try {
-      const setup = await assertOk(authed, 'POST', '/api/me/2fa/setup', {
-        currentPassword: USERS.alice.password,
-      });
-      const enableCode = speakeasy.totp({ secret: setup.secret, encoding: 'base32' });
-      await assertOk(authed, 'POST', '/api/me/2fa/confirm', { code: enableCode });
-      const disableCode = speakeasy.totp({ secret: setup.secret, encoding: 'base32' });
-      const payload = await assertOk(authed, 'POST', '/api/me/2fa/disable', { code: disableCode });
-      expect(payload.ok).toBe(true);
+      const res = await authed.post('/api/me/2fa/disable', { data: { code: '000000' } });
+      expect(res.status()).toBe(404);
     } finally {
       await authed.dispose();
     }
-  });
-
-  test('disable when not enabled → 400', async () => {
-    const authed = await apiLogin(USERS.alice);
-    try {
-      const res = await authed.post('/api/me/2fa/disable', { data: { code: '123456' } });
-      expect(res.status()).toBe(400);
-    } finally {
-      await authed.dispose();
-    }
-  });
-
-  test('setup no auth → 401', async () => {
-    await assertUnauthorized('POST', '/api/me/2fa/setup', { currentPassword: 'x' });
-  });
-
-  test('setup no CSRF → 403', async () => {
-    const authed = await apiLogin(USERS.alice);
-    try {
-      await assertCsrfRejected(authed, 'POST', '/api/me/2fa/setup', {
-        currentPassword: USERS.alice.password,
-      });
-    } finally {
-      await authed.dispose();
-    }
-  });
-
-  test('confirm no auth → 401', async () => {
-    await assertUnauthorized('POST', '/api/me/2fa/confirm', { code: '000000' });
-  });
-
-  test('disable no auth → 401', async () => {
-    await assertUnauthorized('POST', '/api/me/2fa/disable', { code: '000000' });
   });
 });

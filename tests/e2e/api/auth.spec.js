@@ -2,15 +2,18 @@
 
 // Per-endpoint boundary suite for routes/auth.js (Phase 2 of the API suite).
 // Covers POST /api/register, /api/login, /api/auth/{verify-email,
-// forgot-password, reset-password, refresh, logout, 2fa/verify}.
+// forgot-password, reset-password, refresh, logout}.
 //
-// All 8 endpoints in this file are pre-auth (no authMiddleware), so the
+// Tier 22 — the 2FA verify describe block was removed alongside the route.
+// A regression test at the bottom of the file asserts /api/auth/2fa/verify
+// returns 404 so a future inadvertent re-mount surfaces in CI.
+//
+// All endpoints in this file are pre-auth (no authMiddleware), so the
 // authoritative gates are CSRF (where not exempt), zod validation, and
 // per-endpoint domain checks. See middleware/csrf.js EXEMPT_PATHS for the
 // CSRF-exempt subset.
 
 const { test, expect, request: pwRequest } = require('@playwright/test');
-const speakeasy = require('speakeasy');
 
 const { USERS } = require('../fixtures/data');
 const { BASE_URL } = require('../fixtures/env');
@@ -20,8 +23,6 @@ const {
   resetUserLockout,
   insertPasswordResetToken,
   deleteUserByUsername,
-  clear2faForUser,
-  setUserPassword,
 } = require('../helpers/api');
 const {
   assertOk,
@@ -423,77 +424,20 @@ test.describe('POST /api/auth/logout', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/auth/2fa/verify
-//
-// The happy path requires (a) a 2FA-enabled user and (b) a fresh login that
-// returned challenge: true (and set sc_challenge). We enroll alice, log her
-// out, then drive a challenge flow inside the test. afterAll undoes the
-// enrollment so the spec is hermetic.
+// Tier 22 regression — 2FA routes are gone. If any future change accidentally
+// re-mounts them, these tests should fail with a non-404 status. /api/auth/*
+// is also guaranteed to land on the JSON-404 sentinel rather than the SPA
+// shell (see server.js `/api` 404 sentinel above the SPA fallback).
 // ---------------------------------------------------------------------------
 
-test.describe('POST /api/auth/2fa/verify', () => {
-  let totpSecret = null;
-
-  test.afterAll(async () => {
-    await clear2faForUser(USERS.alice.id);
-  });
-
-  test('setup-confirm-login-verify happy path → 200', async () => {
-    // Setup
-    const authed = await apiLogin(USERS.alice);
-    try {
-      const setup = await assertOk(authed, 'POST', '/api/me/2fa/setup', {
-        currentPassword: USERS.alice.password,
-      });
-      expectShape(setup, ['qrCodeDataUrl', 'secret', 'recoveryCodes']);
-      totpSecret = setup.secret;
-
-      const code = speakeasy.totp({ secret: totpSecret, encoding: 'base32' });
-      const confirm = await assertOk(authed, 'POST', '/api/me/2fa/confirm', { code });
-      expect(confirm.ok).toBe(true);
-
-      await assertNoContent(authed, 'POST', '/api/auth/logout');
-    } finally {
-      await authed.dispose();
-    }
-
-    // Login fresh to capture the challenge cookie.
-    const ctx = await pwRequest.newContext({ baseURL: BASE_URL });
-    try {
-      const loginRes = await ctx.post('/api/login', {
-        data: { username: USERS.alice.username, password: USERS.alice.password },
-      });
-      const payload = await loginRes.json();
-      expect(payload.challenge).toBe(true);
-
-      // POST /api/auth/2fa/verify needs CSRF — set up an extraHTTPHeaders
-      // context from the challenge state so the header rides along.
-      const state = await ctx.storageState();
-      const csrf = state.cookies.find((c) => c.name === 'sc_csrf').value;
-      const headered = await pwRequest.newContext({
-        baseURL: BASE_URL,
-        storageState: state,
-        extraHTTPHeaders: { 'X-CSRF-Token': csrf },
-      });
-      try {
-        const code = speakeasy.totp({ secret: totpSecret, encoding: 'base32' });
-        const verifyPayload = await assertOk(headered, 'POST', '/api/auth/2fa/verify', { code });
-        expectShape(verifyPayload, ['user']);
-        expect(verifyPayload.user.username).toBe(USERS.alice.username);
-      } finally {
-        await headered.dispose();
-      }
-    } finally {
-      await ctx.dispose();
-    }
-  });
-
-  test('no challenge cookie → 401', async () => {
+test.describe('Tier 22 — 2FA routes removed', () => {
+  test('POST /api/auth/2fa/verify → 404', async () => {
     const anon = await apiAnon();
     try {
-      // Add a CSRF header so we get past the CSRF middleware and into the
-      // route's own challenge-cookie check.
+      // Seed the CSRF cookie so we get past the CSRF middleware and onto
+      // the route table.
       const csrfRes = await anon.get('/healthz');
+      expect(csrfRes.ok()).toBe(true);
       const csrfCookie = (await anon.storageState()).cookies.find((c) => c.name === 'sc_csrf');
       const headered = await pwRequest.newContext({
         baseURL: BASE_URL,
@@ -502,49 +446,12 @@ test.describe('POST /api/auth/2fa/verify', () => {
       });
       try {
         const res = await headered.post('/api/auth/2fa/verify', { data: { code: '123456' } });
-        expect(res.status()).toBe(401);
-        // Suppress unused var warning
-        expect(csrfRes.ok()).toBe(true);
+        expect(res.status()).toBe(404);
       } finally {
         await headered.dispose();
       }
     } finally {
       await anon.dispose();
-    }
-  });
-
-  test('bad body (neither code nor recoveryCode) → 400', async () => {
-    // Use a fresh password reset on a fresh alice — but to hit the validator
-    // not the challenge cookie check, we just need ANY request body that
-    // fails the schema. The route validates first.
-    // Actually: the route reads the challenge cookie BEFORE validate, so
-    // without a challenge cookie we get 401 not 400. We need a challenge
-    // cookie + bad body. Reusing the totpSecret from the happy-path test
-    // means alice still has 2FA enabled here (afterAll runs at describe
-    // end). Drive a login to get challenge cookie, then send empty body.
-    if (!totpSecret) test.skip(true, 'happy-path test must run first');
-    await setUserPassword(USERS.alice.id, USERS.alice.password); // ensure not changed
-    const ctx = await pwRequest.newContext({ baseURL: BASE_URL });
-    try {
-      const loginRes = await ctx.post('/api/login', {
-        data: { username: USERS.alice.username, password: USERS.alice.password },
-      });
-      const payload = await loginRes.json();
-      if (!payload.challenge) test.skip(true, '2FA not currently enabled on alice');
-      const state = await ctx.storageState();
-      const csrf = state.cookies.find((c) => c.name === 'sc_csrf').value;
-      const headered = await pwRequest.newContext({
-        baseURL: BASE_URL,
-        storageState: state,
-        extraHTTPHeaders: { 'X-CSRF-Token': csrf },
-      });
-      try {
-        await assertValidationError(headered, 'POST', '/api/auth/2fa/verify', {});
-      } finally {
-        await headered.dispose();
-      }
-    } finally {
-      await ctx.dispose();
     }
   });
 });

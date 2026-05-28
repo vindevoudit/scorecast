@@ -5,7 +5,6 @@
 import { useState } from 'react';
 import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
-import TwoFactorSetup from './TwoFactorSetup';
 import ChangePasswordPanel from './ChangePasswordPanel';
 import ChangeEmailPanel from './ChangeEmailPanel';
 import ThemeToggle from './ThemeToggle';
@@ -14,6 +13,10 @@ import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
 import { displayTeamName } from '../utils/teamNames';
 import { Badge, Button, Input, Radio, Textarea } from './ui';
+
+// Tier 22 — TwoFactorSetup was removed. See routes/auth.js header for the
+// revival recipe; this file's diff in the removal commit shows the original
+// mount + handler wiring.
 
 const VISIBILITY_OPTIONS = [
   {
@@ -62,19 +65,8 @@ function friendButtonProps(friendStatus) {
 }
 
 function ProfileView({ profile, onFriendAction, busy, editable }) {
-  const {
-    user,
-    handle2faSetup,
-    handle2faConfirm,
-    handle2faDisable,
-    handleChangePassword,
-    handleChangeEmail,
-  } = useAuth();
+  const { user, handleChangePassword, handleChangeEmail } = useAuth();
   const { handleSaveProfile: onSaveProfile } = useData();
-  const twoFactorEnabled = Boolean(user?.twoFactorEnabled);
-  const on2faSetup = handle2faSetup;
-  const on2faConfirm = handle2faConfirm;
-  const on2faDisable = handle2faDisable;
 
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
@@ -223,16 +215,6 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
       ) : null}
 
       {showEdit ? <ChangePasswordPanel onChangePassword={handleChangePassword} /> : null}
-
-      {showEdit && on2faSetup ? (
-        <TwoFactorSetup
-          enabled={Boolean(twoFactorEnabled)}
-          busy={busy}
-          onSetupRequest={on2faSetup}
-          onConfirm={on2faConfirm}
-          onDisable={on2faDisable}
-        />
-      ) : null}
 
       {showEdit ? (
         <div className="rounded-3xl border border-default bg-elevated/70 p-5">

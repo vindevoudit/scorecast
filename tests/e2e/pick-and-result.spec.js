@@ -2,6 +2,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { registerViaUI, loginViaUI, logoutViaUI } = require('./helpers/auth');
+const { selectGameDate } = require('./helpers/games');
 const { USERS, GAMES } = require('./fixtures/data');
 
 // 5.5.3 — Register → pick → admin set result → leaderboard updates.
@@ -22,6 +23,10 @@ test('register, pick a game, admin sets result, leaderboard reflects points', as
   const userContext = await browser.newContext();
   const userPage = await userContext.newPage();
   await registerViaUI(userPage, newUser);
+  // GamesCalendar (Tier 18 Chunk 3) defaults to today; fixture games sit
+  // at today+1..+3, so snap the chip to the target game's date before
+  // hunting for its pick button.
+  await selectGameDate(userPage, game);
 
   await userPage.getByRole('button', { name: `Pick ${game.homeTeam} to win`, exact: true }).click();
 
@@ -52,6 +57,20 @@ test('register, pick a game, admin sets result, leaderboard reflects points', as
     .last();
 
   await row.getByRole('button', { name: 'Home won', exact: true }).click();
+
+  // The setResult API commits + Express's default etag fires on the next
+  // GET /api/games. With no Cache-Control on the route, the browser
+  // applies heuristic freshness + the conditional revalidation returns
+  // 304 against the pre-click etag — so GameManager's `await load()`
+  // refresh keeps the stale games array and the "Result:" tag never
+  // appears (~10s timeout). Force a hard reload so the browser cache
+  // can't intercept. Real product fix would be `Cache-Control: no-store`
+  // on /api/games; tracked separately, see PR description.
+  await adminPage.reload();
+  await adminPage.getByRole('tab', { name: /Manage/ }).click();
+  await expect(adminPage.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
+    timeout: 20_000,
+  });
 
   // GameRow renders "Result: <team>" after the result is committed.
   await expect(adminPage.getByText(`Result: ${game.homeTeam}`)).toBeVisible({ timeout: 10_000 });

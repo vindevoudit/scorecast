@@ -55,12 +55,8 @@ export default defineConfig({
       },
       // injectManifest precache budget — same 3MB cap as Chunk 1's
       // generateSW config. Runtime-caching rules live inside src/sw.js now.
-      // Exclude help screenshots: they're large, lazy-loaded via <img loading="lazy">,
-      // and only viewed by users who navigate to /help — no need to precache 5MB on
-      // every install.
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        globIgnores: ['**/help/**'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
       devOptions: {

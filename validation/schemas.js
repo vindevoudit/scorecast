@@ -147,9 +147,21 @@ const PUSH_NOTIFICATION_TYPES = [
   'join-request-declined',
 ];
 
+const PUSH_NOTIFICATION_TYPE_SET = new Set(PUSH_NOTIFICATION_TYPES);
+
+// Zod 4's `z.record(z.enum([...]), z.boolean())` requires every enum key
+// to be present in the object — incompatible with the documented "only
+// specified keys flip" partial-update contract on PUT /api/me/push-preferences.
+// Falling back to `z.record(z.string(), z.boolean())` + a refine that gates
+// against PUSH_NOTIFICATION_TYPE_SET preserves the merge semantic while
+// still rejecting unknown keys.
 const pushPreferencesSchema = z
   .object({
-    prefs: z.record(z.enum(PUSH_NOTIFICATION_TYPES), z.boolean()),
+    prefs: z
+      .record(z.string(), z.boolean())
+      .refine((obj) => Object.keys(obj).every((k) => PUSH_NOTIFICATION_TYPE_SET.has(k)), {
+        message: 'Unknown notification type',
+      }),
   })
   .openapi('PushPreferencesRequest');
 

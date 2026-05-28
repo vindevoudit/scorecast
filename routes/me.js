@@ -1,23 +1,27 @@
 'use strict';
 
 // Tier 13 Chunk 1 — current-user routes extracted from server.js. Covers
-// /me, /me/email, /me/password. All require auth.
-//
-// Tier 22 — 2FA setup/confirm/disable handlers were removed. See routes/auth.js
-// header for the revival recipe.
+// /me, /me/2fa/{setup,confirm,disable}, and /me/email. All require auth.
 const express = require('express');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const speakeasy = require('speakeasy');
+const qrcode = require('qrcode');
 
 const { validate } = require('../validation/middleware');
 const {
   setEmailSchema,
   setPasswordSchema,
+  totpSetupSchema,
+  totpConfirmSchema,
+  totpVerifySchema,
   editProfileSchema,
   pushPreferencesSchema,
   acceptTermsSchema,
   CURRENT_TERMS_VERSION,
 } = require('../validation/schemas');
 const { authMiddleware } = require('../middleware/auth');
+const { sensitiveAccountLimiter, lightWriteLimiter } = require('../middleware/rateLimit');
 const { getUserById } = require('../lib/users');
 const { getJoinedGroupIds, getPendingInvites } = require('../lib/groups');
 const { sendVerificationEmail, PUBLIC_APP_URL } = require('../lib/emailHelpers');
@@ -70,6 +74,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 // the others.
 router.put(
   '/me/push-preferences',
+  lightWriteLimiter,
   authMiddleware,
   validate(pushPreferencesSchema),
   async (req, res) => {
@@ -87,7 +92,7 @@ router.put(
 // Tier 11 Chunk 4 — Marks the onboarding tour as completed (either finished
 // or skipped). Idempotent: if already set, the existing timestamp is
 // preserved. No body — the timestamp is server-generated.
-router.post('/me/onboarding-completed', authMiddleware, async (req, res) => {
+router.post('/me/onboarding-completed', lightWriteLimiter, authMiddleware, async (req, res) => {
   try {
     const user = await getUserById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -107,141 +112,165 @@ router.post('/me/onboarding-completed', authMiddleware, async (req, res) => {
 // rejects mismatches so a stale tab can't accept a prior version. Stamps a
 // fresh timestamp on every successful acceptance so we can tell when the
 // user agreed to THIS version, not the previous one.
-router.post('/me/accept-terms', authMiddleware, validate(acceptTermsSchema), async (req, res) => {
-  if (req.body.version !== CURRENT_TERMS_VERSION) {
-    return res.status(400).json({ error: 'Terms version is out of date — please reload' });
-  }
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    user.termsAcceptedAt = new Date();
-    user.termsAcceptedVersion = CURRENT_TERMS_VERSION;
-    await user.save({ hooks: false });
-    res.json({
-      termsAcceptedAt: user.termsAcceptedAt,
-      termsAcceptedVersion: user.termsAcceptedVersion,
-    });
-  } catch (error) {
-    req.log.error({ err: error.message }, 'accept-terms failed');
-    res.status(500).json({ error: 'Failed to record terms acceptance' });
-  }
-});
+router.post(
+  '/me/accept-terms',
+  lightWriteLimiter,
+  authMiddleware,
+  validate(acceptTermsSchema),
+  async (req, res) => {
+    if (req.body.version !== CURRENT_TERMS_VERSION) {
+      return res.status(400).json({ error: 'Terms version is out of date — please reload' });
+    }
+    try {
+      const user = await getUserById(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      user.termsAcceptedAt = new Date();
+      user.termsAcceptedVersion = CURRENT_TERMS_VERSION;
+      await user.save({ hooks: false });
+      res.json({
+        termsAcceptedAt: user.termsAcceptedAt,
+        termsAcceptedVersion: user.termsAcceptedVersion,
+      });
+    } catch (error) {
+      req.log.error({ err: error.message }, 'accept-terms failed');
+      res.status(500).json({ error: 'Failed to record terms acceptance' });
+    }
+  },
+);
 
-router.put('/me', authMiddleware, validate(editProfileSchema), async (req, res) => {
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
+router.put(
+  '/me',
+  lightWriteLimiter,
+  authMiddleware,
+  validate(editProfileSchema),
+  async (req, res) => {
+    try {
+      const user = await getUserById(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Track whether a cached leaderboard field changed so we can invalidate
-    // the 30-s cache. Tier 8.6 — profileVisibility joins displayName as a
-    // cached field; without invalidation, the masking layer would project
-    // off the stale visibility value for up to 30 s after a settings change.
-    let cachedFieldChanged = false;
-    if (req.body.displayName !== undefined) {
-      const next = req.body.displayName === '' ? null : req.body.displayName;
-      if (next !== user.displayName) cachedFieldChanged = true;
-      user.displayName = next;
+      // Track whether a cached leaderboard field changed so we can invalidate
+      // the 30-s cache. Tier 8.6 — profileVisibility joins displayName as a
+      // cached field; without invalidation, the masking layer would project
+      // off the stale visibility value for up to 30 s after a settings change.
+      let cachedFieldChanged = false;
+      if (req.body.displayName !== undefined) {
+        const next = req.body.displayName === '' ? null : req.body.displayName;
+        if (next !== user.displayName) cachedFieldChanged = true;
+        user.displayName = next;
+      }
+      if (req.body.bio !== undefined) {
+        user.bio = req.body.bio === '' ? null : req.body.bio;
+      }
+      if (req.body.profileVisibility !== undefined) {
+        if (req.body.profileVisibility !== user.profileVisibility) cachedFieldChanged = true;
+        user.profileVisibility = req.body.profileVisibility;
+      }
+      await user.save({ hooks: false });
+      if (cachedFieldChanged) LeaderboardService.invalidate('all');
+      res.json({
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        displayName: user.displayName,
+        bio: user.bio,
+        profileVisibility: user.profileVisibility,
+      });
+    } catch (error) {
+      req.log.error({ err: error }, 'handler error');
+      res.status(500).json({ error: 'Failed to update profile' });
     }
-    if (req.body.bio !== undefined) {
-      user.bio = req.body.bio === '' ? null : req.body.bio;
-    }
-    if (req.body.profileVisibility !== undefined) {
-      if (req.body.profileVisibility !== user.profileVisibility) cachedFieldChanged = true;
-      user.profileVisibility = req.body.profileVisibility;
-    }
-    await user.save({ hooks: false });
-    if (cachedFieldChanged) LeaderboardService.invalidate('all');
-    res.json({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      displayName: user.displayName,
-      bio: user.bio,
-      profileVisibility: user.profileVisibility,
-    });
-  } catch (error) {
-    req.log.error({ err: error }, 'handler error');
-    res.status(500).json({ error: 'Failed to update profile' });
-  }
-});
+  },
+);
 
-router.post('/me/password', authMiddleware, validate(setPasswordSchema), async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const passwordValid = await bcrypt.compare(currentPassword, user.password);
-    if (!passwordValid) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+router.post(
+  '/me/password',
+  sensitiveAccountLimiter,
+  authMiddleware,
+  validate(setPasswordSchema),
+  async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    try {
+      const user = await getUserById(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      const passwordValid = await bcrypt.compare(currentPassword, user.password);
+      if (!passwordValid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      if (currentPassword === newPassword) {
+        return res
+          .status(400)
+          .json({ error: 'New password must be different from current password' });
+      }
+      user.password = newPassword;
+      // Save WITH hooks so beforeUpdate re-hashes — mirrors reset-password.
+      await user.save();
+      // Mirror reset-password's force-logout-everywhere semantics, then issue
+      // fresh cookies for the current session so the calling client stays
+      // signed in but every other refresh-token-bearing device is kicked out.
+      await revokeAllUserRefreshTokens(user.id);
+      await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
+      res.json({ ok: true });
+    } catch (error) {
+      req.log.error({ err: error.message }, 'set-password failed');
+      res.status(500).json({ error: 'Failed to change password' });
     }
-    if (currentPassword === newPassword) {
-      return res
-        .status(400)
-        .json({ error: 'New password must be different from current password' });
-    }
-    user.password = newPassword;
-    // Save WITH hooks so beforeUpdate re-hashes — mirrors reset-password.
-    await user.save();
-    // Mirror reset-password's force-logout-everywhere semantics, then issue
-    // fresh cookies for the current session so the calling client stays
-    // signed in but every other refresh-token-bearing device is kicked out.
-    await revokeAllUserRefreshTokens(user.id);
-    await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
-    res.json({ ok: true });
-  } catch (error) {
-    req.log.error({ err: error.message }, 'set-password failed');
-    res.status(500).json({ error: 'Failed to change password' });
-  }
-});
+  },
+);
 
-router.patch('/me/email', authMiddleware, validate(setEmailSchema), async (req, res) => {
-  const { email: emailAddress, currentPassword } = req.body;
-  try {
-    const user = await getUserById(req.user.id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    // Password re-auth so a stolen access JWT alone can't pivot a brief
-    // cookie compromise into permanent account takeover (change email →
-    // verify → forgot-password → reset).
-    const passwordValid = await bcrypt.compare(currentPassword, user.password);
-    if (!passwordValid) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+router.patch(
+  '/me/email',
+  sensitiveAccountLimiter,
+  authMiddleware,
+  validate(setEmailSchema),
+  async (req, res) => {
+    const { email: emailAddress, currentPassword } = req.body;
+    try {
+      const user = await getUserById(req.user.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      // Password re-auth so a stolen access JWT alone can't pivot a brief
+      // cookie compromise into permanent account takeover (change email →
+      // verify → forgot-password → reset).
+      const passwordValid = await bcrypt.compare(currentPassword, user.password);
+      if (!passwordValid) {
+        return res.status(401).json({ error: 'Current password is incorrect' });
+      }
+      const existing = await User.findOne({
+        where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
+      });
+      if (existing && existing.id !== user.id) {
+        return res.status(400).json({ error: 'That email is already in use' });
+      }
+      const oldEmail = user.email;
+      user.email = emailAddress;
+      user.emailVerifiedAt = null;
+      await user.save({ hooks: false });
+      // Notify the OLD address before sending the verify-new-email so the
+      // victim has a window to detect an unauthorized change. Fire-and-forget
+      // — a failed notification must not block the legitimate request.
+      if (oldEmail) {
+        email
+          .send({
+            to: oldEmail,
+            subject: 'Your Bantryx email address was changed',
+            text: `The email address on your Bantryx account was just changed. If this was you, you can ignore this message.\n\nIf you did NOT make this change, reset your password immediately: ${PUBLIC_APP_URL}/\n\n— Bantryx`,
+            html: `<p>The email address on your Bantryx account was just changed. If this was you, you can ignore this message.</p><p>If you did <b>not</b> make this change, <a href="${PUBLIC_APP_URL}/">reset your password immediately</a>.</p><p>— Bantryx</p>`,
+          })
+          .catch((err) => {
+            req.log.warn(
+              { err: err.message, userId: user.id },
+              'failed to send email-change notification to old address',
+            );
+          });
+      }
+      sendVerificationEmail(user).catch((err) => {
+        req.log.warn({ err: err.message, userId: user.id }, 'failed to send verification email');
+      });
+      res.json({ email: user.email, emailVerifiedAt: null });
+    } catch (error) {
+      req.log.error({ err: error.message }, 'set-email failed');
+      res.status(500).json({ error: 'Failed to set email' });
     }
-    const existing = await User.findOne({
-      where: sequelize.where(sequelize.fn('LOWER', sequelize.col('email')), emailAddress),
-    });
-    if (existing && existing.id !== user.id) {
-      return res.status(400).json({ error: 'That email is already in use' });
-    }
-    const oldEmail = user.email;
-    user.email = emailAddress;
-    user.emailVerifiedAt = null;
-    await user.save({ hooks: false });
-    // Notify the OLD address before sending the verify-new-email so the
-    // victim has a window to detect an unauthorized change. Fire-and-forget
-    // — a failed notification must not block the legitimate request.
-    if (oldEmail) {
-      email
-        .send({
-          to: oldEmail,
-          subject: 'Your Bantryx email address was changed',
-          text: `The email address on your Bantryx account was just changed. If this was you, you can ignore this message.\n\nIf you did NOT make this change, reset your password immediately: ${PUBLIC_APP_URL}/\n\n— Bantryx`,
-          html: `<p>The email address on your Bantryx account was just changed. If this was you, you can ignore this message.</p><p>If you did <b>not</b> make this change, <a href="${PUBLIC_APP_URL}/">reset your password immediately</a>.</p><p>— Bantryx</p>`,
-        })
-        .catch((err) => {
-          req.log.warn(
-            { err: err.message, userId: user.id },
-            'failed to send email-change notification to old address',
-          );
-        });
-    }
-    sendVerificationEmail(user).catch((err) => {
-      req.log.warn({ err: err.message, userId: user.id }, 'failed to send verification email');
-    });
-    res.json({ email: user.email, emailVerifiedAt: null });
-  } catch (error) {
-    req.log.error({ err: error.message }, 'set-email failed');
-    res.status(500).json({ error: 'Failed to set email' });
-  }
-});
+  },
+);
 
 module.exports = router;

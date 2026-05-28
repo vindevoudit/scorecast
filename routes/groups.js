@@ -21,6 +21,7 @@ const {
   publicReadLimiter,
   commentLimiter,
   groupJoinPasswordLimiter,
+  inviteLimiter,
 } = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
 const GroupService = require('../services/GroupService');
@@ -77,6 +78,7 @@ router.post(
 
 router.post(
   '/groups/:groupId/invite',
+  inviteLimiter,
   authMiddleware,
   validate(inviteSchema),
   asyncHandler(async (req, res) => {

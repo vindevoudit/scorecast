@@ -3,6 +3,7 @@
 // Tier 13 Chunk 2 — notification routes delegate to NotificationService.
 const express = require('express');
 const { authMiddleware } = require('../middleware/auth');
+const { lightWriteLimiter } = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
 const errors = require('../lib/errors');
 const NotificationService = require('../services/NotificationService');
@@ -22,6 +23,7 @@ router.get(
 
 router.post(
   '/notifications/:id/read',
+  lightWriteLimiter,
   authMiddleware,
   asyncHandler(async (req, res) => {
     const { status } = await NotificationService.markRead(req.params.id, req.user.id);
@@ -33,6 +35,7 @@ router.post(
 
 router.post(
   '/notifications/read-all',
+  lightWriteLimiter,
   authMiddleware,
   asyncHandler(async (req, res) => {
     await NotificationService.markAllRead(req.user.id);

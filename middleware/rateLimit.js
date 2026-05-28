@@ -98,6 +98,45 @@ const groupJoinPasswordLimiter = rateLimit({
   message: { error: 'Too many join attempts — please wait a minute and retry' },
 });
 
+// Tier 22 — high-cost / high-impact account-modification routes. CPU-bound
+// bcrypt on every call (/me/password) or an outbound email send (/me/email);
+// 10/hour/IP is comfortably above any legitimate human cadence but
+// aggressively throttles credential-stuffing pivots that ride a stolen
+// session cookie.
+const sensitiveAccountLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  message: { error: 'Too many account changes — slow down' },
+});
+
+// Tier 22 — light DB writes that aren't expensive per-call but should still
+// have a backstop against scripted abuse. 60/min/IP — legitimate use is
+// under 5/min even for power users.
+const lightWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  message: { error: 'Too many requests' },
+});
+
+// Tier 22 — per-IP throttle on group invites. Every invite fans out a bell +
+// push notification, so without a limit one member can spam thousands of
+// notifications to one user (or one group). The 5/min/IP cap pairs with the
+// per-group pending-invite cap in GroupService.invite.
+const inviteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  message: { error: 'Too many invites — slow down' },
+});
+
 module.exports = {
   skipInTest,
   loginLimiter,
@@ -109,4 +148,7 @@ module.exports = {
   forgotPasswordLimiter,
   publicReadLimiter,
   groupJoinPasswordLimiter,
+  sensitiveAccountLimiter,
+  lightWriteLimiter,
+  inviteLimiter,
 };

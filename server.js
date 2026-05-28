@@ -224,7 +224,26 @@ if (process.env.NODE_ENV !== 'production') {
   logger.info('OpenAPI docs available at /api/docs and /api/openapi.json (dev only)');
 }
 
-app.use(express.static(path.join(__dirname, 'dist')));
+// Tier 25 A2 — cache-control on static assets. Vite emits hash-versioned
+// bundles under `/assets/` (the filename changes on every content
+// change), so those can be cached forever with `immutable`. Everything
+// else at the dist root — `index.html`, `sw.js`, `manifest.webmanifest`,
+// favicon, PWA icons, `registerSW.js` — must NOT be aggressively cached
+// or service worker updates get trapped behind a stale browser cache.
+// `no-cache` here means "revalidate every request"; ETag still returns
+// 304 most of the time, so the overhead is a small conditional GET, not
+// a full byte transfer.
+app.use(
+  express.static(path.join(__dirname, 'dist'), {
+    setHeaders: (res, filepath) => {
+      if (filepath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+    },
+  }),
+);
 
 // API routes. Each module exports an Express Router with paths relative to
 // /api. Tier 13 Chunk 2 will move handler bodies into services/.
@@ -259,6 +278,12 @@ app.get(/\.(?:js|mjs|css|map|png|jpg|jpeg|gif|svg|webp|ico|woff2?|webmanifest)$/
 });
 
 app.get('*', (req, res) => {
+  // Tier 25 A2 — match the express.static no-cache rule for
+  // index.html. Without this, the SPA-fallback served by sendFile
+  // would inherit the express.sendFile defaults (no Cache-Control)
+  // and browsers might aggressively cache it, trapping users on a
+  // stale shell that fetches dead /assets/<old-hash>.js chunks.
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

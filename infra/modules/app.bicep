@@ -251,8 +251,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       scale: {
+        // Tier 25 A5 — burst headroom. Consumption profile bills only
+        // for replicas that exist, so raising maxReplicas costs $0 at
+        // idle. At launch volume (2-3 replicas warm during match
+        // windows) the realistic monthly cost is +$15-40; theoretical
+        // worst case (all 10 pinned 24/7 = sustained ~500 RPS) is
+        // ~$385/mo. At 10 replicas the in-memory per-IP rate limiters
+        // leak up to 10× the documented quota — durable fix is Tier 25
+        // C1 (`rate-limit-redis`); acceptable risk pre-launch because
+        // the per-IP windows are tight and App Insights 5xx alerts
+        // (Tier 25 A7) catch sustained abuse.
         minReplicas: 0
-        maxReplicas: 3
+        maxReplicas: 10
         rules: [
           {
             name: 'http-scale'

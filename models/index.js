@@ -10,6 +10,18 @@ const logger = require('../lib/logger');
 // docker-compose Postgres URL doesn't set it, so SSL stays off there.
 const databaseUrl = process.env.DATABASE_URL || '';
 const requireSsl = databaseUrl.includes('sslmode=require');
+// Tier 25 A1 — pool sized for 3-replica concurrency. See
+// config/database.js for the rationale. Both modules must stay in
+// sync (config/database.js is sequelize-cli only; this is the runtime).
+const sequelizeOptions = {
+  pool: { max: 20, min: 2, idle: 10_000, acquire: 30_000 },
+};
+if (requireSsl) {
+  sequelizeOptions.dialect = 'postgres';
+  sequelizeOptions.dialectOptions = {
+    ssl: { require: true, rejectUnauthorized: false },
+  };
+}
 const sequelize = new Sequelize(
   databaseUrl || {
     host: 'localhost',
@@ -18,14 +30,7 @@ const sequelize = new Sequelize(
     password: 'postgres',
     dialect: 'postgres',
   },
-  requireSsl
-    ? {
-        dialect: 'postgres',
-        dialectOptions: {
-          ssl: { require: true, rejectUnauthorized: false },
-        },
-      }
-    : {},
+  sequelizeOptions,
 );
 
 // Import models

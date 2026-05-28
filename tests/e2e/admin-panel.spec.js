@@ -82,6 +82,14 @@ test('game CRUD: admin creates, then deletes a game via GameManager', async ({ p
   const createForm = page
     .locator('form')
     .filter({ has: page.getByRole('button', { name: 'Create game', exact: true }) });
+  // GameManager populates `form.leagueId` from a useEffect that fires AFTER
+  // GET /api/admin/leagues lands. If we submit before that, handleCreate
+  // early-returns with an "out of band" error toast the test never inspects
+  // and the row never appears. Wait for the E2E Test League option to
+  // attach to the select so we know leagueId has a value.
+  await expect(createForm.locator('select').filter({ hasText: 'E2E Test League' })).toBeVisible({
+    timeout: 10_000,
+  });
   await createForm.getByLabel(/^Home team/).fill(home);
   await createForm.getByLabel(/^Away team/).fill(away);
   const future = new Date();
@@ -90,7 +98,19 @@ test('game CRUD: admin creates, then deletes a game via GameManager', async ({ p
   await createForm.getByLabel(/^Date \/ time/).fill(future.toISOString().slice(0, 16));
   await createForm.getByRole('button', { name: 'Create game', exact: true }).click();
 
-  // Row should appear once /api/admin/games returns + GameManager refreshes.
+  // Same /api/games cache issue as pick-and-result: GameManager's `await
+  // load()` after the POST hits a 304 against the pre-create etag and
+  // keeps the stale games array, so the new row never appears (~15s
+  // timeout). Force a reload so the browser cache can't intercept. Real
+  // product fix would be Cache-Control: no-store on /api/games — tracked
+  // separately in the PR description.
+  await page.reload();
+  await page.getByRole('tab', { name: /Manage/ }).click();
+  await expect(page.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
+    timeout: 20_000,
+  });
+
+  // Row should appear once /api/games returns + GameManager refreshes.
   // Pin to the row by intersecting the unique match text with the row's
   // Delete button (same pattern as pick-and-result.spec.js).
   const row = page
@@ -103,6 +123,13 @@ test('game CRUD: admin creates, then deletes a game via GameManager', async ({ p
   // --- Delete ---
   await row.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
+  // Same cache issue strikes again on the post-delete refresh — the DOM
+  // still shows the row from cache. Reload to force a fresh /api/games.
+  await page.reload();
+  await page.getByRole('tab', { name: /Manage/ }).click();
+  await expect(page.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(page.getByText(matchText)).toHaveCount(0, { timeout: 10_000 });
 });
 

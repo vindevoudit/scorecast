@@ -99,7 +99,7 @@ Groups are private (or public) competitions with friends or strangers.
 2. Choose a name, visibility (public / password / invite-only), and an optional join message
 3. Invite friends by username, or share the password if you set one
 
-Groups can have up to **500 members**. Each group has its own running comment thread for trash talk.
+Groups can have up to **2000 members**. Each group has its own running comment thread for trash talk.
 
 ---
 

@@ -263,7 +263,7 @@ function Help() {
         <li>Invite friends by username, or share the password if you set one.</li>
       </OL>
       <P>
-        Groups can have up to <strong>500 members</strong>. Each group has its own running comment
+        Groups can have up to <strong>2000 members</strong>. Each group has its own running comment
         thread for trash talk.
       </P>
 

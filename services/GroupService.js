@@ -43,20 +43,21 @@ const BCRYPT_ROUNDS = 10;
 // from the same user on the same group.
 const JOIN_REQUEST_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-// Tier 22 M4 — cap on group membership. Without this the leaderboard cache
-// per-group can grow unboundedly: a 10k-member group serializes 10k rows
-// every time the cache rebuilds. The cap is loose enough to never bite a
-// legitimate friend-group but tight enough that the leaderboard payload
-// stays comfortably under ~50 KB. Bumping this requires re-thinking the
-// leaderboard pagination path.
+// Tier 22 M4 — cap on group membership. Originally 500 because the
+// pre-Tier-24 per-group leaderboard rebuild walked every pick on every
+// game for every member (~O(picks × games × members) in JS). Tier 24
+// replaced that with a single indexed UserScore SELECT against a
+// member-id IN clause — rebuild is now O(N) and sub-100ms at 2000.
+// Route output is sliced to limit ≤ 50 before the wire, so payload is
+// bounded regardless of group size.
 //
 // MAX_GROUP_MEMBERS env override exists so operators can dial it down for a
-// staging environment to exercise the cap without seeding 500 fake users.
-// Default 500; clamps to [10, 5000] so a typo can't disable the limit or
+// staging environment to exercise the cap without seeding 2000 fake users.
+// Default 2000; clamps to [10, 5000] so a typo can't disable the limit or
 // blow the cache.
 const MAX_GROUP_MEMBERS = (() => {
   const raw = Number(process.env.MAX_GROUP_MEMBERS);
-  if (!Number.isFinite(raw) || raw <= 0) return 500;
+  if (!Number.isFinite(raw) || raw <= 0) return 2000;
   return Math.max(10, Math.min(5000, Math.floor(raw)));
 })();
 

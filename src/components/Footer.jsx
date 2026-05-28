@@ -7,6 +7,7 @@
 
 const YEAR = new Date().getFullYear();
 const LINKS = [
+  { href: '/help', label: 'Help' },
   { href: '/terms', label: 'Terms' },
   { href: '/privacy', label: 'Privacy' },
   { href: '/copyright', label: 'Copyright' },

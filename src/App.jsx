@@ -13,6 +13,7 @@ import Terms from './components/legal/Terms';
 import Privacy from './components/legal/Privacy';
 import Copyright from './components/legal/Copyright';
 import CookiePolicy from './components/legal/CookiePolicy';
+import Help from './components/legal/Help';
 import { needsTermsAcceptance } from './lib/terms';
 
 // Tier 18 Chunk 6 — pathname-based routing for the four legal pages.
@@ -32,6 +33,8 @@ function renderLegalForPath(pathname) {
       return <Copyright />;
     case '/cookies':
       return <CookiePolicy />;
+    case '/help':
+      return <Help />;
     default:
       return null;
   }

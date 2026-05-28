@@ -3668,6 +3668,68 @@ After Chunk 1's migration deploys, run [scripts/backfill-user-scores.mjs](script
 - Read latency: top-50 leaderboard read drops from O(picks × games × users) JS to a single B-tree index scan. Sub-millisecond.
 - Eliminates Tier 25 C1 (managed Redis, ~$16/mo) because the cross-replica cache-coherence problem is resolved at the storage layer — every replica reads the same materialized state from Postgres.
 
+### 8.32 Tier 25 — Launch Capacity Ladder (Phase 1 + Phase 2)
+
+**Plan file**: `C:\Users\vinde\.claude\plans\tier25.md`. **Operator runbook**: [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md). Tier 25 is the wrapper-runbook around Tier 10 (managed Redis + observability) and Tier 24 (already shipped). Phase 1 ships pre-launch; Phase 2 ships day-1-of-marketing. Phase 3 levers are trigger-driven and parked.
+
+#### What Phase 1 + 2 shipped
+
+**A1 — Sequelize connection pool** ([config/database.js](config/database.js) + [models/index.js](models/index.js)). Defaults raised from `max: 5` (sequelize default) to `{max: 20, min: 2, idle: 10_000, acquire: 30_000}`. Lifts the cluster-wide DB-bound concurrency ceiling from ~15 (5 × 3 replicas) to ~60 (20 × 3 replicas) at default scale, or ~200 at A5's new `maxReplicas: 10` ceiling. Postgres B1ms has ~100 `max_connections` headroom; even at 10 replicas × 20 pool = 200 active connections we'd need the C2 SKU bump. Both files kept in sync because `config/database.js` is sequelize-cli-only (used by the migrate-job) and `models/index.js` is the runtime — drift between them caused subtle bugs in past tier work.
+
+**A2 — Cache-Control headers on static assets** ([server.js](server.js)). Vite emits hash-versioned bundles under `/assets/<name>-<hash>.{js,css}` — those get `Cache-Control: public, max-age=31536000, immutable` because the URL changes on every content change. Everything else at dist root (`index.html`, `sw.js`, `registerSW.js`, `manifest.webmanifest`, PWA icons, `favicon.ico`) gets `Cache-Control: no-cache` so service-worker / PWA manifest updates roll out on next page load instead of being trapped behind stale browser caches. The catch-all SPA fallback (`app.get('*', sendFile index.html)`) also explicitly sets `no-cache` so direct navigation to a SPA route honors the same rule — without this, the SPA shell could get aggressively cached and trap users on a stale shell that fetches dead `/assets/<old-hash>.js` chunks. Smoke-verified live: `curl -I https://bantryx.com/` → `no-cache`; `curl -I https://bantryx.com/assets/index-<hash>.js` → `max-age=31536000, immutable`.
+
+**A4 — `trust proxy: 1`** ([server.js](server.js) — shipped in Tier 22 H1). `express-rate-limit` now sees the real client IP through Cloudflare → Azure ingress. Without this, the per-IP limiters in [middleware/rateLimit.js](middleware/rateLimit.js) would all key on Azure's load balancer IP and effectively disable per-IP enforcement.
+
+**A5 — `maxReplicas: 3 → 10`** ([infra/modules/app.bicep](infra/modules/app.bicep)). Consumption profile bills per-replica-active-time, so headroom is free at idle. Realistic launch shape (2-3 replicas warm during match windows): +$15-40/mo. Theoretical worst case (all 10 pinned 24/7 = sustained ~500 RPS): ~$385/mo. Rate-limit consideration documented inline: at 10 replicas the per-IP rate limiters in [middleware/rateLimit.js](middleware/rateLimit.js) leak up to 10× the documented quota (each replica has its own in-memory counter). Durable fix is C1 (`rate-limit-redis`); acceptable risk pre-launch because the per-IP windows are tight and App Insights 5xx alerts (A7) catch sustained abuse.
+
+**B1 — `minReplicas: 0 → 1`** ([infra/modules/app.bicep](infra/modules/app.bicep)). Kills the 3-5s cold start on first request after idle. Critical for shareable links (a tweet of bantryx.com that cold-starts would bounce visitors). Cost: ~$8-12/mo for one always-on 0.5 vCPU / 1 GiB replica × 730 hr/mo at Consumption pricing. Verified live: first `/healthz` hit after 5-min idle = 251ms (TLS + DNS + warm replica); subsequent hits ≈ 80ms (pure network RTT to eastus2). Without B1 the first hit would be 3000-5000ms.
+
+**B2 — `geoRedundantBackup: 'Enabled'`** — **attempted, reverted**. Postgres Flexible Server `geoRedundantBackup` is a **server-creation-time-only setting**. The Bicep apply silently no-ops update payloads for this property (no error raised); `az postgres flexible-server update --geo-redundant-backup Enabled` returns `unrecognized arguments` because the CLI doesn't even expose the flag on `update`. B2 is folded into Tier 25 C3 (Burstable → GP D2ds_v5) — that migration recreates the server for the SKU bump anyway, so we'll set `geoRedundantBackup: 'Enabled'` at the new server's creation. [infra/modules/db.bicep](infra/modules/db.bicep) reverted to `'Disabled'` with a comment block explaining the limitation. Cost saved (vs original plan): ~$3/mo that didn't actually apply.
+
+#### Bonus: Tier 20 Chunk 7 readiness probe alignment
+
+Tier 20 Chunk 7 (shipped 2026-05-26) added `/readyz` as the DB-pinging readiness probe + updated [infra/modules/app.bicep](infra/modules/app.bicep) to point ACA's Readiness probe at it. But day-to-day CD only does `az containerapp update --image` — it never touches probe config. So the live readiness probe was still hitting `/healthz` (which doesn't ping the DB), meaning a replica with a dead DB connection would stay in rotation. The Tier 25 Bicep reapply (2026-05-28, 2m 10s, `provisioningState: Succeeded`) brought live config in line with the Tier 20 design intent as a free side effect.
+
+#### Phase 1 operator action gap (LAUNCH_CHECKLIST.md Step 2)
+
+Still TODO: **A7 — App Insights alerts**. Three rules to configure manually in the Azure portal (~15 min):
+
+- HTTP 5xx rate > 1% over 5 min → severity 2
+- `/readyz` failures > 0 in 5 min → severity 1 (DB connectivity issue)
+- Replica count = `maxReplicas` for 10+ min → severity 2 (capacity-capped)
+
+[LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md) Step 2 has the step-by-step portal walkthrough including the KQL log queries.
+
+#### Phase 3 (trigger-driven, parked)
+
+See [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md) trigger table for the exact metric → lever mapping. Headline items:
+
+- **A6 LOG_LEVEL=warn** if Log Analytics daily ingestion > 800 MB before noon
+- **C1 Managed Redis Basic C0** when multi-replica rate-limit abuse becomes observable OR ready to start Tier 7 SSE (+$16/mo)
+- **C2 Postgres B1ms → B2s** when Postgres CPU > 70% sustained (+$15/mo)
+- **C3 Postgres B2s → GP D2ds_v5** at ~2000+ DAU sustained (+$112/mo, absorbs the B2 geo backup at server creation)
+- **C5 SSE realtime** at ~500+ concurrent users during live windows ($0, uses C1 Redis)
+
+#### Deferred (parked unless signal appears)
+
+- **A3 Cloudflare DNS orange-cloud** — depends on Azure managed TLS / Cloudflare cert pipeline verification. Wake trigger: observable bot/DDoS traffic. HSTS preload submission (after 30 days stable since Tier 22) is independent — submit before A3.
+- **B5 Cloudflare WAF rate-limit rules** — depends on A3.
+
+#### Cost summary at each launch stage
+
+Numbers are total monthly Azure spend, not deltas:
+
+| Stage                              | Levers in place                             | Total Azure  |
+| ---------------------------------- | ------------------------------------------- | ------------ |
+| Pre-Tier-25 baseline               | A4 only                                     | ~$30-50/mo   |
+| **Post-Tier-25 Phase 1+2 (today)** | + A1 + A2 + A5 + B1 + bonus probe alignment | ~$40-60/mo   |
+| First real traffic surge           | A5 spins up during peaks                    | ~$55-100/mo  |
+| Multi-replica sustained            | + C1 (Redis)                                | ~$75-120/mo  |
+| DB constrained                     | + C2 (Postgres B2s)                         | ~$90-135/mo  |
+| Sustained growth                   | + C3 (GP Postgres + B2 absorbed)            | ~$200-250/mo |
+
+A6 / C5 are $0 marginal cost. A7 is $0 (App Insights alerts are free; ingestion is the meter and is bounded by A6 if needed).
+
 ---
 
 ## 11. Operational Notes
@@ -3941,7 +4003,7 @@ Container Apps issues + binds a free Azure managed cert via HTTP-01 ACME validat
 
 ## 13. Roadmap
 
-The live forward roadmap is in `C:\Users\vinde\.claude\plans\ROADMAP.md` (Tiers 7, 10, 12, 14, 15, 16). The original tier plan lives at `C:\Users\vinde\.claude\plans\go-through-this-codebase-warm-cloud.md` for historical context.
+The live forward roadmap is in `C:\Users\vinde\.claude\plans\ROADMAP.md`. **Next up**: Tier 23 (~6 hr operational hardening — HSTS preload submission, audit-log weekly digest, secrets rotation drill, Postgres backup restore drill). Pending parked levers: Tier 25 Phase 3 (C1 Redis / C2 Postgres B2s / C3 GP / C5 SSE, all trigger-driven), Tier 7 SSE realtime + email digests + prefs UI, Tier 9.10 TypeScript, Tier 9.11 Storybook, Tier 12 / 14 / 15 / 16. Tier 10 is mostly absorbed by Tier 20 Chunk 7 + Tier 25. The original tier plan lives at `C:\Users\vinde\.claude\plans\go-through-this-codebase-warm-cloud.md` for historical context.
 
 Summary:
 

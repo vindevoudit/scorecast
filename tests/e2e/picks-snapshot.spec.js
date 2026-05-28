@@ -16,6 +16,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
+const { selectGameDate } = require('./helpers/games');
 const {
   apiLogin,
   createPick,
@@ -257,6 +258,10 @@ test('undo confirm modal appears when locked payout exceeds current', async ({ p
   }
 
   await loginViaUI(page, USERS.alice);
+  // GamesCalendar defaults to today; Lions sits at today+1, so snap the
+  // chip to its date before hunting for the "Undo pick" button (the
+  // button lives inside the Lions GameCard).
+  await selectGameDate(page, GAMES.lions);
 
   // Only one pick → exactly one "Undo pick" button on the page.
   await page.getByRole('button', { name: 'Undo pick' }).click();
@@ -290,6 +295,9 @@ test('undo skips modal when locked payout does not exceed current', async ({ pag
   }
 
   await loginViaUI(page, USERS.alice);
+  // GamesCalendar defaults to today; Lions sits at today+1, so snap the
+  // chip to its date before hunting for the "Undo pick" button.
+  await selectGameDate(page, GAMES.lions);
 
   await page.getByRole('button', { name: 'Undo pick' }).click();
 

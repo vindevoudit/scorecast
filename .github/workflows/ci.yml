@@ -83,6 +83,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The base schema is created by `sequelize.sync({alter: false})` at app
+      # boot, NOT by a CREATE-TABLE migration — every migration in
+      # migrations/ is an ALTER that assumes the table already exists. So
+      # `db:migrate` against an empty Postgres fails on the very first
+      # migration with `relation "users" does not exist`. Mirror the dev/test
+      # boot order (sync → migrate) so the smoke validates what we actually
+      # ship.
+      - name: Initialize base schema (mirrors models/index.js sync)
+        run: |
+          node -e "const m = require('./models'); m.sequelize.sync({ alter: false }).then(() => m.sequelize.close()).then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); })"
+
       - name: Apply migrations
         run: npm run db:migrate
 

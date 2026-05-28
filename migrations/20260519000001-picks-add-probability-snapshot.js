@@ -12,26 +12,27 @@
 //
 // No new index — picks are looked up by the existing (userId, gameId) unique
 // index or by primary key, never by a snapshot value.
+//
+// Uses raw SQL with IF NOT EXISTS so this is idempotent against an already-
+// synced schema (sequelize.sync materialises every model column, including
+// these). Matches the pattern every other migration in this directory uses.
 
 module.exports = {
-  async up(queryInterface, Sequelize) {
-    await queryInterface.addColumn('picks', 'pickedHomeProbability', {
-      type: Sequelize.DECIMAL(3, 2),
-      allowNull: true,
-    });
-    await queryInterface.addColumn('picks', 'pickedDrawProbability', {
-      type: Sequelize.DECIMAL(3, 2),
-      allowNull: true,
-    });
-    await queryInterface.addColumn('picks', 'pickedAwayProbability', {
-      type: Sequelize.DECIMAL(3, 2),
-      allowNull: true,
-    });
+  async up(queryInterface) {
+    await queryInterface.sequelize.query(`
+      ALTER TABLE picks
+        ADD COLUMN IF NOT EXISTS "pickedHomeProbability" DECIMAL(3, 2) NULL,
+        ADD COLUMN IF NOT EXISTS "pickedDrawProbability" DECIMAL(3, 2) NULL,
+        ADD COLUMN IF NOT EXISTS "pickedAwayProbability" DECIMAL(3, 2) NULL
+    `);
   },
 
   async down(queryInterface) {
-    await queryInterface.removeColumn('picks', 'pickedAwayProbability');
-    await queryInterface.removeColumn('picks', 'pickedDrawProbability');
-    await queryInterface.removeColumn('picks', 'pickedHomeProbability');
+    await queryInterface.sequelize.query(`
+      ALTER TABLE picks
+        DROP COLUMN IF EXISTS "pickedAwayProbability",
+        DROP COLUMN IF EXISTS "pickedDrawProbability",
+        DROP COLUMN IF EXISTS "pickedHomeProbability"
+    `);
   },
 };

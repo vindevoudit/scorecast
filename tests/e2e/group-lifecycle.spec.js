@@ -26,9 +26,15 @@ test('group lifecycle: alice creates and invites, bob accepts, transfer, delete'
   await expect(aliceCard).toBeVisible({ timeout: 10_000 });
   await expect(aliceCard.getByText('Owner', { exact: true })).toBeVisible();
 
-  // Invite Bob via the per-card InviteRow form. Scope to the card so we
-  // don't grab the FriendsList "Username" input on the same page.
-  await aliceCard.getByLabel('Invite a friend').fill(USERS.bob.username);
+  // Invite Bob via the per-card InviteRow typeahead. Tier 19's invite
+  // refactor turned the bare username input into a search box that
+  // surfaces a dropdown of matches; the actual Invite button now sits
+  // next to a matched user's row. Scope everything to the card so we
+  // don't grab the FriendsList "Search users" input on the same page.
+  await aliceCard.getByRole('textbox', { name: 'Search users to invite' }).fill(USERS.bob.username);
+  // Bob's row appears in the typeahead dropdown; the "Invite" button
+  // sits inside it. The dropdown is portal-free (renders inside the
+  // card), so aliceCard.scope still reaches it.
   await aliceCard.getByRole('button', { name: 'Invite', exact: true }).click();
 
   await logoutViaUI(alicePage);

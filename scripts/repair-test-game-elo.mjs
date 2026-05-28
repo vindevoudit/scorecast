@@ -37,9 +37,7 @@ if (!url) {
 
 const [, , gameId, homeTeam, awayTeam] = process.argv;
 if (!gameId || !homeTeam || !awayTeam) {
-  console.error(
-    'Usage: node scripts/repair-test-game-elo.mjs <gameId> "<homeTeam>" "<awayTeam>"',
-  );
+  console.error('Usage: node scripts/repair-test-game-elo.mjs <gameId> "<homeTeam>" "<awayTeam>"');
   process.exit(1);
 }
 
@@ -84,20 +82,16 @@ try {
 
     // Delete the two team rows. The seeder will re-insert at canonical
     // historical Elo on its next run via ON CONFLICT-aware INSERT.
-    const [, teamDeleteMeta] = await s.query(
-      `DELETE FROM teams WHERE name IN (:names)`,
-      { replacements: { names: [homeTeam, awayTeam] }, transaction: t },
-    );
+    const [, teamDeleteMeta] = await s.query(`DELETE FROM teams WHERE name IN (:names)`, {
+      replacements: { names: [homeTeam, awayTeam] },
+      transaction: t,
+    });
     console.log('deleted teams; rowCount =', teamDeleteMeta?.rowCount ?? 'n/a');
   });
 
   console.log('\nDone. Next step:');
-  console.log(
-    '  npx sequelize-cli db:seed --seed 20260522000001-seed-teams-from-elo-history.js',
-  );
-  console.log(
-    'That re-seeds the two deleted team rows at their canonical historical Elo.',
-  );
+  console.log('  npx sequelize-cli db:seed --seed 20260522000001-seed-teams-from-elo-history.js');
+  console.log('That re-seeds the two deleted team rows at their canonical historical Elo.');
 } finally {
   // Suppress unused-var warning for Op (imported but only relevant via
   // the named import contract for future query helpers).

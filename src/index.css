@@ -75,11 +75,7 @@
  * Libre Baskerville Italic: classic Baskerville-family italic — restrained,
  * editorial, the visual counterweight to the neon wordmark. */
 .font-display {
-  font-family:
-    'Bebas Neue',
-    Impact,
-    'Arial Narrow Bold',
-    sans-serif;
+  font-family: 'Bebas Neue', Impact, 'Arial Narrow Bold', sans-serif;
   letter-spacing: 0.04em;
 }
 
@@ -113,8 +109,7 @@
   --c-info: 37 99 235; /* blue-600 */
 
   --shadow-glow: 0 20px 60px rgba(8, 145, 178, 0.12);
-  --shadow-brand-glow:
-    0 0 8px rgba(8, 145, 178, 0.4), 0 0 16px rgba(8, 145, 178, 0.25);
+  --shadow-brand-glow: 0 0 8px rgba(8, 145, 178, 0.4), 0 0 16px rgba(8, 145, 178, 0.25);
   --shadow-soft-glow: 0 0 6px rgba(8, 145, 178, 0.3);
 }
 
@@ -172,7 +167,9 @@ input {
  * radio/range/etc. are excluded because they don't trigger the zoom and
  * don't take typed input. */
 @media (max-width: 767px) {
-  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not(
+      [type='color']
+    ),
   textarea,
   select {
     font-size: 16px !important;

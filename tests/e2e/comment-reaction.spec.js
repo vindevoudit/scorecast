@@ -2,6 +2,7 @@
 
 const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
+const { selectGameDate } = require('./helpers/games');
 const { closestCard } = require('./helpers/selectors');
 const { USERS, GAMES } = require('./fixtures/data');
 
@@ -17,6 +18,9 @@ test('comment thread: alice posts, edits, reacts, deletes', async ({ browser }) 
   const context = await browser.newContext();
   const page = await context.newPage();
   await loginViaUI(page, USERS.alice);
+  // GamesCalendar defaults to today; the Eagles fixture sits at today+2,
+  // so snap the chip to its date before hunting for the pick button.
+  await selectGameDate(page, game);
 
   // Wait for the games list to be hydrated.
   const pickButton = page.getByRole('button', {

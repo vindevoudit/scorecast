@@ -82,8 +82,8 @@ function AuthView() {
     }
   };
 
-  // Wrap the three auth flows that produce a session so the dashboard
-  // fetch runs immediately after a successful login/register/2fa.
+  // Wrap the auth flows that produce a session so the dashboard fetch
+  // runs immediately after a successful login/register.
   const handleLogin = async (event) => {
     try {
       const result = await authLogin(event);

@@ -1,20 +1,17 @@
 'use strict';
 
 // Tier 13 Chunk 1 — current-user routes extracted from server.js. Covers
-// /me, /me/2fa/{setup,confirm,disable}, and /me/email. All require auth.
+// /me, /me/email, /me/password. All require auth.
+//
+// Tier 22 — 2FA setup/confirm/disable handlers were removed. See routes/auth.js
+// header for the revival recipe.
 const express = require('express');
-const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const speakeasy = require('speakeasy');
-const qrcode = require('qrcode');
 
 const { validate } = require('../validation/middleware');
 const {
   setEmailSchema,
   setPasswordSchema,
-  totpSetupSchema,
-  totpConfirmSchema,
-  totpVerifySchema,
   editProfileSchema,
   pushPreferencesSchema,
   acceptTermsSchema,

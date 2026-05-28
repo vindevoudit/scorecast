@@ -85,23 +85,9 @@ const setPasswordSchema = z
   .object({ currentPassword, newPassword: password })
   .openapi('SetPasswordRequest');
 
-const totpSetupSchema = z.object({ currentPassword }).openapi('TotpSetupRequest');
-
-const totpConfirmSchema = z
-  .object({ code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits') })
-  .openapi('TotpConfirmRequest');
-const totpVerifySchema = z
-  .object({
-    code: z
-      .string()
-      .regex(/^\d{6}$/)
-      .optional(),
-    recoveryCode: z.string().trim().min(8).max(60).optional(),
-  })
-  .refine((d) => Boolean(d.code) || Boolean(d.recoveryCode), {
-    message: 'Provide either code or recoveryCode',
-  })
-  .openapi('TotpVerifyRequest');
+// Tier 22 — 2FA schemas (totpSetupSchema / totpConfirmSchema / totpVerifySchema)
+// were removed alongside the route handlers. Re-add here when reviving 2FA;
+// the original shapes live in git history.
 
 // PWA Chunk 4 — Web Push. The browser's PushSubscription.toJSON() output is
 // `{endpoint, keys: {p256dh, auth}}`. Endpoint URLs from FCM / Apple WebPush /
@@ -436,9 +422,6 @@ module.exports = {
   resetPasswordSchema,
   setEmailSchema,
   setPasswordSchema,
-  totpSetupSchema,
-  totpConfirmSchema,
-  totpVerifySchema,
   pushSubscribeSchema,
   pushUnsubscribeSchema,
   pushPreferencesSchema,

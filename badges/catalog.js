@@ -1,5 +1,11 @@
 const BADGE_CATALOG = [
   {
+    slug: 'beta-tester',
+    name: 'Beta Tester',
+    description: 'Was here before launch. Thank you for helping test Bantryx.',
+    emoji: '🧪',
+  },
+  {
     slug: 'first-pick',
     name: 'First Pick',
     description: 'Made your first pick.',

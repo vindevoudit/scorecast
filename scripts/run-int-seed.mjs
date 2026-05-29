@@ -30,7 +30,9 @@ child.stderr.on('data', (chunk) => {
 child.on('exit', (code) => {
   try {
     writeFileSync(LOG_PATH, `STDOUT:\n${stdout}\nSTDERR:\n${stderr}\nEXIT: ${code}\n`);
-  } catch {}
+  } catch (writeErr) {
+    process.stderr.write(`LOG_WRITE_FAILED=${writeErr.message}\n`);
+  }
   // ASCII-only status to caller.
   const ok = code === 0 ? 'OK' : 'FAIL';
   // Look for the seeder's own success log line to confirm row insert.
@@ -45,14 +47,18 @@ child.on('exit', (code) => {
   process.stdout.write(fields.join(' ') + '\n');
   // Print log path for follow-up inspection.
   process.stdout.write(`LOG_PATH=${LOG_PATH}\n`);
-  // Optional: tail of the log without unicode.
+  // Optional: tail of the log without unicode. Keep printable ASCII (0x20-0x7e)
+  // + tab/newline/CR via the standard \s + word charset; non-printable + non-ASCII
+  // chars get dropped so the output flows through az containerapp exec cleanly.
   try {
     const tail = readFileSync(LOG_PATH, 'utf8')
       .split('\n')
-      .filter((line) => !/[^\x09\x0a\x0d\x20-\x7e]/.test(line))
+      .map((line) => line.replace(/[^ -~\t]/g, ''))
       .slice(-10)
       .join('\n');
     process.stdout.write('TAIL:\n' + tail + '\n');
-  } catch {}
+  } catch (readErr) {
+    process.stderr.write(`LOG_READ_FAILED=${readErr.message}\n`);
+  }
   process.exit(code ?? 1);
 });

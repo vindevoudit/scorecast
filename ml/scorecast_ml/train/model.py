@@ -55,20 +55,40 @@ def train(
     X_val: pd.DataFrame,
     y_val: pd.Series,
     *,
+    sample_weight: pd.Series | None = None,
+    val_sample_weight: pd.Series | None = None,
     params: dict | None = None,
     num_boost_round: int = DEFAULT_NUM_BOOST_ROUND,
     early_stopping_rounds: int = DEFAULT_EARLY_STOPPING_ROUNDS,
 ) -> xgb.Booster:
     """Fit XGBoost multi:softprob on the 2-feature matrix. Returns the
-    raw Booster — save via `save_as_json` (no joblib bundle wrapper)."""
+    raw Booster — save via `save_as_json` (no joblib bundle wrapper).
+
+    International model support: optional `sample_weight` (per-row weight
+    aligned to X_train, typically the FIFA-style K-multiplier) is passed
+    through to the train DMatrix; `val_sample_weight` does the same for
+    early-stopping val. Both default `None` → bit-identical to the
+    pre-international-model PL path.
+    """
     if list(X_train.columns) != FEATURE_NAMES:
         X_train = X_train[FEATURE_NAMES]
     if list(X_val.columns) != FEATURE_NAMES:
         X_val = X_val[FEATURE_NAMES]
 
     final_params = {**DEFAULT_PARAMS, **(params or {})}
-    dtrain = xgb.DMatrix(X_train.values, label=y_train.values, feature_names=FEATURE_NAMES)
-    dval = xgb.DMatrix(X_val.values, label=y_val.values, feature_names=FEATURE_NAMES)
+    # CRITICAL non-regression invariant: when sample_weight is None we must
+    # NOT pass the `weight=` kwarg to DMatrix at all. Passing `weight=None`
+    # vs omitting the kwarg produces a different internal DMatrix and shifts
+    # XGBoost's serialized output even though they're "functionally
+    # equivalent" — broke PL byte-identity until this branch landed.
+    dtrain_kwargs: dict = {"label": y_train.values, "feature_names": FEATURE_NAMES}
+    if sample_weight is not None:
+        dtrain_kwargs["weight"] = sample_weight.values
+    dval_kwargs: dict = {"label": y_val.values, "feature_names": FEATURE_NAMES}
+    if val_sample_weight is not None:
+        dval_kwargs["weight"] = val_sample_weight.values
+    dtrain = xgb.DMatrix(X_train.values, **dtrain_kwargs)
+    dval = xgb.DMatrix(X_val.values, **dval_kwargs)
 
     evals_result: dict = {}
     booster = xgb.train(

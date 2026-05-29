@@ -110,6 +110,18 @@ async function upsertFixture({ league, fixture, transaction }) {
     transaction,
   });
 
+  // International model — fixtures synced under the WC league row are the
+  // V1 international meta-pool. Stamp the neutral-venue flag + FIFA-style
+  // K-factor multiplier at intake so the cascade reads them consistently
+  // for every result capture on this fixture.
+  //
+  // V1 simplification: every match arriving via sourceLeagueId='WC' is a
+  // World Cup finals match (the only matches football-data.org currently
+  // returns under that competition code), so we stamp a single 3.0 default.
+  // Per-stage derivation (group vs final) is out of scope. When Euros/Copa
+  // wire in later under their own sourceLeagueIds, this is the branch point
+  // for their tier-specific defaults.
+  const isInternationalMetaPool = league.sourceLeagueId === 'WC';
   const baseAttrs = {
     homeTeam: fixture.homeTeam,
     awayTeam: fixture.awayTeam,
@@ -123,6 +135,8 @@ async function upsertFixture({ league, fixture, transaction }) {
     kickoffTz: fixture.venueTimezone,
     halfTimeReached: Boolean(fixture.halfTimeReached),
     phase: fixture.phase || null,
+    neutralVenue: isInternationalMetaPool,
+    eloKMultiplier: isInternationalMetaPool ? 3.0 : null,
   };
 
   // Probabilities: leave existing values intact on update; for new rows

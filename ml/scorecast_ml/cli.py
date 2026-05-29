@@ -26,6 +26,7 @@ import typer
 from scorecast_ml.config import get_settings
 from scorecast_ml.elo.engine import EloConfig, batch_compute
 from scorecast_ml.ingest.football_data_uk import parse_csv
+from scorecast_ml.ingest.international import parse_intl_csv
 from scorecast_ml.logging import configure_logging, get_logger
 from scorecast_ml.train.model import FEATURE_NAMES, save_as_json, train as train_model
 
@@ -67,20 +68,37 @@ def _load_aliases(league: str) -> dict[str, str]:
     return block["aliases"]
 
 
-def _canonicalize_frame(df: pd.DataFrame, aliases: dict[str, str]) -> pd.DataFrame:
-    """Apply strict alias lookup to home + away columns. Loud-fail on
-    any unknown so the training corpus stays clean."""
+def _canonicalize_frame(df: pd.DataFrame, aliases: dict[str, str], *, strict: bool = True) -> pd.DataFrame:
+    """Apply alias lookup to home + away columns.
+
+    `strict=True` (PL behavior, unchanged): any name not in the aliases
+    dict raises loud — the PL corpus is static and clean, so a new club
+    in the CSV is always operator-actionable (add to teams.json before
+    retraining).
+
+    `strict=False` (INT behavior): unmapped names fall through with
+    identity. The CSV's own naming IS the canonical naming for the
+    international dataset (see reconcile/teams.json "INT" block note).
+    The alias map captures KNOWN SYNONYMS that the source uses
+    inconsistently; everything else is preserved as-is. This is the
+    appropriate guard when the upstream dataset isn't auditable for
+    every team identity (333 nations + microstates + CONIFA).
+    """
     raw_names = set(df["home"].astype(str).unique()) | set(df["away"].astype(str).unique())
     missing = [n for n in raw_names if n not in aliases]
-    if missing:
+    if missing and strict:
         raise KeyError(
             f"reconcile: {len(missing)} CSV team(s) without an alias in teams.json:\n"
             + "\n".join(f"  - {n}" for n in sorted(missing))
             + "\nAdd entries to ml/scorecast_ml/reconcile/teams.json (PL.aliases) and re-run."
         )
     out = df.copy()
-    out["home"] = out["home"].map(aliases)
-    out["away"] = out["away"].map(aliases)
+    if strict:
+        out["home"] = out["home"].map(aliases)
+        out["away"] = out["away"].map(aliases)
+    else:
+        out["home"] = out["home"].map(lambda n: aliases.get(n, n))
+        out["away"] = out["away"].map(lambda n: aliases.get(n, n))
     return out
 
 
@@ -101,12 +119,27 @@ def _label_from_ftr(ftr: str) -> int:
 
 @app.command()
 def train(
-    league: str = typer.Option("PL", "--league", help="ScoreCast league code (default PL — only PL is wired today)"),
-    val_season: str = typer.Option("2324", "--val-season", help="Season code to hold out for early-stopping val"),
+    league: str = typer.Option("PL", "--league", help="ScoreCast league code (PL or INT)"),
+    source: str = typer.Option(
+        "fdco",
+        "--source",
+        help="Data source. 'fdco' (default) = Football-Data.co.uk CSV cache under ml/data/raw/ (PL). 'international' = international_match_archive/results.csv + former_names.csv (INT).",
+    ),
+    val_season: str = typer.Option("2324", "--val-season", help="[fdco only] Season code held out for early-stopping val"),
     train_through_season: str = typer.Option(
         "2223",
         "--train-through-season",
-        help="Inclusive last season in the train fold (everything BEFORE val_season). Defaults to 2223.",
+        help="[fdco only] Inclusive last season in the train fold (everything BEFORE val_season).",
+    ),
+    val_start_date: str = typer.Option(
+        "2022-01-01",
+        "--val-start-date",
+        help="[international only] ISO date; rows on or after this date are the val fold.",
+    ),
+    train_through_date: str = typer.Option(
+        "2021-12-31",
+        "--train-through-date",
+        help="[international only] ISO date; rows on or before this date are the train fold.",
     ),
     hfa: float = typer.Option(0.0, "--hfa", help="Home-field advantage in Elo points (default 0)"),
     output_dir: Path | None = typer.Option(
@@ -116,11 +149,52 @@ def train(
     ),
 ) -> None:
     """Fit an XGBoost multi:softprob model on `[home_elo_pre, away_elo_pre]`
-    features over the committed PL_*.csv corpus. Writes the booster's
-    native JSON dump that lib/ml/xgboostInference.js loads at runtime."""
+    features. Writes the booster's native JSON dump that
+    lib/ml/xgboostInference.js loads at runtime.
+
+    PL path (--source fdco, default): walks the committed PL_*.csv corpus,
+    uses strict alias reconciliation + season-based train/val split.
+    Bit-identical to the pre-international-model behavior — locked by the
+    PL byte-diff check in the verification ladder.
+
+    INT path (--source international, --league INT): walks the
+    international_match_archive/ dataset, uses permissive reconciliation
+    + date-based train/val split + FIFA-style K-multiplier as both the
+    Elo K-factor weight AND the XGBoost row sample_weight.
+    """
     configure_logging()
 
     settings = get_settings()
+
+    if source == "fdco":
+        _train_fdco(
+            league=league,
+            val_season=val_season,
+            train_through_season=train_through_season,
+            hfa=hfa,
+            output_dir=output_dir,
+            settings=settings,
+        )
+    elif source == "international":
+        _train_international(
+            league=league,
+            val_start_date=val_start_date,
+            train_through_date=train_through_date,
+            hfa=hfa,
+            output_dir=output_dir,
+            settings=settings,
+        )
+    else:
+        typer.echo(f"unknown --source {source!r}; expected 'fdco' or 'international'")
+        raise typer.Exit(code=1)
+
+
+def _train_fdco(
+    *, league: str, val_season: str, train_through_season: str, hfa: float, output_dir: Path | None, settings
+) -> None:
+    """Original PL training path. Kept structurally bit-identical to its
+    pre-international-model form so re-training PL produces byte-identical
+    JSON output (XGBoost is deterministic at seed=42)."""
     raw_dir = settings.raw_dir()
     csvs = sorted(raw_dir.glob(f"{league}_*.csv"))
     if not csvs:
@@ -141,7 +215,7 @@ def train(
 
     # Strict reconciliation. raise loud on any unmapped team.
     aliases = _load_aliases(league)
-    reconciled = _canonicalize_frame(raw, aliases)
+    reconciled = _canonicalize_frame(raw, aliases, strict=True)
 
     # Run Elo to populate home_elo_pre / away_elo_pre on every row.
     elo_cfg = EloConfig(home_field_advantage=hfa)
@@ -185,6 +259,114 @@ def train(
         )
 
     booster = train_model(X_train, y_train, X_val, y_val)
+
+    out_dir = output_dir or settings.models_dir()
+    path = save_as_json(booster, league=league, out_dir=out_dir)
+    typer.echo(f"\nmodel JSON written: {path}")
+    typer.echo(
+        f"Next step: copy/commit to lib/ml/models/{league}_elo.json so the JS"
+        " runtime cascade picks it up on next deploy."
+    )
+
+
+def _train_international(
+    *, league: str, val_start_date: str, train_through_date: str, hfa: float, output_dir: Path | None, settings
+) -> None:
+    """International training path. Wired against international_match_archive/
+    (martj42 Kaggle dataset). Uses:
+      - permissive reconcile (identity fallback for unmapped names),
+      - date-based train/val split (no notion of "season" in international
+        football),
+      - FIFA-style K-multiplier as both Elo K-factor weight AND XGBoost
+        row sample_weight, so high-stakes matches dominate both the rating
+        calculation AND the gradient.
+      - promoted_team_strategy='initial' — when a new nation appears in the
+        dataset we start it at 1500 rather than min(current), because the
+        "promoted from below" semantic doesn't apply across confederations.
+    """
+    # Locate the archive folder. Convention: it sits at the repo root,
+    # i.e. ml/.. (two levels up from cli.py).
+    repo_root = Path(__file__).resolve().parents[2]
+    archive_dir = repo_root / "international_match_archive"
+    results_path = archive_dir / "results.csv"
+    former_names_path = archive_dir / "former_names.csv"
+    if not results_path.exists():
+        typer.echo(
+            f"international source missing: {results_path} not found. "
+            f"Drop martj42's results.csv into {archive_dir} (the standard "
+            "'International football results from 1872' Kaggle dataset)."
+        )
+        raise typer.Exit(code=1)
+    if not former_names_path.exists():
+        typer.echo(f"international source missing: {former_names_path} not found.")
+        raise typer.Exit(code=1)
+
+    raw = parse_intl_csv(results_path, former_names_path)
+
+    # Permissive reconcile — INT block's aliases are typically empty (the
+    # CSV's own naming is canonical) but the alias map captures any known
+    # synonyms a future Kaggle re-drop introduces.
+    aliases = _load_aliases(league)
+    reconciled = _canonicalize_frame(raw, aliases, strict=False)
+
+    # Elo config: per-match K-multiplier (k_mult column from ingest) and
+    # neutral flag (per-match HFA=0). promoted_team_strategy='initial'
+    # because nations don't "promote" from another league — every new
+    # nation enters at 1500.
+    elo_cfg = EloConfig(
+        home_field_advantage=hfa,
+        promoted_team_strategy="initial",
+        k_multiplier_column="k_mult",
+        neutral_column="neutral",
+    )
+    augmented, _state = batch_compute(reconciled, elo_cfg)
+
+    X = augmented[["home_elo_pre", "away_elo_pre"]].rename(
+        columns={"home_elo_pre": "home_elo", "away_elo_pre": "away_elo"}
+    )
+    y = pd.Series([_label_from_ftr(f) for f in augmented["ftr"]], name="label")
+    # K-multiplier doubles as the XGBoost row sample_weight so high-stakes
+    # matches dominate the gradient as well as the Elo rating.
+    weight = augmented["k_mult"].astype(float)
+
+    # Date-based split.
+    val_start = pd.Timestamp(val_start_date, tz="UTC")
+    train_through = pd.Timestamp(train_through_date, tz="UTC")
+    if val_start <= train_through:
+        typer.echo(
+            f"--val-start-date {val_start_date} must be AFTER --train-through-date {train_through_date}"
+        )
+        raise typer.Exit(code=2)
+    dates = augmented["date"]
+    train_mask = dates <= train_through
+    val_mask = dates >= val_start
+
+    X_train, y_train = X[train_mask], y[train_mask]
+    X_val, y_val = X[val_mask], y[val_mask]
+    w_train = weight[train_mask]
+    w_val = weight[val_mask]
+    typer.echo(
+        f"split: train {len(X_train)} rows (<= {train_through_date}),"
+        f" val {len(X_val)} rows (>= {val_start_date})"
+    )
+    if X_train.empty or X_val.empty:
+        typer.echo("split produced empty train or val set — check --val-start-date / --train-through-date.")
+        raise typer.Exit(code=2)
+
+    if list(X_train.columns) != FEATURE_NAMES:
+        raise RuntimeError(
+            f"FEATURE_NAMES drift detected: cli produced {list(X_train.columns)}"
+            f" but train.model expected {FEATURE_NAMES}. Realign before training."
+        )
+
+    booster = train_model(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        sample_weight=w_train,
+        val_sample_weight=w_val,
+    )
 
     out_dir = output_dir or settings.models_dir()
     path = save_as_json(booster, league=league, out_dir=out_dir)

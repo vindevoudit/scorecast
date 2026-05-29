@@ -1,6 +1,9 @@
 {
-  "_note": "Tier 17 — JS port of ml/scorecast_ml/reconcile/teams.json. Maps Football-Data.co.uk CSV team names (keys) to the canonical football-data.org names that ScoreCast's games.homeTeam/awayTeam columns store (values). The Phase 2 seeder reads PL CSVs and looks up each team here before upserting into the teams table; a missing entry throws a loud error so new PL clubs surface immediately instead of being silently dropped from the Elo bootstrap.",
-  "_last_reviewed": "2026-05-22",
+  "_note": "Tier 17 — JS port of ml/scorecast_ml/reconcile/teams.json. Maps Football-Data.co.uk CSV team names (keys) to the canonical football-data.org names that ScoreCast's games.homeTeam/awayTeam columns store (values). The Phase 2 seeder reads PL CSVs and looks up each team here before upserting into the teams table; a missing entry throws a loud error so new PL clubs surface immediately instead of being silently dropped from the Elo bootstrap. The INT block mirrors the Python reconcile/teams.json INT block — for the international seeder, the CSV's own naming is canonical, so the alias map captures KNOWN SYNONYMS only and the seeder uses permissive (identity-fallback) lookup.",
+  "_last_reviewed": "2026-05-28",
+  "INT": {
+    "aliases": {}
+  },
   "PL": {
     "aliases": {
       "Arsenal": "Arsenal FC",

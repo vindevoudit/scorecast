@@ -121,6 +121,25 @@ module.exports = (sequelize) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // International model support — neutralVenue flag (true for WC and
+      // other neutral-pitch fixtures) drives inference-time symmetrization
+      // in PredictionService.rePredictFutureFixtures and HFA=0 in the Elo
+      // cascade. eloKMultiplier (null → 1.0) is the FIFA-style tier
+      // multiplier (WC=3.0, WC-qual + continental finals=2.5, etc.)
+      // stamped by LeagueService.upsertFixture at sync time. Both default
+      // to PL-compatible values so the existing pipeline is unchanged.
+      // eloKMultiplier should be treated as FROZEN once appliedResult is
+      // non-null — mutating it between captures would break the Tier 17
+      // reversal invariant.
+      neutralVenue: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      eloKMultiplier: {
+        type: DataTypes.DECIMAL(4, 2),
+        allowNull: true,
+      },
     },
     {
       tableName: 'games',

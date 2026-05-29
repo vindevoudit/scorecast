@@ -45,6 +45,11 @@ const normalize = require('../lib/ml/normalize');
 // cache populates on the first cascade call.
 const MODEL_PATHS = {
   PL: path.join(__dirname, '..', 'lib', 'ml', 'models', 'PL_elo.json'),
+  // International model — covers WC fixtures + (future) Euros/Copa via the
+  // INTL meta-pool. The WC league row is the V1 host; rePredictFutureFixtures
+  // also runs symmetrization for fixtures marked `neutralVenue=true` to
+  // guarantee predict(A,B) === predict(B,A) on neutral pitches.
+  WC: path.join(__dirname, '..', 'lib', 'ml', 'models', 'INT_elo.json'),
 };
 const modelCache = new Map();
 
@@ -145,12 +150,23 @@ async function onResultUpdated(game, { transaction }) {
   let homeEloPre = game.homeEloPre != null ? parseFloat(game.homeEloPre) : null;
   let awayEloPre = game.awayEloPre != null ? parseFloat(game.awayEloPre) : null;
 
+  // International model: read per-game K-multiplier (null → 1.0) and
+  // neutral-venue flag. These travel with the game row so a result change
+  // on the same game (X → Y) reverses + reapplies with the same multiplier,
+  // preserving the Tier 17 PR F reversal invariant. PL fixtures have
+  // eloKMultiplier=NULL + neutralVenue=FALSE so the opts collapse to the
+  // bit-identical pre-international-model path.
+  const eloOpts = {
+    kMultiplier: game.eloKMultiplier != null ? parseFloat(game.eloKMultiplier) : 1,
+    neutral: !!game.neutralVenue,
+  };
+
   // Reverse prior delta (against the locked snapshot) if there's one to
   // reverse. After this block, team Elo is "as if this game had never
   // contributed."
   let reversed = null;
   if (previous != null && homeEloPre != null && awayEloPre != null) {
-    const revertDelta = eloMath.eloDelta(homeEloPre, awayEloPre, previous);
+    const revertDelta = eloMath.eloDelta(homeEloPre, awayEloPre, previous, eloOpts);
     homeEloLive -= revertDelta.home;
     awayEloLive -= revertDelta.away;
     reversed = { previous, deltaHome: revertDelta.home, deltaAway: revertDelta.away };
@@ -165,7 +181,7 @@ async function onResultUpdated(game, { transaction }) {
       homeEloPre = homeEloLive;
       awayEloPre = awayEloLive;
     }
-    const newDelta = eloMath.eloDelta(homeEloPre, awayEloPre, next);
+    const newDelta = eloMath.eloDelta(homeEloPre, awayEloPre, next, eloOpts);
     homeEloLive += newDelta.home;
     awayEloLive += newDelta.away;
     applied = { next, deltaHome: newDelta.home, deltaAway: newDelta.away };
@@ -306,6 +322,26 @@ async function rePredictFutureFixtures({ affectedTeams, leagueId }) {
     let probs;
     try {
       probs = xgboost.predict(model, [homeElo, awayElo]);
+      // International model — neutral-venue symmetrization. For games
+      // marked neutralVenue=true (WC, future Euros finals, etc.) we
+      // GUARANTEE order-independence by averaging the forward prediction
+      // with the swapped prediction (class labels swapped to compensate).
+      // The model was trained on a mix of home/away/neutral matches so it
+      // has learned some asymmetry that doesn't apply on a neutral pitch;
+      // averaging fwd + swap cancels it exactly. PL games (neutralVenue
+      // defaults to FALSE) skip this branch entirely.
+      if (g.neutralVenue) {
+        const probsSwap = xgboost.predict(model, [awayElo, homeElo]);
+        // 3-class softmax output: [P(home), P(draw), P(away)]. When we
+        // swap inputs, the model outputs probs for THE NEW HOME (= old
+        // away). So probsSwap[0] = old P(away from old-home perspective),
+        // probsSwap[2] = old P(home). Draw stays draw.
+        probs = [
+          (probs[0] + probsSwap[2]) / 2,
+          (probs[1] + probsSwap[1]) / 2,
+          (probs[2] + probsSwap[0]) / 2,
+        ];
+      }
     } catch (err) {
       logger.error(
         { err, gameId: g.id, homeElo, awayElo },

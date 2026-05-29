@@ -44,6 +44,19 @@ class EloConfig:
     #                 Captures the empirical reality that promoted teams
     #                 underperform the bottom of the league they joined.
     promoted_team_strategy: PromotedStrategy = "min_rating"
+    # International model support. Both default-off so PL training stays
+    # bit-identical. Mirror of lib/ml/eloMath.js's `eloDelta(..., opts)`
+    # signature so the Python trainer and JS cascade apply identical math.
+    #
+    # `k_multiplier_column`: optional DataFrame column name whose row value
+    # multiplies `k_factor` per match (e.g. 3.0 for WC finals, 1.0 for
+    # friendlies). Absent column or NaN → 1.0 fallback.
+    #
+    # `neutral_column`: optional DataFrame column name whose truthy row
+    # value forces HFA=0 for that match's expected_score calculation —
+    # used for WC and other neutral-pitch fixtures.
+    k_multiplier_column: str | None = None
+    neutral_column: str | None = None
 
 
 def expected_score(r_home: float, r_away: float, hfa: float = 65.0) -> float:
@@ -109,6 +122,9 @@ def batch_compute(
     away_pre: list[float] = []
     seasons_seen: set[str] = set()
     has_season_col = "season" in matches.columns
+    # International model carriers — looked up per-row when set.
+    k_mult_col = cfg.k_multiplier_column if cfg.k_multiplier_column in matches.columns else None
+    neutral_col = cfg.neutral_column if cfg.neutral_column in matches.columns else None
 
     for row in matches.itertuples(index=False):
         # Track season boundary so the promoted-team strategy knows whether
@@ -139,12 +155,31 @@ def batch_compute(
         home_pre.append(h.rating)
         away_pre.append(a.rating)
 
+        # Per-match effective HFA + K-factor. Defaults (no INT columns) collapse
+        # to (cfg.home_field_advantage, cfg.k_factor) — bit-identical to the
+        # pre-international-model path. NaN/None k_mult also falls back to 1.0
+        # so a sparsely-populated column doesn't silently zero out a match.
+        if neutral_col is not None:
+            raw_neutral = getattr(row, neutral_col)
+            effective_hfa = 0.0 if bool(raw_neutral) else cfg.home_field_advantage
+        else:
+            effective_hfa = cfg.home_field_advantage
+        if k_mult_col is not None:
+            raw_k = getattr(row, k_mult_col)
+            try:
+                k_mult = float(raw_k) if raw_k is not None and pd.notna(raw_k) else 1.0
+            except (TypeError, ValueError):
+                k_mult = 1.0
+        else:
+            k_mult = 1.0
+        effective_k = cfg.k_factor * k_mult
+
         # Apply the match to both teams.
-        eh = expected_score(h.rating, a.rating, cfg.home_field_advantage)
+        eh = expected_score(h.rating, a.rating, effective_hfa)
         ea = 1.0 - eh
         actual_h, actual_a = actual_score_from_ftr(row.ftr)
-        h.rating = update(h.rating, eh, actual_h, cfg.k_factor)
-        a.rating = update(a.rating, ea, actual_a, cfg.k_factor)
+        h.rating = update(h.rating, eh, actual_h, effective_k)
+        a.rating = update(a.rating, ea, actual_a, effective_k)
         h.matches_played += 1
         a.matches_played += 1
         h.last_match_date = row.date

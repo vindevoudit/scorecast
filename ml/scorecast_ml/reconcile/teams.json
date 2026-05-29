@@ -56,5 +56,11 @@
       "Wimbledon": "Wimbledon FC",
       "Wolves": "Wolverhampton Wanderers FC"
     }
+  },
+  "INT": {
+    "version": 1,
+    "last_reviewed": "2026-05-28",
+    "_note": "Permissive-mode reconcile for the international match archive (martj42 Kaggle dataset). The CSV's own naming is already the canonical naming (e.g. 'Korea Republic' is stored as 'South Korea' in the CSV, which becomes our canonical name too — there is no football-data.org alignment requirement for V1 because INT fixtures sync to the WC league row directly, not a per-nation league). cli.py uses strict=False for INT so unmapped names fall through with identity instead of raising. This block captures KNOWN SYNONYMS that the CSV uses inconsistently across decades — append-only as more variants surface in future Kaggle re-drops. Add an entry here when an audit run via scripts/audit_intl_teams.py shows a new variant.",
+    "aliases": {}
   }
 }

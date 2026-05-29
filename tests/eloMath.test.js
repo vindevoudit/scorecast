@@ -154,3 +154,135 @@ test('updateElos chained: applying then reverting brings team back near start', 
   // Home should be closer to start than after the first match.
   assert.ok(Math.abs(back.newHomeElo - start) < Math.abs(newHomeElo - start));
 });
+
+// ---------------------------------------------------------------------------
+// International model — opts.kMultiplier + opts.neutral support. Locked
+// together with ml/scorecast_ml/elo/engine.py via the parity invariant in
+// CLAUDE.md ("Elo math parity"). The default-bit-identical assertions guard
+// the PL pipeline from any unintended drift.
+// ---------------------------------------------------------------------------
+
+test('eloDelta: omitted opts produce bit-identical output to no-opts signature', () => {
+  // The non-regression contract: every PL callsite passes 3 args and must
+  // see the exact same numeric output. Sample across the rating space.
+  const cases = [
+    [1500, 1500, 'home'],
+    [1500, 1500, 'away'],
+    [1500, 1500, 'draw'],
+    [1700, 1400, 'home'],
+    [1300, 1900, 'home'], // upset
+    [1648.3, 1635.8, 'draw'],
+  ];
+  for (const [rh, ra, result] of cases) {
+    const noOpts = eloDelta(rh, ra, result);
+    const emptyOpts = eloDelta(rh, ra, result, {});
+    assert.equal(noOpts.home, emptyOpts.home, `home drift at [${rh}, ${ra}, ${result}]`);
+    assert.equal(noOpts.away, emptyOpts.away, `away drift at [${rh}, ${ra}, ${result}]`);
+  }
+});
+
+test('updateElos: omitted opts produce bit-identical output to no-opts signature', () => {
+  const cases = [
+    [1500, 1500, 'home'],
+    [1700, 1400, 'away'],
+    [1300, 1900, 'draw'],
+  ];
+  for (const [rh, ra, result] of cases) {
+    const noOpts = updateElos(rh, ra, result);
+    const emptyOpts = updateElos(rh, ra, result, {});
+    assert.equal(noOpts.newHomeElo, emptyOpts.newHomeElo);
+    assert.equal(noOpts.newAwayElo, emptyOpts.newAwayElo);
+  }
+});
+
+test('eloDelta: kMultiplier=3 triples delta magnitude vs default', () => {
+  // Triples both legs — and preserves zero-sum.
+  for (const [rh, ra, result] of [
+    [1500, 1500, 'home'],
+    [1700, 1400, 'away'],
+    [1300, 1900, 'draw'],
+  ]) {
+    const base = eloDelta(rh, ra, result);
+    const triple = eloDelta(rh, ra, result, { kMultiplier: 3 });
+    assert.ok(
+      Math.abs(triple.home - base.home * 3) < 1e-9,
+      `home: ${triple.home} vs 3×${base.home}`,
+    );
+    assert.ok(
+      Math.abs(triple.away - base.away * 3) < 1e-9,
+      `away: ${triple.away} vs 3×${base.away}`,
+    );
+    assert.ok(
+      Math.abs(triple.home + triple.away) < 1e-9,
+      `zero-sum violated: ${triple.home + triple.away}`,
+    );
+  }
+});
+
+test('eloDelta: neutral=true is equivalent to default while HFA=0', () => {
+  // HFA constant is 0 today so the neutral flag is structurally a no-op
+  // for the magnitude. This test pins the equivalence; if HFA ever becomes
+  // non-zero the neutral branch must diverge — which would then need a
+  // dedicated assertion.
+  for (const [rh, ra, result] of [
+    [1500, 1500, 'home'],
+    [1700, 1400, 'away'],
+    [1300, 1900, 'draw'],
+  ]) {
+    const standard = eloDelta(rh, ra, result);
+    const neutral = eloDelta(rh, ra, result, { neutral: true });
+    assert.equal(neutral.home, standard.home);
+    assert.equal(neutral.away, standard.away);
+  }
+});
+
+test('eloDelta: neutral=true with equal ratings is symmetric in H↔A swap', () => {
+  // Home picking vs away picking on a neutral fixture between equal teams:
+  // by symmetry of the Elo logistic with HFA=0, the home-team delta from
+  // a home win equals the away-team delta from an away win (mirror image).
+  const eq = 1500;
+  const dHomeWin = eloDelta(eq, eq, 'home', { neutral: true });
+  const dAwayWin = eloDelta(eq, eq, 'away', { neutral: true });
+  assert.equal(dHomeWin.home, dAwayWin.away);
+  assert.equal(dHomeWin.away, dAwayWin.home);
+});
+
+test('eloDelta: combined kMultiplier + neutral compose multiplicatively', () => {
+  // K-mult scales magnitude; neutral controls HFA. With HFA=0 today, neutral
+  // is structurally moot but the multiplicative behavior under kMultiplier
+  // must hold either way.
+  const base = eloDelta(1500, 1500, 'home');
+  const combined = eloDelta(1500, 1500, 'home', { kMultiplier: 2.5, neutral: true });
+  assert.ok(Math.abs(combined.home - base.home * 2.5) < 1e-9);
+  assert.ok(Math.abs(combined.away - base.away * 2.5) < 1e-9);
+});
+
+test('updateElos: kMultiplier=3 triples elo movement', () => {
+  const start = 1500;
+  const single = updateElos(start, start, 'home');
+  const triple = updateElos(start, start, 'home', { kMultiplier: 3 });
+  // single delta is 10 (K=20, expected=0.5, actual=1); triple should be 30.
+  assert.ok(Math.abs(single.newHomeElo - 1510) < 1e-9);
+  assert.ok(Math.abs(triple.newHomeElo - 1530) < 1e-9);
+});
+
+test('eloDelta: applying then reversing under the same opts is exact', () => {
+  // The PR F reversal invariant carried into the K-mult arm: storing a
+  // snapshot + applying delta with K-mult=3, then later subtracting the
+  // delta computed FROM THE SAME SNAPSHOT with the same K-mult, returns
+  // Elo to the original pair exactly. This is the property that
+  // PredictionService.onResultUpdated depends on when an INT result is
+  // changed (X → Y reversal arm).
+  for (const [rh, ra, result, kMultiplier] of [
+    [1500, 1500, 'home', 3],
+    [1700, 1400, 'away', 2.5],
+    [1648.3, 1635.8, 'draw', 1.5],
+  ]) {
+    const d = eloDelta(rh, ra, result, { kMultiplier });
+    // Apply forward, then reverse against the same snapshot.
+    const after = { home: rh + d.home, away: ra + d.away };
+    const restored = { home: after.home - d.home, away: after.away - d.away };
+    assert.equal(restored.home, rh);
+    assert.equal(restored.away, ra);
+  }
+});

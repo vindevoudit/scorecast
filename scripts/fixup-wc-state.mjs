@@ -344,11 +344,51 @@ async function main() {
       teamSet.add(g.awayTeam);
     }
     process.stdout.write(`AFFECTED_TEAM_COUNT=${teamSet.size}\n`);
-    const result = await prediction.rePredictFutureFixtures({
-      affectedTeams: [...teamSet],
-      leagueId: wcId,
-    });
-    process.stdout.write(`REWRITTEN=${result.rewritten} SKIPPED=${result.skipped ?? 0}\n`);
+
+    // Pino's INFO logs emit U+25C7 (the diamond bullet) which crashes the
+    // Azure CLI's cp1252 stdout decoder on Windows hosts and terminates the
+    // exec connection mid-flight — killing the async cascade before it
+    // commits. Buffer all stdout/stderr during the cascade phase and emit
+    // only ASCII after it returns. The buffer is dumped to /tmp/cascade.log
+    // inside the container in case the operator needs to inspect it.
+    const origOut = process.stdout.write.bind(process.stdout);
+    const origErr = process.stderr.write.bind(process.stderr);
+    let buffered = '';
+    process.stdout.write = (chunk) => {
+      buffered += String(chunk);
+      return true;
+    };
+    process.stderr.write = (chunk) => {
+      buffered += String(chunk);
+      return true;
+    };
+    let result;
+    let cascadeErr;
+    try {
+      result = await prediction.rePredictFutureFixtures({
+        affectedTeams: [...teamSet],
+        leagueId: wcId,
+      });
+    } catch (e) {
+      cascadeErr = e;
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
+    try {
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync('/tmp/cascade.log', buffered);
+    } catch (writeErr) {
+      process.stderr.write(`CASCADE_LOG_WRITE_FAILED=${writeErr.message}\n`);
+    }
+    if (cascadeErr) {
+      process.stdout.write(
+        `CASCADE_EXCEPTION=${String(cascadeErr.message || cascadeErr).replace(/[^ -~]/g, '')}\n`,
+      );
+    } else {
+      process.stdout.write(`REWRITTEN=${result.rewritten} SKIPPED=${result.skipped ?? 0}\n`);
+    }
+    process.stdout.write('CASCADE_LOG=/tmp/cascade.log\n');
   } else {
     process.stdout.write('PHASE=rewrite-probs-skipped REASON=no_flag\n');
     process.stdout.write('NEXT_STEP=re-run_with_--rewrite-probs_to_fill_probabilities\n');

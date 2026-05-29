@@ -201,11 +201,12 @@ async function main() {
   process.stdout.write(`WC_LEAGUE_ID=${wcId}\n`);
 
   // -- Step 2: backfill neutralVenue + eloKMultiplier on existing WC games.
+  // (Note: games table has timestamps: false in the Sequelize model — there's
+  // no updatedAt column, don't try to set one here.)
   const [, gameMeta] = await sequelize.query(
     `UPDATE games
        SET "neutralVenue" = true,
-           "eloKMultiplier" = 3.0,
-           "updatedAt" = NOW()
+           "eloKMultiplier" = 3.0
      WHERE "leagueId" = :id
        AND ("neutralVenue" = false OR "eloKMultiplier" IS NULL)`,
     { replacements: { id: wcId } },

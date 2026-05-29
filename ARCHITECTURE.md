@@ -289,7 +289,7 @@ ScoreCast/
 │   └── AuditLog.js                      # Tier 4b Chunk 3: actorUserId (SET NULL on user delete), action (e.g. 'admin.game.delete'), entityType, entityId, before JSONB, after JSONB, requestId, statusCode
 │
 ├── badges/
-│   └── catalog.js                       # Source of truth for badge slugs/names/emojis (server + frontend)
+│   └── catalog.js                       # Source of truth for badge slugs/names/emojis (server + frontend). Includes beta-tester (🧪) — a MANUAL-grant badge (scripts/grant-beta-badge.mjs), never awarded by evaluateBadges()
 │
 ├── validation/
 │   ├── schemas.js                       # All zod schemas, one per POST/PUT route
@@ -410,7 +410,9 @@ ScoreCast/
 │   ├── query-teams.mjs                  # Tier 17: prod-safe Sequelize query helper. SSL-aware. Prints top 10 by Elo (no args) or specific teams by name
 │   ├── find-game.mjs                    # Tier 17: look up a game by home + away team names; surfaces id + result + snapshot/appliedResult state
 │   ├── repair-test-game-elo.mjs         # Tier 17: atomic transaction that clears a game's result + Elo snapshot + appliedResult AND deletes the involved team rows so the seeder restores at canonical Elo on next run
-│   └── backfill-probabilities.mjs       # Tier 17: drives PredictionService's predict + toThreeWay flow over every upcoming fixture in a league (CLI version of the reactive cascade). Supports --dry-run + --league. Functionally identical to rePredictFutureFixtures; useful after retrain
+│   ├── backfill-probabilities.mjs       # Tier 17: drives PredictionService's predict + toThreeWay flow over every upcoming fixture in a league (CLI version of the reactive cascade). Supports --dry-run + --league. Functionally identical to rePredictFutureFixtures; useful after retrain
+│   ├── grant-beta-badge.mjs             # Beta->launch reset: delete pick-derived badges (keep group-founder), grant beta-tester to all users. --wipe-picks also DELETEs all picks + clears user_scores/user_scores_overall in the same tx. --dry-run + ASCII-only stdout
+│   └── notify-beta-badge.mjs            # Announce the Beta Tester badge to all users via NotificationService.notify (in-app bell + Web Push). Idempotent (skips users already notified). LOG_LEVEL=silent + dotenv quiet + Sequelize logging off so az exec stdout stays cp1252-safe. --dry-run
 │
 ├── seeders/                             # sequelize-cli seeders. Idempotent via ON CONFLICT
 │   ├── 20260513000001-seed-password-backfill.js  # Tier 6: bcrypt-hash any plaintext passwords in users table

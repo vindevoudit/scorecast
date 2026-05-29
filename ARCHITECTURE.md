@@ -3730,6 +3730,156 @@ Numbers are total monthly Azure spend, not deltas:
 
 A6 / C5 are $0 marginal cost. A7 is $0 (App Insights alerts are free; ingestion is the meter and is bounded by A6 if needed).
 
+### 8.33 International Model — World Cup Predictions (intl-model, 2026-05-28)
+
+**Plan file**: `C:\Users\vinde\.claude\plans\we-need-to-train-sleepy-rainbow.md`.
+
+Extends the Tier 17 PL probability pipeline to cover international football — primarily the 2026 World Cup (with Euros / Copa / Nations League / friendlies as future scope). The user's two key requirements drove the shape:
+
+1. **Per-competition K-factor weighting**: friendlies should nudge Elo less than World Cup matches. Standard FIFA-style tiered scheme is the target.
+2. **Neutral-venue order-independence**: WC matches are on neutral pitches; swapping home/away inputs MUST produce mirrored output. The user wanted this guaranteed, not merely "close".
+
+#### Decisions locked up front
+
+- **Single INTL meta-pool**: all ~210+ national teams (333 actual rows after the seeder ran on the martj42 archive) share ONE Elo pool. V1 pragmatically uses the existing seeded `WC` league row (created by migration `20260518000001-create-leagues.js`) — its `sourceLeagueId='WC'` matches the football-data.org fixture sync. Future Euros / Copa / Nations League wiring slots into the same row (or splits later via a `parentLeagueId` indirection).
+- **2-feature XGBoost (parity with PL)**: model stays `[home_elo, away_elo]`. HFA mechanics live in training-time Elo + inference-time symmetrization, not in the model's feature shape. Same [lib/ml/xgboostInference.js](lib/ml/xgboostInference.js) consumes it.
+- **FIFA-style K-multiplier tiers** applied as BOTH the Elo K-factor weight AND the XGBoost row `sample_weight`:
+  - **×3.0**: `FIFA World Cup`
+  - **×2.5**: `FIFA World Cup qualification`, `UEFA Euro`, `Copa América`, `African Cup of Nations`, `AFC Asian Cup`, `Gold Cup` (CONCACAF top continental), `CONCACAF Championship` (Gold Cup predecessor), `Oceania Nations Cup`
+  - **×2.0**: continental qualifiers (`...qualification` suffix), `UEFA Nations League`, `CONCACAF Nations League`
+  - **×1.5**: `Confederations Cup` / `FIFA Confederations Cup`, anything matching `Olympic` (prefix match catches Olympic Games / Summer Olympics / etc.)
+  - **×1.0**: `Friendly` and anything not matched (regional sub-confederation cups like CECAFA / COSAFA / AFF / Arab Cup / etc. fall through here — documented in [scripts/fixup-wc-state.mjs](scripts/fixup-wc-state.mjs) as friendly-tier acceptable per the K-mult coverage audit test)
+
+#### Schema
+
+[migrations/20260528000002-games-add-intl-neutral-and-tier.js](migrations/20260528000002-games-add-intl-neutral-and-tier.js):
+
+```sql
+ALTER TABLE games
+  ADD COLUMN IF NOT EXISTS "neutralVenue"   BOOLEAN       NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS "eloKMultiplier" NUMERIC(4, 2) NULL;
+```
+
+Both columns are orthogonal to the Tier 17 PR F snapshot matrix (`homeEloPre` / `awayEloPre` / `appliedResult`). The cascade reads `game.eloKMultiplier` live each capture (null = 1.0) and `game.neutralVenue` for the symmetrization branch. PL defaults (`neutralVenue=false`, `eloKMultiplier=null`) collapse to bit-identical pre-intl-model behavior.
+
+**Frozen-after-capture invariant**: once `appliedResult` is non-null on a game, `eloKMultiplier` and `neutralVenue` should not be mutated. The cascade's reverse-then-reapply logic reads the LIVE column each time, so a mid-flight UPDATE would compute the reverse delta against the new K-mult while the snapshot was applied under the old one. Documented as operator convention in the migration comment + CLAUDE.md Critical considerations; no DB-level enforcement.
+
+#### Python pipeline
+
+[ml/scorecast_ml/ingest/international.py](ml/scorecast_ml/ingest/international.py) (new):
+
+- `parse_intl_csv(results_path, former_names_path)`: reads martj42 `results.csv` (date, home_team, away_team, home_score, away_score, tournament, city, country, neutral). Drops rows with `home_score == 'NA'` (future fixtures), drops self-vs-self, parses neutral as boolean. Output columns: `date, home, away, ftr, fthg, ftag, tournament, neutral, k_mult, league='INT', season=<year>`.
+- `derive_k_multiplier(tournament)`: exact-match lookup against the K-mult tier table, then a prefix-match for `Olympic*`, default 1.0.
+- `apply_former_names(df, former_names_path)`: date-windowed historical rewriter (USSR→Russia 1924-11-16 to 1991-11-13, Czechoslovakia variants, Upper Volta→Burkina Faso, etc.). Reads the 36-row `former_names.csv` and rewrites both `home` and `away` only when the match `date` falls inside the `[start_date, end_date]` window for the former name. Czechoslovakia ↔ Czech Republic / Slovakia split is NOT bridged (the dataset includes modern successor names directly for post-1993 matches; matches under "Czechoslovakia" stay as-is — slight Elo drift but bounded).
+
+[ml/scorecast_ml/elo/engine.py](ml/scorecast_ml/elo/engine.py) (extended): `EloConfig` gains `k_multiplier_column: str | None = None` + `neutral_column: str | None = None`. Both default-off → PL training stays bit-identical. In `batch_compute`, per row: read `k_mult = float(row[k_multiplier_column]) if set else 1.0` (NaN falls back to 1.0); effective `hfa = 0.0 if row[neutral_column] else cfg.home_field_advantage`. Apply `expected_score(h, a, effective_hfa)` and update with `cfg.k_factor * k_mult`.
+
+[ml/scorecast_ml/train/model.py](ml/scorecast_ml/train/model.py) (extended): `train()` gains optional `sample_weight: pd.Series | None = None` + `val_sample_weight: pd.Series | None = None`. **Critical non-regression detail**: when `sample_weight is None`, the code MUST NOT pass `weight=None` to `xgb.DMatrix(...)` — it must omit the kwarg entirely. Passing `weight=None` produces a different internal DMatrix than omitting the kwarg, even though they're "functionally equivalent". This broke PL byte-identity on the first attempt; fix is conditional kwarg construction:
+
+```python
+dtrain_kwargs = {"label": y_train.values, "feature_names": FEATURE_NAMES}
+if sample_weight is not None:
+    dtrain_kwargs["weight"] = sample_weight.values
+dtrain = xgb.DMatrix(X_train.values, **dtrain_kwargs)
+```
+
+[ml/scorecast_ml/cli.py](ml/scorecast_ml/cli.py) (extended): `train` subcommand gains `--source {fdco,international}` flag (default `fdco` = PL behavior, bit-identical to pre-change). When `source=international`:
+
+- Reads `international_match_archive/results.csv` + `former_names.csv` via `parse_intl_csv`
+- Uses date-based train/val split (`--val-start-date 2022-01-01` default; `--train-through-date 2021-12-31` default)
+- Overrides `promoted_team_strategy='initial'` (nations don't "promote" across confederations)
+- Permissive reconcile (`strict=False` in `_canonicalize_frame`) — identity fallback for unmapped names, since the dataset's own naming IS the canonical naming
+- Passes `sample_weight = augmented['k_mult']` to `train_model` so the K-mult tier weighting affects both Elo arithmetic AND the XGBoost gradient
+
+#### JS runtime parity
+
+[lib/ml/eloMath.js](lib/ml/eloMath.js) (extended): `eloDelta(homeElo, awayElo, result, opts = {})` accepts `{ kMultiplier = 1, neutral = false }`. When `neutral === true`, passes `hfaOverride=0` to `expectedHomeScore`. Multiplies both delta legs by `kMultiplier`. Zero-sum invariant preserved (`home === -away`). **Locked-bit-identical for defaults**: when `opts` is omitted or `{}`, returns the same numeric output as the pre-opts signature (asserted across the rating space in [tests/eloMath.test.js](tests/eloMath.test.js)).
+
+[services/PredictionService.js](services/PredictionService.js) (extended):
+
+1. `MODEL_PATHS.WC = path.join(__dirname, '..', 'lib', 'ml', 'models', 'INT_elo.json')` — cache key stays `sourceLeagueId='WC'`.
+2. `onResultUpdated` reads `game.eloKMultiplier` (null → 1.0) and `game.neutralVenue`. Passes them to `eloMath.eloDelta(homeEloPre, awayEloPre, value, { kMultiplier, neutral })` for BOTH the reverse and re-apply legs. The Tier 17 PR F snapshot matrix is unchanged — same Elo pair + same opts → reversal is exact under K-mult=3.
+3. `rePredictFutureFixtures` — **neutral-venue symmetrization branch**: after `probs = xgboost.predict(model, [homeElo, awayElo])`, if `g.neutralVenue === true`, compute `probsSwap = xgboost.predict(model, [awayElo, homeElo])` and average with class-label compensation:
+   - `home = (probs[0] + probsSwap[2]) / 2`
+   - `draw = (probs[1] + probsSwap[1]) / 2`
+   - `away = (probs[2] + probsSwap[0]) / 2`
+   - Re-normalize via the existing `normalize.toThreeWay`
+   - Mathematically GUARANTEES `predict(A, B) === predict(B, A)` mirrored — the user's explicit requirement. The 1-cent DECIMAL(3,2) rounding residual on equal-team neutral fixtures is locked in test as `TOLERANCE = 0.0101`.
+
+The Tier 19 Chunk 5 `pickProbabilitiesLockedAt: null` guard is unchanged — locked games skip the rewrite, so symmetrization respects the kickoff-time lock automatically.
+
+#### JS seeder
+
+[seeders/20260528000003-seed-teams-from-intl-elo-history.js](seeders/20260528000003-seed-teams-from-intl-elo-history.js) (new):
+
+- Reads `international_match_archive/results.csv` once
+- JS port of `derive_k_multiplier` + `apply_former_names` (literal table mirroring the Python version; both files cite each other for parity invariant)
+- Per match: calls `eloMath.eloDelta(home, away, result, { kMultiplier, neutral })` **DIRECTLY** from [lib/ml/eloMath.js](lib/ml/eloMath.js) (the same function PredictionService uses for the runtime cascade) — structurally eliminates one of the two drift paths the PL seeder is grandfathered into
+- INSERT into `teams WHERE leagueId = (SELECT id FROM leagues WHERE sourceLeagueId='WC')` with `ON CONFLICT (name, "leagueId") DO NOTHING` — same idempotency contract as PL: re-running preserves cascade-accumulated state
+
+**Trade-off bit us in prod**: the `ON CONFLICT DO NOTHING` semantic preserves any pre-existing rows. When the WC fixtures had been synced BEFORE the seeder ran (which is what happened in prod), the 48 nations participating in the 2026 WC had auto-inserted rows at `elo=1500, gamesPlayed=0` (from `LeagueService.upsertFixture ensureTeamExists`'s `min(elo)` default). The seeder couldn't overwrite them. Resolved by [scripts/fixup-wc-state.mjs](scripts/fixup-wc-state.mjs) — identifies stuck rows via `gamesPlayed=0` (the runtime cascade always increments this on every captured result), re-walks history in-process, and UPDATEs only the stuck rows.
+
+#### Fixture-sync stamp
+
+[services/LeagueService.js](services/LeagueService.js) `upsertFixture`: when `league.sourceLeagueId === 'WC'`, stamps `neutralVenue=true, eloKMultiplier=3.0` on every new/updated game row. PL fixtures (and every other league) skip this branch — they get `neutralVenue=false, eloKMultiplier=null`. V1 simplification: every match arriving via the WC competition code from football-data.org is a World Cup finals match (the only matches that endpoint returns today), so a single 3.0 default is safe. Per-stage derivation (group vs final) is out of scope — future Euros/Copa wiring is the branch point.
+
+#### Operator scripts (the cp1252 saga)
+
+All intl-model operator scripts under [scripts/](scripts/) emit **ASCII-only** stdout to survive a previously-unknown Azure CLI gotcha: `az containerapp exec`'s internal `_ssh_utils.py` hardcodes `cp1252` in its stdout decoder. When the container's stdout contains any non-cp1252 character (U+25C7 ◇ from `npx` spinners, pino pretty-print mode, country names with `ç` / `é`, em-dashes in code comments), the CLI's reader thread crashes with `UnicodeEncodeError` and terminates the WebSocket connection — KILLING any async work the container's process was doing.
+
+Two-layer mitigation pattern carried across the five scripts:
+
+1. **Replace `process.stdout.write`** to capture JS-level writes (catches anything done via console.log / process.stdout.write at the script level)
+2. **Spawn unicode-emitting work as subprocesses** with `stdio: ['ignore', 'pipe', 'pipe']` so their output is captured at the OS-pipe level — required because pino in production mode uses `fs.write(1, ...)` directly which BYPASSES `process.stdout.write` interception. Same for npx + sequelize-cli + any tool with progress spinners.
+
+After the cascade/seeder subprocess exits, emit a single ASCII-summary line to the outer stdout. Full buffered output gets written to `/tmp/<script>.log` inside the container for operator inspection.
+
+The five intl-model scripts:
+
+- [scripts/run-int-seed.mjs](scripts/run-int-seed.mjs) — subprocess wrapper around `npx sequelize-cli db:seed --seed 20260528000003-seed-teams-from-intl-elo-history.js`. Emits `STATUS=OK EXIT=0 UPSERT_ROWS=333 MATCHES=49215 TEAMS=333` on success.
+- [scripts/inspect-wc-state.mjs](scripts/inspect-wc-state.mjs) — raw-Sequelize prod inspection: total/scheduled game counts, sample fixture probabilities, TBD/placeholder team detection. Avoids `require('models/index.js')` to skip umzug side effects (same pattern as `scripts/backfill-user-scores.mjs`).
+- [scripts/fixup-wc-state.mjs](scripts/fixup-wc-state.mjs) — the load-bearing one-shot fixup. Five phases: (1) backfill `neutralVenue=true, eloKMultiplier=3.0` on existing WC games; (2) delete TBD team row + other placeholder rows so the cascade's null-elo skip fires on knockout-stage TBD-vs-TBD fixtures; (3) re-walk history, UPDATE stuck-at-1500 nations WHERE `gamesPlayed=0` (idempotent re-run preserves cascade-touched rows); (4) `HISTORY_SYNONYMS` map bridges 4 football-data.org ↔ martj42 name diffs (Czechia ↔ Czech Republic, Bosnia-Herzegovina ↔ Bosnia and Herzegovina, Cape Verde Islands ↔ Cape Verde, Congo DR ↔ DR Congo); (5) optional `--rewrite-probs` flag spawns `rePredictFutureFixtures` as a SUBPROCESS (pino's `fs.write(1, ...)` bypasses any JS-level stdout interception) so the cascade's pino logs are captured to `/tmp/cascade.log` and only an ASCII summary reaches `az`.
+- [scripts/list-wc-team-elo.mjs](scripts/list-wc-team-elo.mjs) — joins teams against `DISTINCT homeTeam/awayTeam` from the 104 WC fixtures (excluding TBD/placeholder) and prints by Elo descending. Returns exactly the 48 2026-WC participants.
+- [scripts/activate-wc-league.mjs](scripts/activate-wc-league.mjs) — idempotent `UPDATE leagues SET active = true WHERE sourceLeagueId='WC'`. Wasn't needed in the actual rollout (prod WC league was already active) but kept for future deactivation scenarios.
+
+#### Prod rollout shape (operator runbook)
+
+1. **Push to main** → CD applies migration + rolls new image
+2. **Once CD lands**: `az containerapp exec --name scorecast-app --resource-group scorecast-prod --command "node scripts/run-int-seed.mjs"` populates 333 nations under the WC league pool (idempotent — re-run is a no-op via `ON CONFLICT DO NOTHING`)
+3. **Inspect**: `az containerapp exec --command "node scripts/inspect-wc-state.mjs"` to see game counts, sample probabilities, TBD-row presence
+4. **Fix-up (if any pre-shipped fixtures exist)**: `az containerapp exec --command "node scripts/fixup-wc-state.mjs"` for dry-run (no probability rewrite); `... --rewrite-probs` to fire `rePredictFutureFixtures` after the fixups
+5. **List participants**: `az containerapp exec --command "node scripts/list-wc-team-elo.mjs"` returns the 48 actual WC nations sorted by Elo (Spain 2091 → Curaçao 1577 at time of rollout)
+
+#### Verification
+
+- **75 JS unit tests** (`npm run test:unit`) — incl. 11 new INT-specific tests in `eloMath.test.js`, full `predictionService.intl.test.js`, `seed-teams-intl.test.js`
+- **36 Python tests** (`pytest ml/tests/`) — incl. 7 new INT Elo engine tests, 12 ingest tests, 3 training tests
+- **97 e2e specs** across games / picks / leaderboard / pick-and-result / leaderboard-scoring / leagues / admin
+- **PL prediction parity**: re-trained PL booster in the new pipeline produces bit-identical predictions to the committed `PL_elo.json` in the JS inference runtime across all test inputs. (The JSON serialization byte-format differs because the committed file was emitted under an older XGBoost int-typed JSON convention; semantic equivalence — same 615 trees, same best_iteration=174, same val_mlogloss=0.944 — confirmed via the JS inference path.)
+- **End-to-end cascade smoke** (dev DB): Spain vs Argentina WC fixture captured → ±25.52 Elo delta (3× standard K=20 baseline), X→Y reversal returns to pre-snapshot exactly, idempotent re-save no-ops, 6 future fixtures rewritten with symmetrized probabilities
+
+#### Final prod state
+
+- 104 WC games all stamped `neutralVenue=true, kmult=3.00`
+- 337 teams under WC (333 seeded + 4 surviving football-data.org-only names that got synced before the seeder; the TBD row was deleted by `fixup-wc-state.mjs`)
+- 72/104 fixtures got INT-model probabilities; 32 TBD-containing knockout fixtures correctly kept at default `0.50/0.00/0.50` per the cascade's null-elo skip (user's explicit "no probabilities on TBD vs TBD" requirement)
+- Top international Elo: Spain 2091, Argentina 2039, France 2018, England 1971, Portugal 1932 — matches dev exactly
+- Sample fixture probabilities read sensibly: Mexico 0.56 / 0.34 / 0.10 vs South Africa, Brazil 0.26 = Morocco 0.26 (symmetric on equal-Elo neutral fixture), Germany 0.64 / 0.29 / 0.07 vs Curaçao
+
+#### Cost
+
+- $0/mo recurring (in-process inference, no managed-services upgrade)
+- ~3.6 MB image overhead from `COPY international_match_archive` in [Dockerfile](Dockerfile)
+- The dataset + INT_elo.json are committed to git (3.7 MB + 2.3 MB respectively — same pattern as the PL CSV corpus per CLAUDE.md's "CSV training corpus committed to git" invariant)
+
+#### What's explicitly out of scope (V1)
+
+- Admin UI to mark arbitrary games neutral or override `eloKMultiplier` — DB-level only
+- Euros / Copa / Nations League routing — V1 funnels everything through the WC league row as the meta-pool
+- Per-tournament-stage K-mult derivation from football-data.org payloads (group vs final) — V1 stamps a single 3.0 default at sync time
+- Goalscorer-based features (`goalscorers.csv` is committed but unused by any code path; included for future feature work)
+- Backfilling K-mult on the existing PL corpus (PL stays K=20 flat with `eloKMultiplier=null`)
+
 ---
 
 ## 11. Operational Notes

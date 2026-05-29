@@ -62,6 +62,16 @@ COPY services ./services
 # invoked explicitly by an operator after CD lands.
 COPY scripts ./scripts
 COPY data.json ./data.json
+# International model dataset — read once by the international Elo bootstrap
+# seeder (seeders/20260528000003-seed-teams-from-intl-elo-history.js). Same
+# operator runbook as Tier 24's backfill: invoked via `az containerapp exec
+# --command "npx sequelize-cli db:seed --seed 20260528000003-seed-teams-from-intl-elo-history.js"`
+# once after the deploy lands. ~3.6 MB image overhead; the seeder warn-and-skips
+# if the directory is missing so removing this COPY just disables the
+# one-time bootstrap (LeagueService.upsertFixture would then auto-insert at
+# min(elo)=1500 for every nation as WC fixtures sync — workable but loses
+# the pre-launch FIFA-Elo history).
+COPY international_match_archive ./international_match_archive
 
 # Drop root.
 RUN chown -R app:app /app

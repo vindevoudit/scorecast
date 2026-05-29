@@ -325,15 +325,6 @@ async function main() {
   // -- Step 5: optional probability rewrite for WC fixtures.
   if (rewriteProbs) {
     process.stdout.write('PHASE=rewrite-probs\n');
-    // Load the runtime PredictionService to fire its cascade — same code path
-    // the cron will eventually trigger, but on demand for the initial fill.
-    // Import via createRequire so this .mjs script can pull the CJS module.
-    const { createRequire } = await import('node:module');
-    const require = createRequire(import.meta.url);
-    const prediction = require('../services/PredictionService');
-    // affectedTeams = a set covering every team referenced by every scheduled
-    // WC game. The cascade filters on team name presence; missing teams
-    // (TBD, now deleted) cause that game to be skipped silently.
     const [scheduledGames] = await sequelize.query(
       `SELECT "homeTeam", "awayTeam" FROM games WHERE "leagueId" = :id AND status = 'scheduled'`,
       { replacements: { id: wcId } },
@@ -345,50 +336,70 @@ async function main() {
     }
     process.stdout.write(`AFFECTED_TEAM_COUNT=${teamSet.size}\n`);
 
-    // Pino's INFO logs emit U+25C7 (the diamond bullet) which crashes the
-    // Azure CLI's cp1252 stdout decoder on Windows hosts and terminates the
-    // exec connection mid-flight — killing the async cascade before it
-    // commits. Buffer all stdout/stderr during the cascade phase and emit
-    // only ASCII after it returns. The buffer is dumped to /tmp/cascade.log
-    // inside the container in case the operator needs to inspect it.
-    const origOut = process.stdout.write.bind(process.stdout);
-    const origErr = process.stderr.write.bind(process.stderr);
-    let buffered = '';
-    process.stdout.write = (chunk) => {
-      buffered += String(chunk);
-      return true;
-    };
-    process.stderr.write = (chunk) => {
-      buffered += String(chunk);
-      return true;
-    };
-    let result;
-    let cascadeErr;
-    try {
-      result = await prediction.rePredictFutureFixtures({
-        affectedTeams: [...teamSet],
-        leagueId: wcId,
+    // Spawn the cascade as a subprocess with stdio:pipe so all output
+    // (including pino's fs.write(1, ...) JSON logs in production mode,
+    // which bypasses any process.stdout.write interception) is captured
+    // into THIS script's buffer. We then emit only ASCII to az's stdout.
+    // Same subprocess-isolation pattern as scripts/run-int-seed.mjs.
+    const { spawn } = await import('node:child_process');
+    const { writeFileSync } = await import('node:fs');
+    const cascadeBody = `
+      const ps = require('./services/PredictionService');
+      ps.rePredictFutureFixtures({
+        affectedTeams: ${JSON.stringify([...teamSet])},
+        leagueId: ${JSON.stringify(wcId)},
+      }).then((r) => {
+        process.stdout.write('RESULT_JSON=' + JSON.stringify(r) + '\\n');
+        process.exit(0);
+      }).catch((e) => {
+        process.stdout.write('RESULT_ERROR=' + (e && e.message ? e.message : String(e)) + '\\n');
+        process.exit(1);
       });
-    } catch (e) {
-      cascadeErr = e;
-    } finally {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    }
-    try {
-      const { writeFileSync } = await import('node:fs');
-      writeFileSync('/tmp/cascade.log', buffered);
-    } catch (writeErr) {
-      process.stderr.write(`CASCADE_LOG_WRITE_FAILED=${writeErr.message}\n`);
-    }
-    if (cascadeErr) {
-      process.stdout.write(
-        `CASCADE_EXCEPTION=${String(cascadeErr.message || cascadeErr).replace(/[^ -~]/g, '')}\n`,
-      );
-    } else {
-      process.stdout.write(`REWRITTEN=${result.rewritten} SKIPPED=${result.skipped ?? 0}\n`);
-    }
-    process.stdout.write('CASCADE_LOG=/tmp/cascade.log\n');
+    `;
+    await new Promise((resolveOuter) => {
+      const child = spawn(process.execPath, ['-e', cascadeBody], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
+      });
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (chunk) => {
+        out += chunk.toString();
+      });
+      child.stderr.on('data', (chunk) => {
+        err += chunk.toString();
+      });
+      child.on('exit', (code) => {
+        try {
+          writeFileSync('/tmp/cascade.log', `STDOUT:\n${out}\nSTDERR:\n${err}\nEXIT: ${code}\n`);
+        } catch (writeErr) {
+          process.stderr.write(`CASCADE_LOG_WRITE_FAILED=${writeErr.message}\n`);
+        }
+        // Pull the RESULT_JSON / RESULT_ERROR line out of the child's
+        // stdout. Everything else is pino's JSON noise, dumped to the
+        // cascade log file for inspection.
+        const resultMatch = out.match(/RESULT_JSON=(.+)/);
+        const errorMatch = out.match(/RESULT_ERROR=(.+)/);
+        if (resultMatch) {
+          try {
+            const parsed = JSON.parse(resultMatch[1]);
+            process.stdout.write(
+              `REWRITTEN=${parsed.rewritten} SKIPPED=${parsed.skipped ?? 0}\n`,
+            );
+          } catch (parseErr) {
+            process.stdout.write(`RESULT_PARSE_FAILED=${parseErr.message}\n`);
+          }
+        } else if (errorMatch) {
+          process.stdout.write(
+            `CASCADE_EXCEPTION=${String(errorMatch[1]).replace(/[^ -~]/g, '')}\n`,
+          );
+        } else {
+          process.stdout.write(`CASCADE_NO_RESULT EXIT_CODE=${code}\n`);
+        }
+        process.stdout.write('CASCADE_LOG=/tmp/cascade.log\n');
+        resolveOuter();
+      });
+    });
   } else {
     process.stdout.write('PHASE=rewrite-probs-skipped REASON=no_flag\n');
     process.stdout.write('NEXT_STEP=re-run_with_--rewrite-probs_to_fill_probabilities\n');

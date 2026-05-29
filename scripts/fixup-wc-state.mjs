@@ -272,11 +272,28 @@ async function main() {
       a.lastMatchDate = row.date;
     }
 
+    // Synonym map: football-data.org uses some names that differ from the
+    // martj42 dataset's canonical names. When we find a stuck team whose name
+    // doesn't appear in `state`, fall back to the dataset-side name via this
+    // map and use that team's Elo. The team row's `name` column (the one we
+    // UPDATE) stays at the football-data.org form so the runtime cascade
+    // continues to find it when WC fixtures arrive with those names.
+    //
+    // This is the inverse direction of seeders/reconcileMap.json which maps
+    // dataset names → canonical; here we map canonical (football-data.org) →
+    // dataset names so we can read the seeder-computed Elo.
+    const HISTORY_SYNONYMS = {
+      Czechia: 'Czech Republic',
+      'Bosnia-Herzegovina': 'Bosnia and Herzegovina',
+      'Cape Verde Islands': 'Cape Verde',
+      'Congo DR': 'DR Congo',
+    };
     const stuckNames = stuckTeams.map((t) => t.name);
     let updated = 0;
     let missingFromHistory = 0;
     for (const name of stuckNames) {
-      const s = state.get(name);
+      const lookupName = HISTORY_SYNONYMS[name] || name;
+      const s = state.get(lookupName);
       if (!s) {
         missingFromHistory += 1;
         process.stdout.write(`MISSING_FROM_HISTORY=${String(name).replace(/[^ -~]/g, '')}\n`);

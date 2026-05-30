@@ -18,12 +18,17 @@ async function awardBadge(userId, slug) {
   try {
     await Badge.create({ userId, slug });
     const meta = BADGE_CATALOG.find((b) => b.slug === slug);
+    // Tier 30 Phase 1 — deep-link straight to the Badges sub-tab so the
+    // unlocked badge is on-screen the moment the user clicks. SubTabs
+    // reads `?tab=` on mount; an unknown value would fall back to
+    // ProfileView's `defaultValue='overview'`, so the link is safe even
+    // on a pre-Phase-1 client.
     await NotificationService.notify(
       userId,
       'badge',
       `Badge earned: ${meta?.name || slug}`,
       meta?.description || null,
-      '/?view=profile',
+      '/?view=profile&tab=badges',
     );
     return true;
   } catch (_error) {

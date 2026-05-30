@@ -23,7 +23,7 @@ function UL({ children }) {
 
 function Terms() {
   return (
-    <LegalLayout title="Terms of Service" lastUpdated="May 26, 2026">
+    <LegalLayout title="Terms of Service" lastUpdated="May 28, 2026">
       <P>
         Welcome to Bantryx ("we", "us", "the service"). By creating an account or using the service,
         you agree to these Terms. If you do not agree, please do not use the service.
@@ -99,6 +99,18 @@ function Terms() {
         The Bantryx name, logo, design system, copy, and source code are owned by us. Fixture and
         result data is sourced from third-party providers (currently football-data.org) and is used
         under their terms; we make no proprietary claim to underlying match data.
+      </P>
+      <P>
+        Football data provided by the{' '}
+        <a
+          href="https://www.football-data.org/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent underline hover:text-accent-fg"
+        >
+          Football-Data.org API
+        </a>
+        .
       </P>
 
       <H2>6. Availability and changes</H2>

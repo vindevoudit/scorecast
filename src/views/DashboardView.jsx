@@ -3,7 +3,7 @@ import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { lazyWithReload } from '../lib/lazyWithReload';
 import GamesCalendar from '../components/GamesCalendar';
 import Footer from '../components/Footer';
-import LeaderboardCard, { LeaderboardRow } from '../components/LeaderboardCard';
+import LeaderboardCard from '../components/LeaderboardCard';
 import GroupCard from '../components/GroupCard';
 import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
 import ConfirmModal from '../components/ConfirmModal';
@@ -352,111 +352,27 @@ function DashboardView() {
 
         <section className="space-y-6">
           {view === 'games' ? (
-            // grid-cols-1 forces a `minmax(0, 1fr)` track on mobile so the
-            // GameCards + leaderboard side-panel collapse to viewport width
-            // instead of sizing to their min-content (which overflows at
-            // 320px / iPhone SE).
-            // Fluid UI tier — animate-in on first paint after the conditional
-            // remounts (i.e. every tab switch). 4px slide-from-bottom adds
-            // subtle directionality without slowing the swap.
-            <div className="grid grid-cols-1 gap-4 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
-                  <h2 className="text-2xl font-semibold text-fg">Games</h2>
-                  <p className="mt-2 text-fg-muted">
-                    Pick winners, earn more points for underdog upsets.
-                  </p>
-                  <div className="mt-4">
-                    <GameFiltersBar />
-                  </div>
-                </div>
-
-                {/* Tier 18 Chunk 3 — calendar viewer replaces the previous
-                    Live + Upcoming + Completed-toggle cascade. Day strip +
-                    grouped list keeps the screen scannable when the entire
-                    season is loaded. The `liveGames` / `upcomingGames` /
-                    `completedGames` selectors stay on useGames() for any
-                    future surface that still wants the old buckets. */}
-                <GamesCalendar byDay={byDay} />
-              </div>
-
-              <div className="space-y-4">
-                <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
-                  <h2 className="text-2xl font-semibold text-fg">Live leaderboard</h2>
-                  <p className="mt-2 text-fg-muted">
-                    Track your progress and compare with friends.
-                  </p>
-                  <div className="mt-5 space-y-4">
-                    <div className="rounded-3xl bg-overlay/70 p-4">
-                      <h3 className="text-sm uppercase tracking-[0.24em] text-accent/80">
-                        Overall
-                      </h3>
-                      <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
-                        {leaderboard.overall.length === 0 ? (
-                          <p className="text-sm text-fg-muted">No data yet.</p>
-                        ) : (
-                          leaderboard.overall.map((entry, index) => (
-                            <LeaderboardRow
-                              key={entry.userId}
-                              entry={entry}
-                              rank={index + 1}
-                              isCurrentUser={entry.userId === user?.id}
-                              onSelectUser={openProfile}
-                            />
-                          ))
-                        )}
-                      </div>
-                    </div>
-                    <div className="rounded-3xl bg-overlay/70 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <h3 className="text-sm uppercase tracking-[0.24em] text-accent/80">
-                            Group leaderboard
-                          </h3>
-                          <p className="mt-2 text-sm text-fg-muted">
-                            Select one group to view its ranking.
-                          </p>
-                        </div>
-                        {groups.length > 0 ? (
-                          <label className="sm:w-auto">
-                            <span className="sr-only">Choose group</span>
-                            <select
-                              value={selectedGroupId}
-                              onChange={handleGroupSelection}
-                              className="w-full rounded-2xl border border-default bg-elevated/90 px-4 py-3 text-sm text-fg outline-none transition duration-200 focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:w-auto"
-                            >
-                              {groups.map((group) => (
-                                <option key={group.id} value={group.id}>
-                                  {group.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        ) : (
-                          <p className="text-sm text-fg-muted">
-                            Join or create a group to see member rankings.
-                          </p>
-                        )}
-                      </div>
-                      <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
-                        {leaderboard.group.length === 0 ? (
-                          <p className="text-sm text-fg-muted">No group leaderboard data yet.</p>
-                        ) : (
-                          leaderboard.group.map((entry, index) => (
-                            <LeaderboardRow
-                              key={entry.userId}
-                              entry={entry}
-                              rank={index + 1}
-                              isCurrentUser={entry.userId === user?.id}
-                              onSelectUser={openProfile}
-                            />
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
+            // Phase 0 T29-3 — right-column "Live leaderboard" panel removed
+            // (duplicated the Leaderboard tab + made the calendar narrower).
+            // Calendar fills the full width.
+            <div className="space-y-6 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
+              <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
+                <h2 className="text-2xl font-semibold text-fg">Games</h2>
+                <p className="mt-2 text-fg-muted">
+                  Pick winners, earn more points for underdog upsets.
+                </p>
+                <div className="mt-4">
+                  <GameFiltersBar />
                 </div>
               </div>
+
+              {/* Tier 18 Chunk 3 — calendar viewer replaces the previous
+                  Live + Upcoming + Completed-toggle cascade. Day strip +
+                  grouped list keeps the screen scannable when the entire
+                  season is loaded. The `liveGames` / `upcomingGames` /
+                  `completedGames` selectors stay on useGames() for any
+                  future surface that still wants the old buckets. */}
+              <GamesCalendar byDay={byDay} />
             </div>
           ) : null}
 

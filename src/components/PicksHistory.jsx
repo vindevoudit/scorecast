@@ -271,15 +271,16 @@ function PicksHistory({ picks, games }) {
           ))}
         </div>
         {/* Status filter — native select on <md so 5 pills don't blow up
-            the rail on phones. Visually mirrors the friend dropdown so the
-            two read as siblings. */}
-        <label className="inline-flex min-h-9 items-center gap-2 rounded-full border border-default bg-elevated/80 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg md:hidden">
+            the rail on phones. Phase 0 T29-4 — bg moved to the `<select>`
+            so the native popup inherits readable elevated bg (was
+            transparent → white-on-white in light mode). */}
+        <label className="inline-flex min-h-9 items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg md:hidden">
           <span className="text-fg-muted">Status</span>
           <span className="sr-only">Filter picks</span>
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="bg-transparent text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="rounded-xl border border-default bg-elevated/90 px-3 py-1 text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             {FILTERS.map((f) => (
               <option key={f.id} value={f.id}>
@@ -290,14 +291,14 @@ function PicksHistory({ picks, games }) {
         </label>
         {/* Friend filter (Friends mode only) */}
         {mode === 'friends' ? (
-          <label className="inline-flex min-h-9 items-center gap-2 rounded-full border border-default bg-elevated/80 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-fg">
+          <label className="inline-flex min-h-9 items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg">
             <span className="text-fg-muted">Friend</span>
             <span className="sr-only">Filter by friend</span>
             <select
               value={friendFilter}
               onChange={(e) => setFriendFilter(e.target.value)}
               disabled={friendOptions.length === 0}
-              className="bg-transparent text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+              className="rounded-xl border border-default bg-elevated/90 px-3 py-1 text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
             >
               <option value="all">All friends</option>
               {friendOptions.map((opt) => (

@@ -302,7 +302,7 @@ function PicksHistory({ picks, games }) {
     },
     {
       value: 'friends',
-      label: "Friends'",
+      label: 'Friends',
       content: (
         <FriendsPicksPanel
           friendsPicks={friendsPicks}
@@ -319,7 +319,7 @@ function PicksHistory({ picks, games }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-semibold text-fg">My Picks</h2>
+            <h2 className="text-2xl font-semibold text-fg">Picks</h2>
             {isScoped ? (
               <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
                 Filtered

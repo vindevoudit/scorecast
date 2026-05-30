@@ -105,7 +105,7 @@ test('game CRUD: admin creates, then deletes a game via GameManager', async ({ p
   // product fix would be Cache-Control: no-store on /api/games — tracked
   // separately in the PR description.
   await page.reload();
-  await page.getByRole('tab', { name: /Manage/ }).click();
+  await page.getByRole('tab', { name: /^Admin$/ }).click();
   await expect(page.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
     timeout: 20_000,
   });
@@ -126,7 +126,7 @@ test('game CRUD: admin creates, then deletes a game via GameManager', async ({ p
   // Same cache issue strikes again on the post-delete refresh — the DOM
   // still shows the row from cache. Reload to force a fresh /api/games.
   await page.reload();
-  await page.getByRole('tab', { name: /Manage/ }).click();
+  await page.getByRole('tab', { name: /^Admin$/ }).click();
   await expect(page.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
     timeout: 20_000,
   });

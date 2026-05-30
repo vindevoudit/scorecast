@@ -147,23 +147,28 @@ test.describe('mobile screenshots', () => {
 
   test('authed - groups', async ({ page }) => {
     await loginMobile(page, USERS.alice);
-    await openSidebarTab(page, /Groups My Groups/);
-    await page.getByRole('heading', { name: 'Create a new group' }).waitFor({ timeout: 10_000 });
+    // Phase 1 follow-up — sidebar kicker dropped; entry is exactly "Groups".
+    await openSidebarTab(page, /^Groups$/);
+    // GroupsView renders a level-2 "Groups" header above the sub-tabs.
+    await page.getByRole('heading', { name: 'Groups', level: 2 }).waitFor({ timeout: 10_000 });
     await shot(page, '09-authed-groups');
   });
 
   test('authed - leaderboard', async ({ page }) => {
     await loginMobile(page, USERS.alice);
-    await openSidebarTab(page, /Leaderboards Rankings/);
+    await openSidebarTab(page, /^Leaderboards$/);
+    // LeaderboardView's Overall sub-tab is default; its LeaderboardCard
+    // renders the "Overall Leaderboard" h2.
     await page.getByRole('heading', { name: 'Overall Leaderboard' }).waitFor({ timeout: 10_000 });
     await shot(page, '10-authed-leaderboard');
   });
 
   test('authed - profile', async ({ page }) => {
     await loginMobile(page, USERS.alice);
-    await openSidebarTab(page, /Profile Your Stats/);
+    await openSidebarTab(page, /^Profile$/);
     // Profile heading is the user's display name / username, not literal
-    // "Profile". The "Total points" stat block is a stable sentinel.
+    // "Profile". The "Total points" stat block (rendered by the Overview
+    // sub-tab, the SubTabs default) is a stable sentinel.
     await page.getByText('Total points').first().waitFor({ timeout: 10_000 });
     await shot(page, '11-authed-profile');
   });

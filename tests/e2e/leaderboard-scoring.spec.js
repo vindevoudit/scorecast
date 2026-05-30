@@ -106,9 +106,9 @@ test('probability-weighted scoring: underdog wins outscore favorite wins; cache 
     expectPoints(lb.overall, USERS.alice.username, EXPECTED_ALICE_POINTS);
     expectPoints(lb.overall, USERS.bob.username, EXPECTED_BOB_POINTS);
 
-    // --- Phase 3: UI verifies the same totals via the Rankings tab. ---
+    // --- Phase 3: UI verifies the same totals via the Leaderboards tab. ---
     await loginViaUI(page, USERS.alice);
-    await page.getByRole('tab', { name: /Rankings/ }).click();
+    await page.getByRole('tab', { name: /^Leaderboards$/ }).click();
 
     // Exclude `[aria-haspopup]` so we skip the UserMenu trigger in the top
     // bar (also contains the logged-in username), and target the actual

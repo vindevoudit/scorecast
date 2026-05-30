@@ -41,7 +41,7 @@ test('register, pick a game, admin sets result, leaderboard reflects points', as
   const adminPage = await adminContext.newPage();
   await loginViaUI(adminPage, USERS.admin);
 
-  await adminPage.getByRole('tab', { name: /Manage/ }).click();
+  await adminPage.getByRole('tab', { name: /^Admin$/ }).click();
   // AdminPanel is lazy — wait for the Games heading inside it.
   await expect(adminPage.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
     timeout: 20_000,
@@ -67,7 +67,7 @@ test('register, pick a game, admin sets result, leaderboard reflects points', as
   // can't intercept. Real product fix would be `Cache-Control: no-store`
   // on /api/games; tracked separately, see PR description.
   await adminPage.reload();
-  await adminPage.getByRole('tab', { name: /Manage/ }).click();
+  await adminPage.getByRole('tab', { name: /^Admin$/ }).click();
   await expect(adminPage.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({
     timeout: 20_000,
   });
@@ -83,7 +83,9 @@ test('register, pick a game, admin sets result, leaderboard reflects points', as
   const verifyPage = await verifyContext.newPage();
   await loginViaUI(verifyPage, { username: newUser.username, password: newUser.password });
 
-  await verifyPage.getByRole('tab', { name: /Rankings/ }).click();
+  // Phase 1 follow-up — sidebar entry is now "Leaderboards" (was the
+  // "Rankings" label paired with kicker "Leaderboards").
+  await verifyPage.getByRole('tab', { name: /^Leaderboards$/ }).click();
 
   // LeaderboardRow renders as a button when onSelectUser is wired (which the
   // app always does). Exclude `[aria-haspopup]` so we skip the UserMenu

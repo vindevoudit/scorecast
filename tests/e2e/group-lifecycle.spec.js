@@ -13,8 +13,11 @@ const { closestCard } = require('./helpers/selectors');
 const { USERS } = require('./fixtures/data');
 
 async function openGroupsTab(page) {
+  // Phase 1 follow-up — sidebar kicker dropped; the Groups entry is
+  // now exactly "Groups" (was kicker "Groups" + label "My Groups").
+  // The GroupsView's "My Groups" sub-tab is distinct from the sidebar.
   await page
-    .getByRole('tab', { name: /My Groups/ })
+    .getByRole('tab', { name: /^Groups$/ })
     .first()
     .click();
   // The GroupsView card heading is the level-2 "Groups".

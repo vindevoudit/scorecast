@@ -33,8 +33,13 @@ test.afterAll(async () => {
 });
 
 async function openFriendsTab(page) {
+  // Phase 1 follow-up — sidebar kicker dropped; the Friends entry is now
+  // a single-label "Friends" (was the "Social Friends" kicker+label).
+  // `.first()` picks the sidebar entry; sub-tab "Friends" labels in
+  // PicksHistory + LeaderboardView don't collide here because we're on
+  // a different view (the Friends view doesn't render those).
   await page
-    .getByRole('tab', { name: /Social Friends/ })
+    .getByRole('tab', { name: /^Friends$/ })
     .first()
     .click();
   await expect(page.getByRole('heading', { name: 'Friends', level: 2 })).toBeVisible({

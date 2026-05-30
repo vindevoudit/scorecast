@@ -225,7 +225,7 @@ function Help() {
         <li>
           <strong>Filter by league and season</strong>: use the filter bar at the top to scope the
           rankings to, say, Premier League 2025/26 only. The same filter also scopes your{' '}
-          <strong>My Picks</strong> stats.
+          <strong>Picks</strong> stats.
         </li>
       </UL>
       <P>
@@ -281,7 +281,7 @@ function Help() {
         </li>
         <li>
           <strong>See their picks</strong>: open any match card or the{' '}
-          <strong>My Picks → Friends</strong> tab to see what your friends picked on each game.
+          <strong>Picks → Friends</strong> tab to see what your friends picked on each game.
         </li>
       </UL>
       <P>Friend requests work even if the other person has a private profile.</P>

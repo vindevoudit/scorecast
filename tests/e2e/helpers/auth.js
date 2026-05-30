@@ -2,12 +2,13 @@
 
 const { expect } = require('@playwright/test');
 
-// Post-login sentinel: the Sidebar renders a `role="tab"` for "Games" with
-// the accessible name "Games Upcoming Matches" (kicker + label). Always
-// present on the desktop viewport Playwright runs at; also present inside
-// the mobile drawer when open. Replaces the old "Logout" button sentinel
-// from the horizontal top bar (now relocated into the UserMenu dropdown).
-const DASHBOARD_SENTINEL = /Upcoming Matches/;
+// Post-login sentinel: the Sidebar renders a `role="tab"` for the Matches
+// view with accessible name "Matches" (single label; the Phase 1 follow-up
+// dropped kickers from the sidebar). Always present on the desktop viewport
+// Playwright runs at; also present inside the mobile drawer when open.
+// Replaces the old "Logout" button sentinel from the horizontal top bar
+// (now relocated into the UserMenu dropdown).
+const DASHBOARD_SENTINEL = /^Matches$/;
 
 // Unauthenticated visitors land on `<Landing />` first. Both "Get started"
 // and "Sign in" CTAs reveal the same login + register grid; we click

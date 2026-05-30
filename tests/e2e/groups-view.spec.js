@@ -1,8 +1,11 @@
 'use strict';
 
 // Tier 30 Phase 1 Chunk 1.3 — GroupsView surface invariants.
+// Phase 1 follow-up — sidebar kicker dropped; sidebar entry "Groups"
+// (was "My Groups" with kicker "Groups"). The GroupsView's "My Groups"
+// sub-tab is now distinct from the sidebar label.
 //
-//   1. Sidebar "My Groups" entry opens GroupsView with three sub-tabs
+//   1. Sidebar "Groups" entry opens GroupsView with three sub-tabs
 //      (My Groups / Discover / Invites).
 //   2. `+ New group` button opens CreateGroupModal; submission creates the
 //      group and the new card appears in My Groups.
@@ -15,8 +18,6 @@ const { loginViaUI } = require('./helpers/auth');
 const { apiLogin } = require('./helpers/api');
 const { USERS } = require('./fixtures/data');
 
-// Track created groups so afterEach can wipe them — keeps the dashboard's
-// My Groups list bounded across this file's runs.
 const createdGroupIds = [];
 
 test.afterEach(async () => {
@@ -32,17 +33,22 @@ test.afterEach(async () => {
   }
 });
 
-test('GroupsView opens with My Groups default; sub-tabs render', async ({ page }) => {
-  await loginViaUI(page, USERS.alice);
+async function openGroupsSidebar(page) {
   await page
-    .getByRole('tab', { name: /My Groups/ })
+    .getByRole('tab', { name: /^Groups$/ })
     .first()
     .click();
-
-  // Card heading is the level-2 "Groups"; sub-tabs render below.
   await expect(page.getByRole('heading', { name: 'Groups', level: 2 })).toBeVisible({
     timeout: 10_000,
   });
+}
+
+test('GroupsView opens with My Groups default; sub-tabs render', async ({ page }) => {
+  await loginViaUI(page, USERS.alice);
+  await openGroupsSidebar(page);
+
+  // Sub-tabs render. Triple of My Groups / Discover / Invites — sub-tab
+  // names are unique within the page so no scoping needed.
   await expect(page.getByRole('tab', { name: /^My Groups/ })).toBeVisible();
   await expect(page.getByRole('tab', { name: /^Discover$/ })).toBeVisible();
   await expect(page.getByRole('tab', { name: /^Invites/ })).toBeVisible();
@@ -50,10 +56,7 @@ test('GroupsView opens with My Groups default; sub-tabs render', async ({ page }
 
 test('+ New group opens CreateGroupModal; submission creates a group', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await page
-    .getByRole('tab', { name: /My Groups/ })
-    .first()
-    .click();
+  await openGroupsSidebar(page);
 
   // Click the pill → modal opens with the create form.
   await page.getByRole('button', { name: '+ New group', exact: true }).click();
@@ -65,15 +68,12 @@ test('+ New group opens CreateGroupModal; submission creates a group', async ({ 
   await page.locator('#create-group-name').fill(groupName);
   await dialog.getByRole('button', { name: 'Create group', exact: true }).click();
 
-  // Modal closes on success; the new group appears as a GroupCard in
-  // the My Groups sub-tab.
   await expect(dialog).not.toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('heading', { name: groupName, level: 2 })).toBeVisible({
     timeout: 10_000,
   });
 
-  // Capture the id so afterEach can clean up. Reverse-engineer it via the
-  // /api/groups payload — keeps the test self-contained.
+  // Capture the id so afterEach can clean up.
   const authed = await apiLogin(USERS.alice);
   try {
     const res = await authed.get('/api/groups');
@@ -87,10 +87,7 @@ test('+ New group opens CreateGroupModal; submission creates a group', async ({ 
 
 test('Sub-tabs URL syncs via ?tab=', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await page
-    .getByRole('tab', { name: /My Groups/ })
-    .first()
-    .click();
+  await openGroupsSidebar(page);
 
   // Click Discover → URL flips to ?tab=discover; click Invites → ?tab=invites.
   await page
@@ -110,17 +107,16 @@ test('anon visitor: defaults to Discover; My Groups + Invites gate via InlineGat
     .getByRole('button', { name: /browse as a guest/i })
     .first()
     .click();
-  // Anon side bar shows 3 entries (Games / Groups / Rankings). Click Groups.
+  // Anon sidebar shows 3 entries (Matches / Groups / Leaderboards). Click Groups.
   await page
-    .getByRole('tab', { name: /My Groups/ })
+    .getByRole('tab', { name: /^Groups$/ })
     .first()
     .click();
   await expect(page.getByRole('heading', { name: 'Groups', level: 2 })).toBeVisible({
     timeout: 10_000,
   });
 
-  // Discover is the default for anon — confirm the heading copy ("Public
-  // groups that anyone can join…") is visible.
+  // Discover is the default for anon — confirm the heading copy.
   await expect(page.getByText(/Public groups that anyone can join/i).first()).toBeVisible();
 
   // Switch to My Groups → InlineGatePanel "create or join a group" surfaces.

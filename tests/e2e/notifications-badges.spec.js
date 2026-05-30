@@ -127,8 +127,10 @@ test('notification click navigates via deep-link (badge → profile tab, pick-sc
   const firstPickRow = page.getByRole('button').filter({ hasText: /Badge earned: First Pick/i });
   await firstPickRow.click();
 
-  // Sidebar tab name comes from `${kicker} ${label}` → "Profile Your Stats".
-  const profileTab = page.getByRole('tab', { name: /Your Stats/i });
+  // Phase 1 follow-up — sidebar kicker dropped; the Profile entry is
+  // now a single-label "Profile". `.first()` picks the sidebar entry
+  // (sub-tab labels Overview/Badges/Activity don't collide here).
+  const profileTab = page.getByRole('tab', { name: /^Profile$/ }).first();
   await expect(profileTab).toHaveAttribute('aria-selected', 'true', { timeout: 5_000 });
 
   // Now click a pick-scored notification → `?gameId=<id>` consumer flips
@@ -141,7 +143,9 @@ test('notification click navigates via deep-link (badge → profile tab, pick-sc
     .filter({ hasText: new RegExp(`Your pick on ${GAMES.lions.homeTeam}`, 'i') });
   await pickScoredRow.click();
 
-  const gamesTab = page.getByRole('tab', { name: /Upcoming Matches/i });
+  // Phase 1 follow-up — sidebar entry is now "Matches" (was "Upcoming
+  // Matches" with kicker "Games").
+  const gamesTab = page.getByRole('tab', { name: /^Matches$/ }).first();
   await expect(gamesTab).toHaveAttribute('aria-selected', 'true', { timeout: 5_000 });
 
   // Sanity — the consumed query params (`view`, `gameId`) are stripped from

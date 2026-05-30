@@ -4,21 +4,29 @@
 // Groups / Friends). The previous side-by-side two-card layout collapses
 // into a SubTabs primitive with the Friends sub-tab filtering Overall
 // rows to the viewer + accepted-friend set, re-ranked locally.
+// Phase 1 follow-up — sidebar entry is now "Leaderboards" (kicker dropped);
+// sub-tab labels "Groups" + "Friends" collide with sidebar entries, so
+// every sub-tab query is scoped to the `[aria-label="Leaderboard sections"]`
+// tablist that SubTabs renders.
 
 const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
 const { USERS } = require('./fixtures/data');
 
+function leaderboardTablist(page) {
+  return page.locator('[role="tablist"][aria-label="Leaderboard sections"]');
+}
+
 test('Leaderboards sub-tabs render + URL syncs on click', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
   await page
-    .getByRole('tab', { name: /Rankings/ })
+    .getByRole('tab', { name: /^Leaderboards$/ })
     .first()
     .click();
 
-  const overallTab = page.getByRole('tab', { name: 'Overall', exact: true });
-  const groupsTab = page.getByRole('tab', { name: 'Groups', exact: true });
-  const friendsTab = page.getByRole('tab', { name: 'Friends', exact: true });
+  const overallTab = leaderboardTablist(page).getByRole('tab', { name: 'Overall', exact: true });
+  const groupsTab = leaderboardTablist(page).getByRole('tab', { name: 'Groups', exact: true });
+  const friendsTab = leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true });
 
   await expect(overallTab).toBeVisible({ timeout: 10_000 });
   await expect(groupsTab).toBeVisible();
@@ -41,35 +49,25 @@ test('deep-link /?view=leaderboard&tab=friends lands on Friends sub-tab', async 
   await loginViaUI(page, USERS.alice);
   await page.goto('/?view=leaderboard&tab=friends');
 
-  // The card title in the Friends sub-tab is "Friends" (re-using
-  // LeaderboardCard with a Friends title).
-  await expect(page.getByRole('tab', { name: 'Friends', exact: true })).toHaveAttribute(
-    'data-state',
-    'active',
-    { timeout: 10_000 },
-  );
+  await expect(
+    leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true }),
+  ).toHaveAttribute('data-state', 'active', { timeout: 10_000 });
   // `view` is stripped; `tab` survives.
   await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();
   await expect.poll(() => new URL(page.url()).searchParams.get('tab')).toBe('friends');
 });
 
 test('Friends sub-tab empty state for users with no accepted friends', async ({ page }) => {
-  // Bob has no accepted friends in the default seed state (leaderboard-
-  // scoring's beforeEach clears them) — so the Friends sub-tab should
-  // render the empty-state card. Bob's row IS in the leaderboard so the
-  // empty state must be triggered by the "no accepted friends" branch.
   await loginViaUI(page, USERS.bob);
   await page
-    .getByRole('tab', { name: /Rankings/ })
+    .getByRole('tab', { name: /^Leaderboards$/ })
     .first()
     .click();
-  await page.getByRole('tab', { name: 'Friends', exact: true }).click();
+  await leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true }).click();
 
-  // The empty state title appears in EmptyState text; bob still sees his
-  // OWN row if he has any points, so the empty branch fires only when
-  // friendUserIds is empty AND bob has no entry. With bob's userId added
-  // to the set, his row would be visible. Spec accepts either case:
-  // assert that either the empty state OR bob's own row is visible.
+  // Either the empty state title shows (bob has no entry in the leaderboard
+  // either) OR bob's own row appears (bob has points but no friends), per
+  // the FriendsLeaderboardSection's two branches.
   const emptyOrSelf = page.locator(
     '[role="heading"][aria-level="3"]:has-text("No friends on the leaderboard yet"), button:not([aria-haspopup]):has-text("' +
       USERS.bob.username +

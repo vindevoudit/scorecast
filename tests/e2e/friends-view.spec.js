@@ -1,8 +1,11 @@
 'use strict';
 
 // Tier 30 Phase 1 Chunk 1.2 — FriendsView surface invariants.
+// Phase 1 follow-up — sidebar kicker dropped; the Friends entry is
+// labelled exactly "Friends" now. Sidebar sub-tabs use distinct labels
+// (All / Requests / Find people) so no scoping needed for those.
 //
-//   1. Sidebar entry "Social Friends" navigates to the new FriendsView.
+//   1. Sidebar entry "Friends" navigates to the new FriendsView.
 //   2. All 3 sub-tabs render (All / Requests / Find people) + URL syncs
 //      via `?tab=<id>`.
 //   3. Anon visitors do NOT see the Friends sidebar entry.
@@ -32,10 +35,10 @@ test.afterAll(async () => {
   if (aliceId && bobId) await clearFriendships([aliceId, bobId]);
 });
 
-test('Sidebar → Social Friends opens FriendsView with All sub-tab default', async ({ page }) => {
+test('Sidebar → Friends opens FriendsView with All sub-tab default', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
   await page
-    .getByRole('tab', { name: /Social Friends/ })
+    .getByRole('tab', { name: /^Friends$/ })
     .first()
     .click();
   // FriendsView card heading is the level-2 "Friends".
@@ -50,7 +53,7 @@ test('Sidebar → Social Friends opens FriendsView with All sub-tab default', as
 test('Friends sub-tabs render + ?tab= URL syncs on click', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
   await page
-    .getByRole('tab', { name: /Social Friends/ })
+    .getByRole('tab', { name: /^Friends$/ })
     .first()
     .click();
 
@@ -80,10 +83,13 @@ test('anon visitors do NOT see the Friends sidebar entry', async ({ page }) => {
     .first()
     .click();
 
-  // Anon sidebar should NOT include the Friends tab.
-  await expect(page.getByRole('tab', { name: /Social Friends/ })).toHaveCount(0);
-  // Other anon tabs remain (Games / Groups / Leaderboards). Spot-check Games.
-  await expect(page.getByRole('tab', { name: /Upcoming Matches/ }).first()).toBeVisible();
+  // Anon sidebar should NOT include the Friends tab. Anon has 3 entries
+  // (Matches / Groups / Leaderboards); the sidebar tablist label is
+  // "Dashboard sections".
+  const sidebarTablist = page.locator('[role="tablist"][aria-label="Dashboard sections"]');
+  await expect(sidebarTablist.getByRole('tab', { name: 'Friends', exact: true })).toHaveCount(0);
+  // Other anon tabs remain — spot-check Matches.
+  await expect(sidebarTablist.getByRole('tab', { name: 'Matches', exact: true })).toBeVisible();
 });
 
 test('legacy /?view=groups (no groupId) redirects to FriendsView', async ({ page }) => {

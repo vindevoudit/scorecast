@@ -11,7 +11,12 @@
 const { expect } = require('@playwright/test');
 
 async function openAdminTab(page) {
-  await page.getByRole('tab', { name: /Manage/ }).click();
+  // Phase 1 follow-up — sidebar kickers dropped; admin entry is now
+  // labelled "Admin" (was previously "Manage" with kicker "Admin").
+  // The sidebar tab and the GameManager's role="tab" sub-tab don't
+  // collide because the SubTab is exactly "Games" + the sidebar is
+  // exactly "Admin".
+  await page.getByRole('tab', { name: /^Admin$/ }).click();
   // SubTabs.defaultValue = 'games' — the Games heading is the stable
   // sentinel that the GameManager has hydrated.
   await expect(page.getByRole('heading', { name: 'Games', level: 3 })).toBeVisible({

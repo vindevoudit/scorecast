@@ -37,16 +37,18 @@ function LazyFallback({ label = 'Loading…' }) {
 // Tier 30 Phase 1 — sidebar gets a 7th item: Friends. Tab id `'friends'`
 // resolves to FriendsView (formerly hosted inside the Groups view's left
 // column). Order matches the user-goal hierarchy in the plan:
-// Matches → My Picks → Leaderboards → Friends → Groups → Profile → Admin.
+// Matches → Picks → Leaderboards → Friends → Groups → Profile → Admin.
+// Phase 1 follow-up — kickers dropped; each entry renders a single
+// label. View ids stay stable so deep-link contracts hold.
 const BASE_TABS = [
-  { id: 'games', kicker: 'Games', label: 'Upcoming Matches' },
-  { id: 'mypicks', kicker: 'My Picks', label: 'Your History' },
-  { id: 'leaderboard', kicker: 'Leaderboards', label: 'Rankings' },
-  { id: 'friends', kicker: 'Social', label: 'Friends' },
-  { id: 'groups', kicker: 'Groups', label: 'My Groups' },
-  { id: 'profile', kicker: 'Profile', label: 'Your Stats' },
+  { id: 'games', label: 'Matches' },
+  { id: 'mypicks', label: 'Picks' },
+  { id: 'leaderboard', label: 'Leaderboards' },
+  { id: 'friends', label: 'Friends' },
+  { id: 'groups', label: 'Groups' },
+  { id: 'profile', label: 'Profile' },
 ];
-const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
+const ADMIN_TAB = { id: 'admin', label: 'Admin' };
 
 // Tier 11 Chunk 2 — DashboardView tokenized. BANTRYX wordmark moved to the
 // `text-shadow-brand-glow` utility; pill buttons in the top utility bar

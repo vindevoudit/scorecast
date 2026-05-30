@@ -86,14 +86,16 @@ function CloseIcon(props) {
 
 function NavItem({ tab, active, collapsed, onSelect }) {
   const Icon = ICONS[tab.id] || ICONS.profile;
-  const accessibleName = `${tab.kicker} ${tab.label}`;
+  // Tier 30 Phase 1 follow-up — kicker removed. Sidebar entries render
+  // a single label per item. Playwright contracts switch from
+  // `${kicker} ${label}` accessible name to just `label`.
   return (
     <button
       role="tab"
       aria-selected={active}
       aria-current={active ? 'page' : undefined}
       onClick={() => onSelect(tab.id)}
-      title={collapsed ? accessibleName : undefined}
+      title={collapsed ? tab.label : undefined}
       className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         active ? 'bg-accent/10 text-fg' : 'text-fg hover:bg-overlay/60 hover:text-fg'
       } ${collapsed ? 'justify-center' : ''}`}
@@ -105,11 +107,10 @@ function NavItem({ tab, active, collapsed, onSelect }) {
         />
       ) : null}
       <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-      <span className={`min-w-0 flex-1 ${collapsed ? 'sr-only' : ''}`}>
-        <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-fg-muted">
-          {tab.kicker}
-        </span>
-        <span className="mt-0.5 block truncate text-sm font-semibold">{tab.label}</span>
+      <span
+        className={`min-w-0 flex-1 truncate text-sm font-semibold ${collapsed ? 'sr-only' : ''}`}
+      >
+        {tab.label}
       </span>
     </button>
   );

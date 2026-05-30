@@ -5,24 +5,31 @@
 // share, and the filter rail (Status + League/Season) lifted above the
 // SubTabs since both filters apply to both modes. The Friend dropdown
 // stays inside the Friends sub-tab content.
+// Phase 1 follow-up — sidebar entry is now "Picks" (was "Your History"
+// with kicker "My Picks"); the Friends sub-tab dropped its apostrophe.
+// Sub-tab "Friends" collides with the sidebar "Friends" entry so we
+// scope every sub-tab query to the SubTabs tablist `aria-label`.
 
 const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
 const { USERS } = require('./fixtures/data');
 
+function picksTablist(page) {
+  return page.locator('[role="tablist"][aria-label="Pick source"]');
+}
+
 test('PicksHistory mounts Mine / Friends sub-tabs; URL syncs', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
   await page
-    .getByRole('tab', { name: /Your History/ })
+    .getByRole('tab', { name: /^Picks$/ })
     .first()
     .click();
-  await expect(page.getByRole('heading', { name: 'My Picks', level: 2 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Picks', level: 2 })).toBeVisible({
     timeout: 10_000,
   });
 
-  // SubTabs renders both sub-tab triggers as Radix Tabs (role="tab").
-  const mineTab = page.getByRole('tab', { name: 'Mine', exact: true });
-  const friendsTab = page.getByRole('tab', { name: "Friends'", exact: true });
+  const mineTab = picksTablist(page).getByRole('tab', { name: 'Mine', exact: true });
+  const friendsTab = picksTablist(page).getByRole('tab', { name: 'Friends', exact: true });
   await expect(mineTab).toBeVisible();
   await expect(friendsTab).toBeVisible();
   // Mine is the default — SubTabs.defaultValue.
@@ -42,10 +49,10 @@ test('PicksHistory mounts Mine / Friends sub-tabs; URL syncs', async ({ page }) 
 test('Status filter applies to both Mine and Friends', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
   await page
-    .getByRole('tab', { name: /Your History/ })
+    .getByRole('tab', { name: /^Picks$/ })
     .first()
     .click();
-  await expect(page.getByRole('heading', { name: 'My Picks', level: 2 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Picks', level: 2 })).toBeVisible({
     timeout: 10_000,
   });
 
@@ -55,7 +62,7 @@ test('Status filter applies to both Mine and Friends', async ({ page }) => {
   await winsPill.click();
   await expect(winsPill).toHaveAttribute('aria-selected', 'true');
   // Switch sub-tabs and confirm Wins is still active.
-  await page.getByRole('tab', { name: "Friends'", exact: true }).click();
+  await picksTablist(page).getByRole('tab', { name: 'Friends', exact: true }).click();
   await expect(winsPill).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -63,13 +70,12 @@ test('Deep-link /?view=mypicks&tab=friends lands on Friends sub-tab', async ({ p
   await loginViaUI(page, USERS.alice);
   await page.goto('/?view=mypicks&tab=friends');
 
-  await expect(page.getByRole('heading', { name: 'My Picks', level: 2 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Picks', level: 2 })).toBeVisible({
     timeout: 10_000,
   });
-  await expect(page.getByRole('tab', { name: "Friends'", exact: true })).toHaveAttribute(
-    'data-state',
-    'active',
-  );
+  await expect(
+    picksTablist(page).getByRole('tab', { name: 'Friends', exact: true }),
+  ).toHaveAttribute('data-state', 'active');
   // `view` is stripped by consumeDeepLinks; `tab` survives as SubTabs' URL
   // writer key.
   await expect.poll(() => new URL(page.url()).searchParams.get('view')).toBeNull();

@@ -20,12 +20,12 @@ test.afterEach(async () => {
   await setUserPassword(USERS.alice.id, USERS.alice.password);
 });
 
-// Open the Profile tab from the dashboard's left sidebar.
-async function openProfileTab(page) {
-  await page
-    .getByRole('tab', { name: /Profile/i })
-    .first()
-    .click();
+// Tier 30 Phase 1 Chunk 1.1 — ChangePasswordPanel moved from Profile tab
+// to Settings → Account sub-tab. Open via UserMenu → Settings; Account
+// is the default sub-tab so the panel mounts immediately.
+async function openSettingsAccount(page) {
+  await page.locator('[aria-haspopup="menu"]:visible').click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { level: 3, name: /^Password$/ }).first()).toBeVisible({
     timeout: 10_000,
   });
@@ -33,7 +33,7 @@ async function openProfileTab(page) {
 
 test('ChangePasswordPanel — expand + show/hide + happy path', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
 
   // Collapsed state shows the "Change password" button.
   const expandBtn = page.getByRole('button', { name: 'Change password' });
@@ -65,7 +65,7 @@ test('ChangePasswordPanel — expand + show/hide + happy path', async ({ page })
 
 test('ChangePasswordPanel — confirm-mismatch surfaces inline error', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
   await page.getByRole('button', { name: 'Change password' }).click();
 
   await page.locator('#change-password-current').fill(USERS.alice.password);
@@ -79,7 +79,7 @@ test('ChangePasswordPanel — confirm-mismatch surfaces inline error', async ({ 
 
 test('ChangePasswordPanel — wrong current password surfaces server error', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
   await page.getByRole('button', { name: 'Change password' }).click();
 
   await page.locator('#change-password-current').fill('definitely-wrong');

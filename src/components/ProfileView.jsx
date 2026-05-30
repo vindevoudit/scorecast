@@ -1,40 +1,21 @@
-// Tier 11 Chunk 2 — ProfileView tokenized. ThemeToggle is mounted in the
-// "Account" footer for the editable (own-profile) view so users can pick
-// System / Light / Dark.
+// Tier 11 Chunk 2 — ProfileView tokenized.
+// Tier 30 Phase 1 Chunk 1.1 — Account/Appearance/Notifications/Privacy
+// panels moved to SettingsView (reached via UserMenu → Settings). The
+// inline displayName/bio edit form is now an EditProfileModal triggered
+// by the "Edit profile" button. ProfileView is read-mostly: identity +
+// stats + badges + recent picks.
 
 import { useState } from 'react';
 import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
-import ChangePasswordPanel from './ChangePasswordPanel';
-import ChangeEmailPanel from './ChangeEmailPanel';
-import ThemeToggle from './ThemeToggle';
-import PushSettingsPanel from './PushSettingsPanel';
-import { useAuth } from '../hooks/useAuth';
+import EditProfileModal from './EditProfileModal';
 import { useData } from '../hooks/useData';
 import { displayTeamName } from '../utils/teamNames';
-import { Badge, Button, Input, Radio, Textarea } from './ui';
+import { Badge, Button } from './ui';
 
 // Tier 22 — TwoFactorSetup was removed. See routes/auth.js header for the
 // revival recipe; this file's diff in the removal commit shows the original
 // mount + handler wiring.
-
-const VISIBILITY_OPTIONS = [
-  {
-    value: 'public',
-    label: 'Public',
-    description: 'Anyone can view your profile, picks, and badges.',
-  },
-  {
-    value: 'friends',
-    label: 'Friends only',
-    description: 'Only accepted friends see your profile. Leaderboard rank stays visible.',
-  },
-  {
-    value: 'private',
-    label: 'Private',
-    description: 'Only you (and admins) see your profile. Leaderboard rank stays visible.',
-  },
-];
 
 function formatDate(value) {
   return new Date(value).toLocaleString([], { dateStyle: 'medium' });
@@ -65,12 +46,9 @@ function friendButtonProps(friendStatus) {
 }
 
 function ProfileView({ profile, onFriendAction, busy, editable }) {
-  const { user, handleChangePassword, handleChangeEmail, handleResendVerification } = useAuth();
   const { handleSaveProfile: onSaveProfile } = useData();
 
-  const [editing, setEditing] = useState(false);
-  const [displayName, setDisplayName] = useState(profile?.displayName || '');
-  const [bio, setBio] = useState(profile?.bio || '');
+  const [editOpen, setEditOpen] = useState(false);
 
   if (!profile) return null;
 
@@ -78,20 +56,10 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
   const friendBtn = friendButtonProps(profile.friendStatus);
   const showEdit = editable && profile.friendStatus === 'self';
 
-  const startEdit = () => {
-    setDisplayName(profile.displayName || '');
-    setBio(profile.bio || '');
-    setEditing(true);
-  };
-
-  const submitEdit = async (event) => {
-    event.preventDefault();
+  const submitEdit = async (payload) => {
     if (!onSaveProfile) return;
-    await onSaveProfile({
-      displayName: displayName.trim(),
-      bio: bio.trim(),
-    });
-    setEditing(false);
+    await onSaveProfile(payload);
+    setEditOpen(false);
   };
 
   return (
@@ -118,8 +86,8 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {showEdit && !editing ? (
-            <Button variant="secondary" onClick={startEdit}>
+          {showEdit ? (
+            <Button variant="secondary" onClick={() => setEditOpen(true)}>
               Edit profile
             </Button>
           ) : null}
@@ -137,41 +105,23 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
         </div>
       </div>
 
-      {editing ? (
-        <form onSubmit={submitEdit} className="space-y-3 rounded-3xl bg-overlay/70 p-4">
-          <Input
-            label="Display name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            maxLength={60}
-            placeholder={profile.username}
-          />
-          <div>
-            <Textarea
-              label="Bio"
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              maxLength={280}
-              rows={3}
-              placeholder="Tell people who you are…"
-            />
-            <span className="mt-1 block text-right text-xs tabular-nums text-fg-subtle">
-              {bio.length} / 280
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={busy}>
-              Save
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : profile.bio ? (
+      {/* Bio sits below the header strip; edit happens in the modal so
+          the surface stays read-mostly. */}
+      {profile.bio ? (
         <p className="whitespace-pre-wrap rounded-3xl bg-overlay/70 p-4 text-sm text-fg">
           {profile.bio}
         </p>
+      ) : null}
+
+      {/* Modal mounts unconditionally so its open/close animates cleanly;
+          Radix portal only renders Content while `open` is true. */}
+      {showEdit ? (
+        <EditProfileModal
+          open={editOpen}
+          profile={profile}
+          onSave={submitEdit}
+          onCancel={() => setEditOpen(false)}
+        />
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-4">
@@ -203,73 +153,6 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
               ? ` (${profile.headToHead.ties} tie${profile.headToHead.ties === 1 ? '' : 's'})`
               : ''}
           </p>
-        </div>
-      ) : null}
-
-      {showEdit ? (
-        <ChangeEmailPanel
-          currentEmail={user?.email}
-          verified={Boolean(user?.emailVerifiedAt)}
-          lastVerificationSentAt={user?.lastVerificationSentAt}
-          onChangeEmail={handleChangeEmail}
-          onResendVerification={handleResendVerification}
-        />
-      ) : null}
-
-      {showEdit ? <ChangePasswordPanel onChangePassword={handleChangePassword} /> : null}
-
-      {showEdit ? (
-        <div className="rounded-3xl border border-default bg-elevated/70 p-5">
-          {/* Stack on narrow viewports — the segmented toggle is ~190px wide
-              and forced the row to overflow on iPhone SE. */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
-                Appearance
-              </h3>
-              <p className="mt-1 text-sm text-fg">Pick the theme that suits your eyes.</p>
-            </div>
-            <ThemeToggle />
-          </div>
-        </div>
-      ) : null}
-
-      {/* PWA Chunk 5 — Web Push opt-in + per-type checkboxes. Renders the
-          iOS install-first gate, the "browser doesn't support" message, and
-          the permission-denied state on its own; no caller branching needed. */}
-      {showEdit ? <PushSettingsPanel /> : null}
-
-      {/* Tier 8.6 — Privacy panel. Edits flush immediately via PUT /api/me
-          (handleSaveProfile); the radio reflects the current value. */}
-      {showEdit ? (
-        <div className="rounded-3xl border border-default bg-elevated/70 p-5">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
-            Privacy
-          </h3>
-          <p className="mt-1 text-sm text-fg">Who can see your profile?</p>
-          <fieldset className="mt-3 space-y-2">
-            <legend className="sr-only">Profile visibility</legend>
-            {VISIBILITY_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                htmlFor={`profile-visibility-${opt.value}`}
-                className="flex cursor-pointer items-start gap-3 rounded-2xl bg-overlay/70 p-3 hover:bg-overlay"
-              >
-                <Radio
-                  id={`profile-visibility-${opt.value}`}
-                  name="profileVisibility"
-                  value={opt.value}
-                  checked={(profile.profileVisibility || 'public') === opt.value}
-                  disabled={busy}
-                  onChange={() => onSaveProfile?.({ profileVisibility: opt.value }).catch(() => {})}
-                />
-                <span className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium text-fg">{opt.label}</span>
-                  <span className="text-xs text-fg-muted">{opt.description}</span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
         </div>
       ) : null}
 

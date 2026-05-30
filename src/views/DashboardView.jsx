@@ -31,6 +31,9 @@ import { useGames } from '../hooks/useGames';
 const PicksHistory = lazyWithReload(() => import('../components/PicksHistory'));
 const ProfileView = lazyWithReload(() => import('../components/ProfileView'));
 const AdminPanel = lazyWithReload(() => import('../components/admin/AdminPanel'));
+// Tier 30 Phase 1 — SettingsView lifted out of ProfileView. Lazy-loaded
+// the same way so the per-route bundle stays in line with the other views.
+const SettingsView = lazyWithReload(() => import('./SettingsView'));
 
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-fg-muted">{label}</p>;
@@ -670,6 +673,12 @@ function DashboardView() {
                 <AdminPanel />
               </Suspense>
             </div>
+          ) : null}
+
+          {view === 'settings' && user ? (
+            <Suspense fallback={<LazyFallback label="Loading settings…" />}>
+              <SettingsView />
+            </Suspense>
           ) : null}
         </section>
 

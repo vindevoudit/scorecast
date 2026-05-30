@@ -61,6 +61,7 @@ function UserMenu() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => setView('profile')}>View profile</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setView('settings')}>Settings</DropdownMenuItem>
         <DropdownMenuItem
           className="font-semibold text-accent"
           onSelect={() => setConfirmingLogout(true)}

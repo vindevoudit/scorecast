@@ -23,11 +23,12 @@ test.afterEach(async () => {
   });
 });
 
-async function openProfileTab(page) {
-  await page
-    .getByRole('tab', { name: /Profile/i })
-    .first()
-    .click();
+// Tier 30 Phase 1 Chunk 1.1 — ChangeEmailPanel moved from Profile tab to
+// Settings → Account sub-tab. Open via UserMenu → Settings; Account is
+// the default sub-tab so the panel mounts immediately.
+async function openSettingsAccount(page) {
+  await page.locator('[aria-haspopup="menu"]:visible').click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
   await expect(page.getByRole('heading', { level: 3, name: /^Email$/ }).first()).toBeVisible({
     timeout: 10_000,
   });
@@ -35,7 +36,7 @@ async function openProfileTab(page) {
 
 test('ChangeEmailPanel — shows current email + verified badge', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
 
   await expect(page.getByText(USERS.alice.email, { exact: false }).first()).toBeVisible();
   await expect(page.getByText('Verified').first()).toBeVisible();
@@ -43,7 +44,7 @@ test('ChangeEmailPanel — shows current email + verified badge', async ({ page 
 
 test('ChangeEmailPanel — expand + happy path → success', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
 
   await page.getByRole('button', { name: 'Change email' }).click();
 
@@ -68,7 +69,7 @@ test('ChangeEmailPanel — expand + happy path → success', async ({ page }) =>
 
 test('ChangeEmailPanel — wrong password surfaces server error', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
   await page.getByRole('button', { name: 'Change email' }).click();
 
   await page.locator('#change-email-new').fill(NEW_EMAIL);
@@ -82,7 +83,7 @@ test('ChangeEmailPanel — wrong password surfaces server error', async ({ page 
 
 test('ChangeEmailPanel — same-as-current address surfaces inline error', async ({ page }) => {
   await loginViaUI(page, USERS.alice);
-  await openProfileTab(page);
+  await openSettingsAccount(page);
   await page.getByRole('button', { name: 'Change email' }).click();
 
   await page.locator('#change-email-new').fill(USERS.alice.email);

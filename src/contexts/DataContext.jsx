@@ -20,7 +20,16 @@ const emptyFriends = { friends: [], incoming: [], outgoing: [] };
 
 // Tier 18 Chunk 6 — notification deep-link guards. Module-scope so the
 // memoized consumeDeepLinks callback stays referentially stable.
-const DEEP_LINK_ALLOWED_VIEWS = ['games', 'mypicks', 'groups', 'leaderboard', 'profile', 'admin'];
+// Tier 30 Phase 1 — `'settings'` added (UserMenu → Settings target).
+const DEEP_LINK_ALLOWED_VIEWS = [
+  'games',
+  'mypicks',
+  'groups',
+  'leaderboard',
+  'profile',
+  'admin',
+  'settings',
+];
 const DEEP_LINK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function DataProvider({ children }) {

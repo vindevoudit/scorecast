@@ -1,11 +1,34 @@
 'use strict';
 
+// 5.5.4 — Group lifecycle: create → invite → accept → transfer → delete.
+// Tier 30 Phase 1 Chunk 1.3 — Groups view now mounts a dedicated GroupsView
+// with three sub-tabs (My Groups / Discover / Invites). The "Create a new
+// group" form lifted out of the inline left column into a CreateGroupModal
+// triggered by a "+ New group" button on the My Groups sub-tab. The invite
+// listing moved from the right column into the Invites sub-tab.
+
 const { test, expect } = require('@playwright/test');
 const { loginViaUI, logoutViaUI } = require('./helpers/auth');
 const { closestCard } = require('./helpers/selectors');
 const { USERS } = require('./fixtures/data');
 
-// 5.5.4 — Group lifecycle: create → invite → accept → transfer → delete.
+async function openGroupsTab(page) {
+  await page
+    .getByRole('tab', { name: /My Groups/ })
+    .first()
+    .click();
+  // The GroupsView card heading is the level-2 "Groups".
+  await expect(page.getByRole('heading', { name: 'Groups', level: 2 })).toBeVisible({
+    timeout: 10_000,
+  });
+}
+
+async function openGroupsSubTab(page, label) {
+  // SubTabs option labels carry a count suffix when non-zero (e.g.
+  // "My Groups (3)"). Regex-match the prefix so the test is stable.
+  await page.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
+}
+
 test('group lifecycle: alice creates and invites, bob accepts, transfer, delete', async ({
   browser,
 }) => {
@@ -18,36 +41,37 @@ test('group lifecycle: alice creates and invites, bob accepts, transfer, delete'
   const alicePage = await aliceContext.newPage();
   await loginViaUI(alicePage, USERS.alice);
 
-  await alicePage.getByRole('tab', { name: /My Groups/ }).click();
-  await alicePage.locator('#group-name').fill(groupName);
-  await alicePage.getByRole('button', { name: 'Create group', exact: true }).click();
+  await openGroupsTab(alicePage);
+  // My Groups is the default sub-tab; open the create modal via the pill.
+  await alicePage.getByRole('button', { name: '+ New group', exact: true }).click();
+  await alicePage.locator('#create-group-name').fill(groupName);
+  await alicePage
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Create group', exact: true })
+    .click();
 
   const aliceCard = cardFor(alicePage, groupName);
   await expect(aliceCard).toBeVisible({ timeout: 10_000 });
   await expect(aliceCard.getByText('Owner', { exact: true })).toBeVisible();
 
-  // Invite Bob via the per-card InviteRow typeahead. Tier 19's invite
-  // refactor turned the bare username input into a search box that
-  // surfaces a dropdown of matches; the actual Invite button now sits
-  // next to a matched user's row. Scope everything to the card so we
-  // don't grab the FriendsList "Search users" input on the same page.
+  // Invite Bob via the per-card InviteRow typeahead. The "Search users
+  // to invite" input is unique to GroupCard's invite UI.
   await aliceCard.getByRole('textbox', { name: 'Search users to invite' }).fill(USERS.bob.username);
-  // Bob's row appears in the typeahead dropdown; the "Invite" button
-  // sits inside it. The dropdown is portal-free (renders inside the
-  // card), so aliceCard.scope still reaches it.
   await aliceCard.getByRole('button', { name: 'Invite', exact: true }).click();
 
   await logoutViaUI(alicePage);
   await aliceContext.close();
 
-  // --- Phase 2: Bob accepts the pending invite. ---
+  // --- Phase 2: Bob accepts the pending invite (Invites sub-tab). ---
   const bobContext = await browser.newContext();
   const bobPage = await bobContext.newPage();
   await loginViaUI(bobPage, USERS.bob);
 
-  await bobPage.getByRole('tab', { name: /My Groups/ }).click();
+  await openGroupsTab(bobPage);
+  await openGroupsSubTab(bobPage, 'Invites');
 
-  // Pending invite block uses the group name as its heading-like label.
+  // Pending invite row carries the "Invited to join" label + the group
+  // name (rendered via GroupNameDisplay → "<name> #<discriminator>").
   const inviteBlock = bobPage
     .locator('div')
     .filter({ hasText: 'Invited to join' })
@@ -55,10 +79,11 @@ test('group lifecycle: alice creates and invites, bob accepts, transfer, delete'
     .first();
   await inviteBlock.getByRole('button', { name: /Accept/i }).click();
 
-  // After accept, the group appears as a member in Bob's list.
+  // After accept, Bob switches to My Groups and sees the new group as a
+  // regular member.
+  await openGroupsSubTab(bobPage, 'My Groups');
   const bobCard = cardFor(bobPage, groupName);
   await expect(bobCard).toBeVisible({ timeout: 10_000 });
-  // Bob is a regular member at this point; "Owner" badge should belong to alice.
   await expect(bobCard.getByText('Owner', { exact: true })).toHaveCount(0);
 
   await logoutViaUI(bobPage);
@@ -68,15 +93,13 @@ test('group lifecycle: alice creates and invites, bob accepts, transfer, delete'
   const aliceContext2 = await browser.newContext();
   const alicePage2 = await aliceContext2.newPage();
   await loginViaUI(alicePage2, USERS.alice);
-  await alicePage2.getByRole('tab', { name: /My Groups/ }).click();
+  await openGroupsTab(alicePage2);
 
   const aliceCard2 = cardFor(alicePage2, groupName);
   await aliceCard2.getByRole('button', { name: 'Transfer ownership', exact: true }).click();
-  // The select reveals after the toggle; selectOption by visible label.
   await aliceCard2.getByLabel(/Transfer to/).selectOption({ label: USERS.bob.username });
   await aliceCard2.getByRole('button', { name: 'Transfer', exact: true }).click();
 
-  // After transfer alice no longer carries the Owner badge in this card.
   await expect(aliceCard2.getByText('Owner', { exact: true })).toHaveCount(0, { timeout: 10_000 });
 
   await logoutViaUI(alicePage2);
@@ -86,16 +109,14 @@ test('group lifecycle: alice creates and invites, bob accepts, transfer, delete'
   const bobContext2 = await browser.newContext();
   const bobPage2 = await bobContext2.newPage();
   await loginViaUI(bobPage2, USERS.bob);
-  await bobPage2.getByRole('tab', { name: /My Groups/ }).click();
+  await openGroupsTab(bobPage2);
 
   const bobCard2 = cardFor(bobPage2, groupName);
-  // Confirm we received ownership during the transfer.
   await expect(bobCard2.getByText('Owner', { exact: true })).toBeVisible({ timeout: 10_000 });
 
   await bobCard2.getByRole('button', { name: 'Delete group', exact: true }).click();
   await bobPage2.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click();
 
-  // Group disappears from the list.
   await expect(bobPage2.getByRole('heading', { name: groupName, level: 2 })).toHaveCount(0, {
     timeout: 10_000,
   });

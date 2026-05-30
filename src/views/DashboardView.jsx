@@ -1,13 +1,10 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { lazyWithReload } from '../lib/lazyWithReload';
 import GamesCalendar from '../components/GamesCalendar';
 import Footer from '../components/Footer';
 import LeaderboardCard from '../components/LeaderboardCard';
-import GroupCard from '../components/GroupCard';
 import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
 import ConfirmModal from '../components/ConfirmModal';
-import EmptyState from '../components/EmptyState';
 import ProfileDrawer from '../components/ProfileDrawer';
 import NotificationBell from '../components/NotificationBell';
 import RefreshButton from '../components/RefreshButton';
@@ -16,12 +13,10 @@ import JoinGroupPasswordDialog from '../components/JoinGroupPasswordDialog';
 import JoinRequestDialog from '../components/JoinRequestDialog';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
-import InlineGatePanel from '../components/InlineGatePanel';
-import GroupNameDisplay from '../components/GroupNameDisplay';
 import InstallPrompt from '../components/InstallPrompt';
 import GameFiltersBar from '../components/GameFiltersBar';
 import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
-import { Button, Input } from '../components/ui';
+import { Button } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
@@ -30,11 +25,12 @@ import { useGames } from '../hooks/useGames';
 const PicksHistory = lazyWithReload(() => import('../components/PicksHistory'));
 const ProfileView = lazyWithReload(() => import('../components/ProfileView'));
 const AdminPanel = lazyWithReload(() => import('../components/admin/AdminPanel'));
-// Tier 30 Phase 1 — SettingsView + FriendsView lifted out of Profile + Groups.
-// Lazy-loaded the same way so the per-route bundle stays in line with the
-// other views.
+// Tier 30 Phase 1 — SettingsView + FriendsView + GroupsView lifted out of
+// their previous in-line homes. Lazy-loaded the same way so the per-route
+// bundle stays in line with the other views.
 const SettingsView = lazyWithReload(() => import('./SettingsView'));
 const FriendsView = lazyWithReload(() => import('./FriendsView'));
+const GroupsView = lazyWithReload(() => import('./GroupsView'));
 
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-fg-muted">{label}</p>;
@@ -61,8 +57,6 @@ const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
 function DashboardView() {
   const {
     user,
-    authData,
-    setAuthData,
     setConfirmingLogout,
     confirmingLogout,
     performLogout,
@@ -76,24 +70,15 @@ function DashboardView() {
     view,
     setView,
     groups,
-    pendingInvites,
     friends,
     leaderboard,
     groupOrderBy,
     groupOffset,
     groupLimit,
     selectedGroupId,
-    discoverGroups,
     ownProfile,
     picks,
-    handleCreateGroup,
-    handleLeaveGroup,
-    handleTransferGroup,
-    handleDeleteGroup,
     handleJoinPublicGroup,
-    handleInvite,
-    handleAcceptInvite,
-    handleDeclineInvite,
     openProfile,
     handleChangeGroupOrder,
     handleChangeGroupOffset,
@@ -123,33 +108,13 @@ function DashboardView() {
     window.localStorage.setItem('sc_sidebar_collapsed', collapsed ? '1' : '0');
   }, [collapsed]);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [invitesRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
-  // Tier 19 Chunks 1+3 — dialog-target state. Holds the group object the
-  // user picked from search; the dialog component decides what to render
-  // (password vs request-to-join) based on the kind we set.
+  // Tier 19 Chunks 1+3 — dialog-target state for SearchBar-driven joins.
+  // Holds the group object the user picked from search; the dialog
+  // component decides what to render (password vs request-to-join) based
+  // on the kind we set. State stays in DashboardView so SearchBar can
+  // trigger from anywhere, regardless of which view is mounted.
   const [passwordDialogGroup, setPasswordDialogGroup] = useState(null);
   const [requestDialogGroup, setRequestDialogGroup] = useState(null);
-
-  const onCreateGroupSubmit = async (event) => {
-    event.preventDefault();
-    // Tier 19 Chunks 1+3 — only send `password` when visibility is private.
-    // Server-side schema rejects password+non-private combos with 400, so
-    // matching the gate here keeps the request shape clean.
-    const payload = {
-      name: authData.groupName,
-      visibility: authData.groupVisibility,
-    };
-    if (authData.groupVisibility === 'private' && authData.groupPassword) {
-      payload.password = authData.groupPassword;
-    }
-    await handleCreateGroup(payload);
-    setAuthData((prev) => ({
-      ...prev,
-      groupName: '',
-      groupVisibility: 'secret',
-      groupPassword: '',
-    }));
-  };
 
   return (
     <div className="flex min-h-[calc(100dvh-3rem)] gap-4 lg:gap-6" aria-busy={loading}>
@@ -405,225 +370,9 @@ function DashboardView() {
           ) : null}
 
           {view === 'groups' ? (
-            <div className="grid grid-cols-1 gap-6 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,0.95fr)]">
-              <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
-                {user ? (
-                  <>
-                    <h2 className="text-2xl font-semibold text-fg">Create a new group</h2>
-                    <p className="mt-2 text-fg-muted">
-                      Invite friends and compare scores in your private pool.
-                    </p>
-                    <form onSubmit={onCreateGroupSubmit} className="mt-6 space-y-4">
-                      <Input
-                        id="group-name"
-                        aria-label="Group name"
-                        value={authData.groupName}
-                        onChange={(event) =>
-                          setAuthData((prev) => ({ ...prev, groupName: event.target.value }))
-                        }
-                        placeholder="Group name"
-                      />
-                      {/* Tier 19 — three-tier visibility. Each option gets
-                          a one-line tagline explaining who can find +
-                          join the group so the user can pick confidently
-                          without reading docs. Order: most-open →
-                          most-private. */}
-                      <fieldset className="rounded-3xl border border-default bg-overlay/50 px-4 py-3">
-                        <legend className="px-2 text-xs uppercase tracking-[0.25em] text-fg-muted">
-                          Visibility
-                        </legend>
-                        <div className="flex flex-col gap-3 pt-2 text-sm text-fg">
-                          {[
-                            {
-                              value: 'public',
-                              label: 'Public',
-                              description: 'Discoverable and free to join.',
-                            },
-                            {
-                              value: 'private',
-                              label: 'Private',
-                              description:
-                                'Discoverable. Join by request, invitation, or password.',
-                            },
-                            {
-                              value: 'secret',
-                              label: 'Secret',
-                              description: 'Hidden. Invite-only.',
-                            },
-                          ].map((opt) => (
-                            // eslint-disable-next-line jsx-a11y/label-has-associated-control
-                            <label
-                              key={opt.value}
-                              htmlFor={`group-visibility-${opt.value}`}
-                              className="flex items-start gap-2"
-                            >
-                              <input
-                                id={`group-visibility-${opt.value}`}
-                                type="radio"
-                                name="group-visibility"
-                                value={opt.value}
-                                checked={authData.groupVisibility === opt.value}
-                                onChange={() =>
-                                  setAuthData((prev) => ({
-                                    ...prev,
-                                    groupVisibility: opt.value,
-                                  }))
-                                }
-                                className="mt-1"
-                              />
-                              <span className="flex flex-col">
-                                <span className="font-medium">{opt.label}</span>
-                                <span className="text-xs text-fg-muted">{opt.description}</span>
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      </fieldset>
-
-                      {/* Tier 19 Chunk 1 — optional password input, only
-                          rendered when the user picks Private. Min 4 chars
-                          (enforced server-side too). */}
-                      {authData.groupVisibility === 'private' ? (
-                        <div className="rounded-3xl border border-default bg-overlay/50 px-4 py-3">
-                          <label
-                            htmlFor="group-password"
-                            className="block text-xs uppercase tracking-[0.25em] text-fg-muted"
-                          >
-                            Password (optional)
-                          </label>
-                          <p className="mt-1 text-xs text-fg-muted">
-                            Anyone with this password can join without owner approval. Leave blank
-                            to require requests + invitations only.
-                          </p>
-                          <Input
-                            id="group-password"
-                            type="password"
-                            aria-label="Group password"
-                            value={authData.groupPassword}
-                            onChange={(event) =>
-                              setAuthData((prev) => ({
-                                ...prev,
-                                groupPassword: event.target.value,
-                              }))
-                            }
-                            placeholder="Min 4 characters"
-                            autoComplete="off"
-                            className="mt-2"
-                          />
-                        </div>
-                      ) : null}
-                      <Button type="submit" variant="primary" size="lg">
-                        Create group
-                      </Button>
-                    </form>
-                  </>
-                ) : (
-                  <InlineGatePanel
-                    label="create a group"
-                    description="Build a private league and invite your friends — sign up free or sign in."
-                  />
-                )}
-
-                <div className="mt-6 space-y-3">
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.25em] text-fg-muted">
-                    Discover public groups
-                  </h3>
-                  {discoverGroups.length === 0 ? (
-                    <EmptyState
-                      title="No public groups right now"
-                      description="Check back later, or invite friends to a private group."
-                    />
-                  ) : (
-                    discoverGroups.map((group) => (
-                      <div
-                        key={group.id}
-                        className="flex flex-col gap-3 rounded-2xl bg-overlay/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-fg">
-                            <GroupNameDisplay group={group} />
-                          </p>
-                          <p className="text-xs text-fg-muted">
-                            {group.memberCount} member{group.memberCount === 1 ? '' : 's'}
-                          </p>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            if (!gate('join a group')) return;
-                            handleJoinPublicGroup(group.id);
-                          }}
-                        >
-                          Join
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                {pendingInvites.length > 0 ? (
-                  <div className="rounded-3xl border border-warning/40 bg-warning/5 p-6 shadow-glow">
-                    <h2 className="text-2xl font-semibold text-fg">Pending Invitations</h2>
-                    <p className="mt-2 text-sm text-warning">
-                      You have {pendingInvites.length} pending group invitation
-                      {pendingInvites.length !== 1 ? 's' : ''}.
-                    </p>
-                    <div ref={invitesRef} className="mt-4 space-y-3">
-                      {pendingInvites.map((invite) => (
-                        <div
-                          key={invite.id}
-                          className="flex flex-col gap-3 rounded-3xl bg-overlay/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm text-fg">Invited to join</p>
-                            <p className="mt-1 truncate font-semibold text-fg">
-                              <GroupNameDisplay
-                                group={{
-                                  name: invite.groupName,
-                                  discriminator: invite.groupDiscriminator,
-                                }}
-                              />
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button onClick={() => handleAcceptInvite(invite.groupId, invite.id)}>
-                              Accept
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleDeclineInvite(invite.groupId, invite.id)}
-                            >
-                              Decline
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {groups.length === 0 ? (
-                  <EmptyState
-                    title="No groups yet"
-                    description="Create your first group on the left, or accept an invite when one arrives."
-                  />
-                ) : (
-                  groups.map((group) => (
-                    <GroupCard
-                      key={group.id}
-                      group={group}
-                      currentUserId={user?.id}
-                      onInvite={handleInvite}
-                      onLeave={handleLeaveGroup}
-                      onTransfer={handleTransferGroup}
-                      onDelete={handleDeleteGroup}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
+            <Suspense fallback={<LazyFallback label="Loading groups…" />}>
+              <GroupsView />
+            </Suspense>
           ) : null}
 
           {view === 'profile' ? (

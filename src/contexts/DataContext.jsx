@@ -1001,6 +1001,7 @@ export function DataProvider({ children }) {
     // Reload all
     loadDashboard,
     loadAnonDashboard,
+    revalidate,
 
     // Refreshers (exposed for AdminPanel + niche callers)
     refreshGames,

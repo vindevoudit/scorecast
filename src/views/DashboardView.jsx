@@ -11,6 +11,7 @@ import EmptyState from '../components/EmptyState';
 import ProfileDrawer from '../components/ProfileDrawer';
 import FriendsList from '../components/FriendsList';
 import NotificationBell from '../components/NotificationBell';
+import RefreshButton from '../components/RefreshButton';
 import SearchBar from '../components/SearchBar';
 import JoinGroupPasswordDialog from '../components/JoinGroupPasswordDialog';
 import JoinRequestDialog from '../components/JoinRequestDialog';
@@ -311,9 +312,13 @@ function DashboardView() {
                 </div>
                 <div className="flex items-center justify-end gap-3">
                   {user ? (
-                    <NotificationBell />
+                    <>
+                      <RefreshButton />
+                      <NotificationBell />
+                    </>
                   ) : (
                     <>
+                      <RefreshButton />
                       {signInBtn}
                       {signUpBtn}
                     </>
@@ -329,12 +334,14 @@ function DashboardView() {
                 <div className="flex items-center justify-end gap-3">
                   {user ? (
                     <>
+                      <RefreshButton />
                       <NotificationBell />
                       <UserMenu />
                     </>
                   ) : (
                     <>
                       {homePill}
+                      <RefreshButton />
                       {signInBtn}
                       {signUpBtn}
                     </>

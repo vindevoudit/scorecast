@@ -22,6 +22,16 @@ import { clientsClaim } from 'workbox-core';
 self.skipWaiting();
 clientsClaim();
 
+// Phase 0 T29-5 — let the RefreshButton wake a 'waiting' SW. The top-level
+// skipWaiting() above handles fresh installs; this listener handles the
+// in-app trigger so users can force-activate a queued update without
+// closing the PWA.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // Drop stale precache entries from previous SW versions.
 cleanupOutdatedCaches();
 

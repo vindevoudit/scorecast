@@ -87,8 +87,11 @@ router.post('/register', registerLimiter, validate(registerSchema), async (req, 
       termsAcceptedAt: new Date(),
       termsAcceptedVersion: acceptedTermsVersion,
     });
+    // Phase 0 P0-4 — bump severity warn → error so failed sends are
+    // surfaced in alerting; users can still recover via the "Sent N min
+    // ago + [Resend]" UI fed by users.lastVerificationSentAt.
     sendVerificationEmail(newUser).catch((err) => {
-      req.log.warn({ err: err.message, userId: newUser.id }, 'failed to send verification email');
+      req.log.error({ err: err.message, userId: newUser.id }, 'failed to send verification email');
     });
     await setAuthCookies(res, newUser, { userAgent: req.headers['user-agent'] });
     res.json({ user: { id: newUser.id, username: newUser.username } });

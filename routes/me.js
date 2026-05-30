@@ -44,6 +44,9 @@ router.get('/me', authMiddleware, async (req, res) => {
     bio: user.bio || null,
     email: user.email || null,
     emailVerifiedAt: user.emailVerifiedAt || null,
+    // Phase 0 P0-4 — verification-email observability. Frontend renders
+    // "Sent N min ago" + a [Resend] CTA when emailVerifiedAt is null.
+    lastVerificationSentAt: user.lastVerificationSentAt || null,
     twoFactorEnabled: Boolean(user.totpEnabledAt),
     // Tier 11 Chunk 4 — null on first sign-in, set when the user finishes
     // or skips the onboarding tour. Frontend reads this to decide whether
@@ -64,6 +67,42 @@ router.get('/me', authMiddleware, async (req, res) => {
     pendingInvites,
   });
 });
+
+// Phase 0 P0-4 — user-initiated verification email resend. Rate-limited
+// (sensitiveAccountLimiter — 10/hr/IP, matches /me/password + /me/email)
+// so a stuck UI loop can't drown the email transport. No-op silently when
+// the user is already verified (don't reveal verification state via
+// response code variation — the front end gates the button on the same
+// emailVerifiedAt that GET /me returns).
+router.post(
+  '/me/resend-verification',
+  sensitiveAccountLimiter,
+  authMiddleware,
+  async (req, res) => {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.emailVerifiedAt) {
+      // Idempotent + intentionally silent — verified users can't trigger
+      // a fresh token; surface a 200 so the UI doesn't blow up on a stale
+      // tab whose state lags behind a verify that just happened.
+      return res.status(200).json({ sent: false, alreadyVerified: true });
+    }
+    try {
+      await sendVerificationEmail(user);
+      const refreshed = await getUserById(user.id);
+      return res.status(200).json({
+        sent: true,
+        lastVerificationSentAt: refreshed.lastVerificationSentAt || null,
+      });
+    } catch (err) {
+      req.log.error(
+        { err: err.message, userId: user.id },
+        'resend-verification: failed to send verification email',
+      );
+      return res.status(502).json({ error: 'Failed to send verification email' });
+    }
+  },
+);
 
 // PWA Chunk 4 — partial update to users.pushPreferences. The PushService
 // merges with existing JSONB rather than replacing, so a PUT { prefs:

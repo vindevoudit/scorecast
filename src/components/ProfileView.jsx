@@ -65,7 +65,7 @@ function friendButtonProps(friendStatus) {
 }
 
 function ProfileView({ profile, onFriendAction, busy, editable }) {
-  const { user, handleChangePassword, handleChangeEmail } = useAuth();
+  const { user, handleChangePassword, handleChangeEmail, handleResendVerification } = useAuth();
   const { handleSaveProfile: onSaveProfile } = useData();
 
   const [editing, setEditing] = useState(false);
@@ -210,7 +210,9 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
         <ChangeEmailPanel
           currentEmail={user?.email}
           verified={Boolean(user?.emailVerifiedAt)}
+          lastVerificationSentAt={user?.lastVerificationSentAt}
           onChangeEmail={handleChangeEmail}
+          onResendVerification={handleResendVerification}
         />
       ) : null}
 

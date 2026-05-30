@@ -267,6 +267,34 @@ export function AuthProvider({ children }) {
     [showStatus],
   );
 
+  // Phase 0 P0-4 — user-initiated verification email resend. Backed by
+  // POST /api/me/resend-verification (sensitiveAccountLimiter 10/hr/IP).
+  // Returns the new lastVerificationSentAt on success so the panel can
+  // immediately update the "Sent N min ago" copy without waiting for the
+  // next /me refresh.
+  const handleResendVerification = useCallback(async () => {
+    try {
+      const data = await apiFetch('/api/me/resend-verification', {
+        method: 'POST',
+      });
+      if (data?.lastVerificationSentAt) {
+        setUser((u) => (u ? { ...u, lastVerificationSentAt: data.lastVerificationSentAt } : u));
+      }
+      if (data?.alreadyVerified) {
+        setUser((u) =>
+          u ? { ...u, emailVerifiedAt: u.emailVerifiedAt || new Date().toISOString() } : u,
+        );
+        showStatus('Your email is already verified.');
+      } else {
+        showStatus('Verification email sent — check your inbox (and spam folder).');
+      }
+      return true;
+    } catch (err) {
+      showStatus(err.message || 'Could not resend verification email');
+      return false;
+    }
+  }, [showStatus]);
+
   const performLogout = useCallback(async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
@@ -310,6 +338,7 @@ export function AuthProvider({ children }) {
     handleResetPassword,
     handleChangePassword,
     handleChangeEmail,
+    handleResendVerification,
     performLogout,
     initialAuthData,
   };

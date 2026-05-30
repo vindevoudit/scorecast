@@ -34,6 +34,14 @@ module.exports = (sequelize) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // Phase 0 P0-4 — last time we attempted to send a verification email.
+      // UI uses this to render "Sent N min ago" + a [Resend] CTA so users
+      // whose initial mail got eaten by spam filters have a visible
+      // recovery path.
+      lastVerificationSentAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
       password: {
         type: DataTypes.STRING,
         allowNull: false,

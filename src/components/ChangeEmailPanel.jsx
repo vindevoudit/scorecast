@@ -7,11 +7,34 @@
 import { useState } from 'react';
 import { Badge, Button, Input, PasswordInput } from './ui';
 
-function ChangeEmailPanel({ currentEmail, verified, onChangeEmail }) {
+// Phase 0 P0-4 — short relative-time helper for "Sent N min ago". Bands
+// at min / hour / day so we don't render "Sent 12537 seconds ago".
+function formatRelativeSent(timestamp) {
+  if (!timestamp) return null;
+  const sentMs = new Date(timestamp).getTime();
+  if (!Number.isFinite(sentMs)) return null;
+  const diffSec = Math.max(0, Math.floor((Date.now() - sentMs) / 1000));
+  if (diffSec < 60) return 'Sent just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `Sent ${diffMin} min ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `Sent ${diffHr} hr ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `Sent ${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
+}
+
+function ChangeEmailPanel({
+  currentEmail,
+  verified,
+  lastVerificationSentAt,
+  onChangeEmail,
+  onResendVerification,
+}) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resending, setResending] = useState(false);
   const [err, setErr] = useState('');
 
   const reset = () => {
@@ -67,6 +90,32 @@ function ChangeEmailPanel({ currentEmail, verified, onChangeEmail }) {
             Changing your email sends a notification to the old address and a verification link to
             the new one.
           </p>
+          {/* Phase 0 P0-4 — observability + recovery affordance when the
+              user's email isn't verified yet. Surfaces last-sent timestamp
+              + an explicit Resend button so spam-filtered initial mails
+              have a visible path forward. */}
+          {currentEmail && !verified && onResendVerification ? (
+            <div className="mt-3 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <span className="text-xs text-fg-muted">
+                {formatRelativeSent(lastVerificationSentAt) || 'Verification email pending.'}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={resending}
+                onClick={async () => {
+                  setResending(true);
+                  try {
+                    await onResendVerification();
+                  } finally {
+                    setResending(false);
+                  }
+                }}
+              >
+                {resending ? 'Sending…' : 'Resend'}
+              </Button>
+            </div>
+          ) : null}
         </div>
         {!open ? (
           <Button variant="secondary" onClick={() => setOpen(true)}>

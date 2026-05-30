@@ -23,7 +23,7 @@
 const { test, expect } = require('@playwright/test');
 const bcrypt = require('bcryptjs');
 const { loginViaUI } = require('./helpers/auth');
-const { openAdminTab } = require('./helpers/admin');
+const { openAdminTab, openAdminSubTab } = require('./helpers/admin');
 const { apiLogin } = require('./helpers/api');
 const { USERS } = require('./fixtures/data');
 
@@ -151,6 +151,8 @@ test('bulk role flip: admin promotes two users → role chip flips; self-checkbo
   try {
     await loginViaUI(page, USERS.admin);
     await openAdminTab(page);
+    // Tier 30 Phase 1 — UserManager lives under the Users sub-tab.
+    await openAdminSubTab(page, 'Users');
 
     const userManager = page
       .locator('div')
@@ -213,6 +215,8 @@ test('cascade delete: deleting a user removes the groups they own (Tier 5.3 tran
     // --- Admin deletes the temp user via the UserManager UI. ---
     await loginViaUI(page, USERS.admin);
     await openAdminTab(page);
+    // Tier 30 Phase 1 — UserManager lives under the Users sub-tab.
+    await openAdminSubTab(page, 'Users');
 
     const userManager = page
       .locator('div')

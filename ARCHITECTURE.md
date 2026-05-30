@@ -298,10 +298,14 @@ ScoreCast/
 ├── src/                                 # React frontend
 │   ├── main.jsx                         # React.createRoot bootstrap; provider stack: NotificationProvider → AuthProvider → AuthGateProvider → DataProvider → App (Tier 13.6 + Tier 11 gate); mounts ErrorBoundary, installs clientErrorReporter, calls initSentry(); SYNCHRONOUSLY applies stored theme before React mounts (no FOUC)
 │   ├── App.jsx                          # ~71 LOC after Tier 13 Chunk 6 — pure layout shell: gradient chrome + skip-to-content link + status banner + 3-way switch (Skeleton/Auth/Dashboard view)
-│   ├── views/                           # Tier 13 Chunk 6 — view-level components consumed by App.jsx
+│   ├── views/                           # Tier 13 Chunk 6 + Tier 30 Phase 1 — view-level components consumed by App.jsx
 │   │   ├── SkeletonView.jsx             # placeholder shown while the initial dashboard fetch is in flight; carries <main id="main"> landmark
 │   │   ├── AuthView.jsx                 # Landing (default) OR login/register/forgot/reset/2FA challenge grid (`showAuth=true`). Sets `localStorage.sc_visited` on first successful sign-in so returning users skip Landing
-│   │   └── DashboardView.jsx            # the authenticated/anon UI: Sidebar + top utility bar (SearchBar, ThemeToggle, NotificationBell, UserMenu OR sign-in pill buttons) + view switch. Consumes useAuth/useData/useGames directly
+│   │   ├── DashboardView.jsx            # the authenticated/anon UI: Sidebar + top utility bar (SearchBar, RefreshButton, NotificationBell, UserMenu OR sign-in pill buttons) + view switch. Consumes useAuth/useData/useGames directly. Tier 30 Phase 1 — trimmed to a composition shell; sub-views below own their own surfaces
+│   │   ├── SettingsView.jsx             # Tier 30 Phase 1 — UserMenu → Settings. SubTabs (Account / Appearance / Notifications / Privacy) hosting the 5 panels lifted out of ProfileView
+│   │   ├── FriendsView.jsx              # Tier 30 Phase 1 — new top-level surface. SubTabs (All / Requests / Find people); replaces the old all-in-one FriendsList component (deleted)
+│   │   ├── GroupsView.jsx               # Tier 30 Phase 1 — Groups surface lifted out of DashboardView. SubTabs (My Groups / Discover / Invites); "+ New group" opens CreateGroupModal
+│   │   └── LeaderboardView.jsx          # Tier 30 Phase 1 — Leaderboards surface lifted out of DashboardView. SubTabs (Overall / Groups / Friends); LeaderboardFiltersBar sits above the sub-tabs
 │   ├── contexts/                        # Tier 13.6 React Context providers + Tier 11 gate
 │   │   ├── NotificationContext.jsx      # status banner + scorecast:client-error subscription (3.5s toast on render-error / window-error)
 │   │   ├── AuthContext.jsx              # user, authData, authView, 2FA flow, URL token consumption, `browseAsGuest` flag (persisted to localStorage.sc_browse_as_guest), `showAuth` flag, `clearSession` for useRequest 401 handler, handleChangeEmail, handleChangePassword
@@ -326,8 +330,11 @@ ScoreCast/
 │   │   └── time.js                      # formatCountdown, useCountdown hook, timeAgo, matchMinute(kickoff, {halfTimeReached, phase}), useMatchMinute (live-minute estimate; Tier 4b Chunk 2)
 │   └── components/
 │       ├── ErrorBoundary.jsx            # Tier 5.4b: class component wrapping <App />; reports via reportClientError + Sentry captureException; raw message gated on import.meta.env.DEV
-│       ├── Sidebar.jsx                  # Left-column dashboard nav. Desktop: 240px ↔ 64px collapsible (persisted localStorage.sc_sidebar_collapsed). Mobile (< md:): off-canvas drawer triggered by top-bar hamburger. Items render <button role="tab"> for Playwright compatibility
-│       ├── UserMenu.jsx                 # Avatar + username in top utility bar; opens role="menu" dropdown with "View profile" + "Sign out" (latter pipes through setConfirmingLogout)
+│       ├── Sidebar.jsx                  # Left-column dashboard nav. Desktop: 240px ↔ 64px collapsible (persisted localStorage.sc_sidebar_collapsed). Mobile (< md:): off-canvas drawer triggered by top-bar hamburger. Items render <button role="tab"> for Playwright compatibility. Tier 30 Phase 1 — 7 entries authed (Matches → My Picks → Leaderboards → Friends → Groups → Profile → Admin), 3 entries anon (Matches / Groups / Leaderboards)
+│       ├── UserMenu.jsx                 # Avatar + username in top utility bar; opens role="menu" dropdown with "View profile" + "Settings" + "Sign out" (last pipes through setConfirmingLogout). Tier 30 Phase 1 added Settings item
+│       ├── SubTabs.jsx                  # Tier 30 Phase 1: shared sub-tab primitive wrapping Radix Tabs + `?tab=<value>` URL sync. Reacts to `scorecast:url-changed` so in-app deep-link nav can pre-select a sub-tab. Used by Settings, Friends, Profile, My Picks, Leaderboards, Groups, Admin
+│       ├── EditProfileModal.jsx         # Tier 30 Phase 1: Radix Dialog hosting the displayName + bio form lifted out of ProfileView's inline edit. Locally-owned state resets on each open
+│       ├── CreateGroupModal.jsx         # Tier 30 Phase 1: Radix Dialog hosting the "Create a new group" form lifted out of DashboardView's inline left column. Locally-owned state resets on each open; opened by the "+ New group" pill in GroupsView's My Groups sub-tab
 │       ├── ThemeToggle.jsx              # Tier 11 Chunk 1: Light/Dark switch. Reads/writes via lib/theme.js
 │       ├── Landing.jsx                  # Marketing landing for first-time anonymous visitors (hero with glowing BANTRYX wordmark + dual CTAs + 3-card stat strip + 4-card feature grid + how-it-works + bottom CTA). 3rd CTA "Or just browse as a guest →" flips browseAsGuest=true
 │       ├── SignInModal.jsx              # Tier 11: anon button-action gate (`<Dialog>` from ui/). Opens with label like "Sign in to pick"
@@ -355,10 +362,10 @@ ScoreCast/
 │       ├── ConfirmModal.jsx             # Backdrop + Esc-close, used by logout + admin deletes + bulk confirm. z-50 stacking; sidebar drawer Escape handler defers when modal is open (see CLAUDE.md "Modal stacking")
 │       ├── Avatar.jsx                   # Deterministic initial-on-color circle (FNV-1a hash of LOWERCASED username → HSL). displayName drives letter; username drives color (renames don't shuffle colors)
 │       ├── SearchBar.jsx                # Debounced (250ms) /api/search, type-grouped dropdown
-│       ├── ProfileView.jsx              # Header (Avatar + displayName + username), stats, BadgeWall, recent picks, friend button, Settings (Privacy radio + ChangeEmailPanel + ChangePasswordPanel + TwoFactorSetup + display-name/bio inline edit)
+│       ├── ProfileView.jsx              # Tier 30 Phase 1 — Header (Avatar + displayName + username) + Edit profile button + SubTabs (Overview / Badges / Activity). The 5 panels (Email, Password, Theme, Push, Privacy) moved to SettingsView; inline edit form moved to EditProfileModal
 │       ├── ProfileDrawer.jsx            # Right-side drawer wrapping ProfileView; renders "This profile is unavailable" sheet when DataContext.profileError is set (Tier 8.6)
 │       ├── BadgeWall.jsx
-│       ├── FriendsList.jsx              # Returns null for anonymous viewers
+│       │   # FriendsList.jsx           # DELETED in Tier 30 Phase 1 — its UX split across FriendsView's sub-tabs
 │       ├── CommentThread.jsx            # Comments with edit, delete, 5-emoji reactions (per-viewer state). Anon: composer replaced with <InlineGatePanel>; reaction clicks open <SignInModal>
 │       ├── NotificationBell.jsx         # 30s polling, dropdown. Hidden in anon mode
 │       ├── ui/                          # Tier 11 design system primitives (Radix wrappers)
@@ -1251,18 +1258,18 @@ Both helpers are wired through `AuthGateContext`, which is the third provider in
 
 **Component branches** for anon viewers:
 
-| Component                          | Authed                                                 | Anonymous                                           |
-| ---------------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
-| `GameCard` pick / undo buttons     | Normal handlers                                        | `gate('Sign in to pick')`                           |
-| `CommentThread` composer           | `<textarea>` + submit                                  | `<InlineGatePanel label="Sign in to comment">`      |
-| `CommentThread` reaction buttons   | Toggle reaction                                        | `gate('Sign in to react')`                          |
-| `FriendsList`                      | Full list + handlers                                   | Returns `null` (component bails)                    |
-| Group create form                  | Visible                                                | `<InlineGatePanel>`                                 |
-| Group "Join" button (discover row) | Normal handler                                         | `gate('Sign in to join this group')`                |
-| `NotificationBell`, `UserMenu`     | Visible                                                | Hidden                                              |
-| Top utility bar                    | UserMenu                                               | `[Sign in]` + `[Sign up]` + `[← Home]` pill buttons |
-| `Sidebar` items                    | Games / My Picks / Groups / Rankings / Profile / Admin | Games / Groups / Rankings only                      |
-| `ProfileDrawer` friend button      | Friend handlers                                        | `gate('Sign in to send a friend request')`          |
+| Component                          | Authed                                                                                   | Anonymous                                           |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `GameCard` pick / undo buttons     | Normal handlers                                                                          | `gate('Sign in to pick')`                           |
+| `CommentThread` composer           | `<textarea>` + submit                                                                    | `<InlineGatePanel label="Sign in to comment">`      |
+| `CommentThread` reaction buttons   | Toggle reaction                                                                          | `gate('Sign in to react')`                          |
+| `FriendsList`                      | Full list + handlers                                                                     | Returns `null` (component bails)                    |
+| Group create form                  | Visible                                                                                  | `<InlineGatePanel>`                                 |
+| Group "Join" button (discover row) | Normal handler                                                                           | `gate('Sign in to join this group')`                |
+| `NotificationBell`, `UserMenu`     | Visible                                                                                  | Hidden                                              |
+| Top utility bar                    | UserMenu                                                                                 | `[Sign in]` + `[Sign up]` + `[← Home]` pill buttons |
+| `Sidebar` items                    | Matches / My Picks / Leaderboards / Friends / Groups / Profile / Admin (Tier 30 Phase 1) | Matches / Groups / Leaderboards only                |
+| `ProfileDrawer` friend button      | Friend handlers                                                                          | `gate('Sign in to send a friend request')`          |
 
 **Entry into anon-browse mode** is the [Landing](src/components/Landing.jsx) page's third CTA ("Or just browse as a guest →") which flips `AuthContext.browseAsGuest = true` (persisted to `localStorage.sc_browse_as_guest`).
 

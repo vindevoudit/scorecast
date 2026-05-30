@@ -45,7 +45,10 @@ function JoinRequestDialog({ group, onClose }) {
   return (
     <Dialog open onOpenChange={(open) => (open ? null : onClose?.())}>
       <DialogContent>
-        <DialogTitle>Request to join &ldquo;{group.name}&rdquo;</DialogTitle>
+        <DialogTitle>
+          Request to join &ldquo;{group.name}
+          {group.discriminator ? ` #${group.discriminator}` : ''}&rdquo;
+        </DialogTitle>
         <DialogDescription>
           The group owner will be notified and can approve or decline your request.
         </DialogDescription>

@@ -59,6 +59,7 @@ function GroupLeaderboardCard({
                 {groups.map((group) => (
                   <option key={group.id} value={group.id}>
                     {group.name}
+                    {group.discriminator ? ` #${group.discriminator}` : ''}
                   </option>
                 ))}
               </select>

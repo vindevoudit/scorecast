@@ -177,7 +177,14 @@ function SearchBar({ onSelectGroup, onSelectGame }) {
                             }}
                             className={`${itemBtn} flex items-center justify-between gap-2`}
                           >
-                            <span className="truncate">{g.name}</span>
+                            <span className="truncate">
+                              {g.name}
+                              {g.discriminator ? (
+                                <span className="ml-1 font-mono text-[0.85em] text-fg-muted/70">
+                                  #{g.discriminator}
+                                </span>
+                              ) : null}
+                            </span>
                             <span className={`shrink-0 text-xs ${toneClass}`}>{cta.label}</span>
                           </button>
                         </li>

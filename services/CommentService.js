@@ -13,6 +13,7 @@ const { Comment, CommentReaction, GroupMember, User, Game, Group } = require('..
 const { ALLOWED_EMOJIS } = require('../validation/schemas');
 const errors = require('../lib/errors');
 const { getUserById } = require('../lib/users');
+const { formatGroupLabel } = require('../lib/groupLabel');
 const NotificationService = require('./NotificationService');
 
 function assertSingleScope({ gameId, groupId }) {
@@ -79,7 +80,7 @@ async function fanOutGroupComment({ comment, author, group }) {
     const members = await GroupMember.findAll({ where: { groupId: group.id } });
     const recipients = members.map((m) => m.userId).filter((id) => id !== author.id);
     if (recipients.length === 0) return;
-    const title = `${author.username} commented in ${group.name}`;
+    const title = `${author.username} commented in ${formatGroupLabel(group)}`;
     const body = comment.body.length > 160 ? `${comment.body.slice(0, 157).trim()}…` : comment.body;
     const link = `/?view=groups&groupId=${group.id}`;
     await Promise.all(

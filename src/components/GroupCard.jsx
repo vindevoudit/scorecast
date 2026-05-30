@@ -8,6 +8,7 @@ import InviteRow from './InviteRow';
 import Avatar from './Avatar';
 import CommentThread from './CommentThread';
 import ConfirmModal from './ConfirmModal';
+import GroupNameDisplay from './GroupNameDisplay';
 import { Badge, Button, Input } from './ui';
 import { useData } from '../hooks/useData';
 
@@ -114,7 +115,9 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
     <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="truncate text-xl font-semibold text-fg">{group.name}</h2>
+          <h2 className="truncate text-xl font-semibold text-fg">
+            <GroupNameDisplay group={group} />
+          </h2>
           <p className="text-sm text-fg-muted">
             {group.members.length} member{group.members.length === 1 ? '' : 's'}
           </p>
@@ -322,7 +325,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
 
       <ConfirmModal
         open={confirmingLeave}
-        title={`Leave "${group.name}"?`}
+        title={`Leave "${group.name}${group.discriminator ? ` #${group.discriminator}` : ''}"?`}
         description="You'll need a new invite to rejoin if it's private."
         confirmLabel="Leave"
         cancelLabel="Stay"
@@ -332,7 +335,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
 
       <ConfirmModal
         open={confirmingDelete}
-        title={`Delete "${group.name}"?`}
+        title={`Delete "${group.name}${group.discriminator ? ` #${group.discriminator}` : ''}"?`}
         description="All members will be removed and the group will be gone. This cannot be undone."
         confirmLabel="Delete"
         cancelLabel="Cancel"

@@ -18,6 +18,7 @@ import JoinRequestDialog from '../components/JoinRequestDialog';
 import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InlineGatePanel from '../components/InlineGatePanel';
+import GroupNameDisplay from '../components/GroupNameDisplay';
 import InstallPrompt from '../components/InstallPrompt';
 import GameFiltersBar from '../components/GameFiltersBar';
 import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
@@ -527,7 +528,9 @@ function DashboardView() {
                         className="flex flex-col gap-3 rounded-2xl bg-overlay/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-fg">{group.name}</p>
+                          <p className="truncate text-sm font-semibold text-fg">
+                            <GroupNameDisplay group={group} />
+                          </p>
                           <p className="text-xs text-fg-muted">
                             {group.memberCount} member{group.memberCount === 1 ? '' : 's'}
                           </p>
@@ -568,7 +571,12 @@ function DashboardView() {
                           <div className="min-w-0">
                             <p className="text-sm text-fg">Invited to join</p>
                             <p className="mt-1 truncate font-semibold text-fg">
-                              {invite.groupName}
+                              <GroupNameDisplay
+                                group={{
+                                  name: invite.groupName,
+                                  discriminator: invite.groupDiscriminator,
+                                }}
+                              />
                             </p>
                           </div>
                           <div className="flex gap-2">

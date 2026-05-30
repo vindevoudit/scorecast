@@ -132,6 +132,9 @@ router.get('/search', publicReadLimiter, optionalAuth, async (req, res) => {
         return {
           id: g.id,
           name: g.name,
+          // Phase 0 T29-1 — surface discriminator so SearchBar can render
+          // the disambiguated label inline.
+          discriminator: g.discriminator,
           visibility: g.visibility,
           isMember,
           hasPassword,

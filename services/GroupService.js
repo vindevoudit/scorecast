@@ -21,6 +21,7 @@
 // time compare is enough for the password-join path's brute-force surface
 // (rate-limited at the route level via `groupJoinPasswordLimiter`).
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const {
   Group,
   GroupMember,
@@ -34,6 +35,7 @@ const { Op } = require('sequelize');
 const errors = require('../lib/errors');
 const { getUserById, getUserByUsername } = require('../lib/users');
 const { getGroupById, getJoinedGroupIds } = require('../lib/groups');
+const { formatGroupLabel } = require('../lib/groupLabel');
 const NotificationService = require('./NotificationService');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
@@ -98,6 +100,14 @@ async function cascadeDelete(group, { transaction } = {}) {
   await group.destroy(opts);
 }
 
+// Phase 0 T29-1 — generate a 6-char uppercase hex discriminator. 24 bits of
+// entropy = 16.7M combinations; collisions are astronomically rare at our
+// group counts but the UNIQUE INDEX in migration 20260530000001 will catch
+// them at INSERT and we retry below.
+function generateDiscriminator() {
+  return crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
 async function createGroup({ ownerId, name, visibility = 'secret', password = null }) {
   // Hash the password ONLY if the owner picked the private tier AND
   // supplied one. Schema validation already rejects password+non-private
@@ -106,13 +116,35 @@ async function createGroup({ ownerId, name, visibility = 'secret', password = nu
   if (visibility === 'private' && password) {
     passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
   }
-  const group = await Group.create({ name, ownerId, visibility, passwordHash });
+  // Phase 0 T29-1 — retry on SequelizeUniqueConstraintError (discriminator
+  // collision). 5 attempts ≈ 1 in 10^32 chance of all colliding.
+  let group = null;
+  let attempt = 0;
+  for (;;) {
+    try {
+      group = await Group.create({
+        name,
+        ownerId,
+        visibility,
+        passwordHash,
+        discriminator: generateDiscriminator(),
+      });
+      break;
+    } catch (err) {
+      if (err?.name === 'SequelizeUniqueConstraintError') {
+        attempt += 1;
+        if (attempt < 5) continue;
+      }
+      throw err;
+    }
+  }
   await GroupMember.create({ groupId: group.id, userId: ownerId });
   const user = await getUserById(ownerId);
   BadgeService.evaluateBadges(ownerId, { groupCreated: true }).catch(() => {});
   return {
     id: group.id,
     name: group.name,
+    discriminator: group.discriminator,
     ownerId: group.ownerId,
     visibility: group.visibility,
     hasPassword: Boolean(passwordHash),
@@ -145,6 +177,7 @@ async function discoverPublic(viewerId) {
   return publicGroups.map((g) => ({
     id: g.id,
     name: g.name,
+    discriminator: g.discriminator,
     ownerId: g.ownerId,
     visibility: g.visibility,
     memberCount: countByGroup.get(g.id) || 0,
@@ -191,6 +224,7 @@ async function getVisible(groupId, viewerId) {
     return {
       id: raw.id,
       name: raw.name,
+      discriminator: raw.discriminator,
       ownerId: raw.ownerId,
       visibility: raw.visibility,
       hasPassword: Boolean(raw.passwordHash),
@@ -236,7 +270,7 @@ async function invite({ groupId, inviterId, username }) {
   NotificationService.notify(
     invitedUser.id,
     'invite',
-    `You were invited to "${group.name}"`,
+    `You were invited to "${formatGroupLabel(group)}"`,
     'Open the Groups tab to accept or decline.',
     `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
@@ -264,7 +298,7 @@ async function acceptInvite({ groupId, inviteId, userId }) {
     NotificationService.notify(
       group.ownerId,
       'group-join',
-      `${user.username} joined "${group.name}"`,
+      `${user.username} joined "${formatGroupLabel(group)}"`,
       null,
       `/?view=groups&groupId=${groupId}`,
     ).catch(() => {});
@@ -307,7 +341,7 @@ async function joinPublic({ groupId, userId }) {
     NotificationService.notify(
       group.ownerId,
       'group-join',
-      `${joiner.username} joined "${group.name}"`,
+      `${joiner.username} joined "${formatGroupLabel(group)}"`,
       null,
       `/?view=groups&groupId=${groupId}`,
     ).catch(() => {});
@@ -348,7 +382,7 @@ async function joinWithPassword({ groupId, userId, password }) {
     NotificationService.notify(
       group.ownerId,
       'group-join',
-      `${joiner.username} joined "${group.name}"`,
+      `${joiner.username} joined "${formatGroupLabel(group)}"`,
       null,
       `/?view=groups&groupId=${groupId}`,
     ).catch(() => {});
@@ -427,7 +461,7 @@ async function requestToJoin({ groupId, requesterId, message }) {
   NotificationService.notify(
     group.ownerId,
     'join-request',
-    `${requester.username} requested to join "${group.name}"`,
+    `${requester.username} requested to join "${formatGroupLabel(group)}"`,
     message ? message.trim().slice(0, 160) : null,
     `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
@@ -493,7 +527,7 @@ async function approveJoinRequest({ groupId, requestId, ownerId }) {
   NotificationService.notify(
     request.requesterId,
     'join-request-approved',
-    `Your request to join "${group.name}" was approved`,
+    `Your request to join "${formatGroupLabel(group)}" was approved`,
     null,
     `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
@@ -517,7 +551,7 @@ async function declineJoinRequest({ groupId, requestId, ownerId }) {
   NotificationService.notify(
     request.requesterId,
     'join-request-declined',
-    `Your request to join "${group.name}" was declined`,
+    `Your request to join "${formatGroupLabel(group)}" was declined`,
     null,
     `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
@@ -546,7 +580,7 @@ async function leave({ groupId, userId }) {
   NotificationService.notify(
     group.ownerId,
     'group-join',
-    `${leaver.username} left "${group.name}"`,
+    `${leaver.username} left "${formatGroupLabel(group)}"`,
     null,
     `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
@@ -571,7 +605,7 @@ async function transferOwnership({ groupId, currentOwnerId, newOwnerId }) {
   NotificationService.notify(
     newOwner.id,
     'group-join',
-    `You are now the owner of "${group.name}"`,
+    `You are now the owner of "${formatGroupLabel(group)}"`,
     null,
     `/?view=groups&groupId=${groupId}`,
   ).catch(() => {});
@@ -585,7 +619,9 @@ async function deleteGroup({ groupId, requesterId }) {
 
   const members = await GroupMember.findAll({ where: { groupId } });
   const memberIds = members.map((m) => m.userId).filter((id) => id !== requesterId);
-  const groupName = group.name;
+  // Phase 0 T29-1 — capture both fields so the post-cascade notification
+  // text still carries the discriminator after the row is destroyed.
+  const groupLabel = formatGroupLabel(group);
 
   await sequelize.transaction(async (t) => {
     await cascadeDelete(group, { transaction: t });
@@ -597,7 +633,7 @@ async function deleteGroup({ groupId, requesterId }) {
     NotificationService.notify(
       memberId,
       'group-join',
-      `Group "${groupName}" was deleted by the owner`,
+      `Group "${groupLabel}" was deleted by the owner`,
       null,
       '/?view=groups',
     ).catch(() => {});

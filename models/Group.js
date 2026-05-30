@@ -13,6 +13,15 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING,
         allowNull: false,
       },
+      // Phase 0 T29-1 — 6-char uppercase hex tag rendered alongside name
+      // so duplicate group names stay visually distinct ("Friday Football
+      // #A3F2D1" vs "Friday Football #7BE091"). Server-set on createGroup
+      // via crypto.randomBytes(3); never user-input. Unique across all
+      // groups (DB-level UNIQUE INDEX).
+      discriminator: {
+        type: DataTypes.CHAR(6),
+        allowNull: false,
+      },
       ownerId: {
         type: DataTypes.UUID,
         allowNull: false,

@@ -41,7 +41,10 @@ function JoinGroupPasswordDialog({ group, onClose }) {
   return (
     <Dialog open onOpenChange={(open) => (open ? null : onClose?.())}>
       <DialogContent>
-        <DialogTitle>Join &ldquo;{group.name}&rdquo;</DialogTitle>
+        <DialogTitle>
+          Join &ldquo;{group.name}
+          {group.discriminator ? ` #${group.discriminator}` : ''}&rdquo;
+        </DialogTitle>
         <DialogDescription>
           This group requires a password. Ask the group owner if you don&apos;t have it.
         </DialogDescription>

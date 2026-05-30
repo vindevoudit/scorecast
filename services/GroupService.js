@@ -664,13 +664,16 @@ async function deleteGroup({ groupId, requesterId }) {
   LeaderboardService.invalidatePrefix(`group:${groupId}`);
 
   for (const memberId of memberIds) {
-    // Group is gone; deep-link to the groups tab only (no groupId).
+    // Group is gone; deep-link to the groups tab only (no groupId). The
+    // `&deleted=1` sentinel disambiguates this from the legacy pre-Tier-30
+    // friend-request link shape (`/?view=groups` bare), which the
+    // Phase-1 `consumeDeepLinks` redirect rewrites to `view=friends`.
     NotificationService.notify(
       memberId,
       'group-join',
       `Group "${groupLabel}" was deleted by the owner`,
       null,
-      '/?view=groups',
+      '/?view=groups&deleted=1',
     ).catch(() => {});
   }
 }

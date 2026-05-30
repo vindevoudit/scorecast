@@ -9,7 +9,6 @@ import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
 import ConfirmModal from '../components/ConfirmModal';
 import EmptyState from '../components/EmptyState';
 import ProfileDrawer from '../components/ProfileDrawer';
-import FriendsList from '../components/FriendsList';
 import NotificationBell from '../components/NotificationBell';
 import RefreshButton from '../components/RefreshButton';
 import SearchBar from '../components/SearchBar';
@@ -31,19 +30,26 @@ import { useGames } from '../hooks/useGames';
 const PicksHistory = lazyWithReload(() => import('../components/PicksHistory'));
 const ProfileView = lazyWithReload(() => import('../components/ProfileView'));
 const AdminPanel = lazyWithReload(() => import('../components/admin/AdminPanel'));
-// Tier 30 Phase 1 — SettingsView lifted out of ProfileView. Lazy-loaded
-// the same way so the per-route bundle stays in line with the other views.
+// Tier 30 Phase 1 — SettingsView + FriendsView lifted out of Profile + Groups.
+// Lazy-loaded the same way so the per-route bundle stays in line with the
+// other views.
 const SettingsView = lazyWithReload(() => import('./SettingsView'));
+const FriendsView = lazyWithReload(() => import('./FriendsView'));
 
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-fg-muted">{label}</p>;
 }
 
+// Tier 30 Phase 1 — sidebar gets a 7th item: Friends. Tab id `'friends'`
+// resolves to FriendsView (formerly hosted inside the Groups view's left
+// column). Order matches the user-goal hierarchy in the plan:
+// Matches → My Picks → Leaderboards → Friends → Groups → Profile → Admin.
 const BASE_TABS = [
   { id: 'games', kicker: 'Games', label: 'Upcoming Matches' },
   { id: 'mypicks', kicker: 'My Picks', label: 'Your History' },
-  { id: 'groups', kicker: 'Groups', label: 'My Groups' },
   { id: 'leaderboard', kicker: 'Leaderboards', label: 'Rankings' },
+  { id: 'friends', kicker: 'Social', label: 'Friends' },
+  { id: 'groups', kicker: 'Groups', label: 'My Groups' },
   { id: 'profile', kicker: 'Profile', label: 'Your Stats' },
 ];
 const ADMIN_TAB = { id: 'admin', kicker: 'Admin', label: 'Manage' };
@@ -100,6 +106,9 @@ function DashboardView() {
 
   const tabs = useMemo(() => {
     if (!user) {
+      // Anon sidebar contract (Tier 11 + Tier 30 Phase 1): only public-
+      // readable surfaces. Friends / My Picks / Profile / Settings / Admin
+      // are all hidden.
       return BASE_TABS.filter(
         (t) => t.id === 'games' || t.id === 'groups' || t.id === 'leaderboard',
       );
@@ -551,10 +560,6 @@ function DashboardView() {
                     ))
                   )}
                 </div>
-
-                <div className="mt-6">
-                  <FriendsList />
-                </div>
               </div>
 
               <div className="space-y-4">
@@ -678,6 +683,12 @@ function DashboardView() {
           {view === 'settings' && user ? (
             <Suspense fallback={<LazyFallback label="Loading settings…" />}>
               <SettingsView />
+            </Suspense>
+          ) : null}
+
+          {view === 'friends' && user ? (
+            <Suspense fallback={<LazyFallback label="Loading friends…" />}>
+              <FriendsView />
             </Suspense>
           ) : null}
         </section>

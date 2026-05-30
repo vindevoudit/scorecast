@@ -20,7 +20,8 @@ const emptyFriends = { friends: [], incoming: [], outgoing: [] };
 
 // Tier 18 Chunk 6 — notification deep-link guards. Module-scope so the
 // memoized consumeDeepLinks callback stays referentially stable.
-// Tier 30 Phase 1 — `'settings'` added (UserMenu → Settings target).
+// Tier 30 Phase 1 — `'settings'` + `'friends'` added (UserMenu → Settings
+// + Sidebar → Friends targets).
 const DEEP_LINK_ALLOWED_VIEWS = [
   'games',
   'mypicks',
@@ -29,6 +30,7 @@ const DEEP_LINK_ALLOWED_VIEWS = [
   'profile',
   'admin',
   'settings',
+  'friends',
 ];
 const DEEP_LINK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -292,6 +294,20 @@ export function DataProvider({ children }) {
       let viewToSet = null;
       if (viewParam && DEEP_LINK_ALLOWED_VIEWS.includes(viewParam)) viewToSet = viewParam;
 
+      // Tier 30 Phase 1 — legacy redirect for friend-request notifications.
+      // Pre-Phase-1 the producer in routes/friends.js emitted
+      // `link: '/?view=groups'` (friend list lived inside Groups). In-flight
+      // notifications still carry that link; routing them to the new
+      // `friends` view keeps the click-through coherent. We trigger only
+      // when there's no groupId param (groupId implies a real group
+      // target) AND no `deleted=1` sentinel (the deleteGroup producer in
+      // services/GroupService.js uses `view=groups&deleted=1` to mark a
+      // legitimate landing on the empty groups tab).
+      const deletedSentinel = params.get('deleted') === '1';
+      if (viewToSet === 'groups' && !groupIdParam && !deletedSentinel) {
+        viewToSet = 'friends';
+      }
+
       if (gameIdParam && DEEP_LINK_UUID_RE.test(gameIdParam)) {
         const game = (gamesList || []).find((g) => g.id === gameIdParam);
         if (game) {
@@ -335,6 +351,9 @@ export function DataProvider({ children }) {
       params.delete('view');
       params.delete('gameId');
       params.delete('groupId');
+      // Phase 1 — `deleted=1` sentinel is consumed by the redirect logic
+      // above; strip so it doesn't show up in the URL after click-through.
+      params.delete('deleted');
       const qs = params.toString();
       const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
       window.history.replaceState({}, '', next);

@@ -40,12 +40,16 @@ router.post(
         status: 'pending',
       });
       const requester = await getUserById(req.user.id);
+      // Tier 30 Phase 1 — link targets the new Friends top-level view
+      // (was `/?view=groups` when FriendsList lived inside Groups). A
+      // legacy redirect inside DataContext.consumeDeepLinks routes any
+      // in-flight pre-Phase-1 link to the new view too.
       notify(
         target.id,
         'friend-request',
         `${requester.username} sent you a friend request`,
-        'Open Groups → Friends to accept or decline.',
-        '/?view=groups',
+        'Open Friends → Requests to accept or decline.',
+        '/?view=friends&tab=requests',
       ).catch(() => {});
       res.json({ success: true, friendship });
     } catch (error) {
@@ -67,12 +71,14 @@ router.post('/friends/:id/accept', authMiddleware, async (req, res) => {
     await friendship.save();
 
     const accepter = await getUserById(req.user.id);
+    // Tier 30 Phase 1 — link targets the new Friends top-level view (see
+    // matching comment on the request-sent notify call above).
     notify(
       friendship.requesterId,
       'friend-request',
       `${accepter.username} accepted your friend request`,
       null,
-      '/?view=groups',
+      '/?view=friends&tab=all',
     ).catch(() => {});
 
     res.json({ success: true });

@@ -1,6 +1,9 @@
 'use strict';
 
 // Tier 5.5b — friend request lifecycle: send → accept / decline / cancel.
+// Tier 30 Phase 1 — Friends became a top-level sidebar surface (was inside
+// the Groups tab). Each test now navigates to the new "Social Friends" tab
+// then drives the three sub-tabs (All / Requests / Find people) as needed.
 // Each test resets friendships between alice + bob via the DB helper so
 // ordering across this file doesn't matter, and so a previous run leaving
 // stale rows can't cause "Friend request already pending" on send.
@@ -26,29 +29,27 @@ test.beforeEach(async () => {
 });
 
 test.afterAll(async () => {
-  // Leave the DB tidy for whatever runs after. We don't close the Sequelize
-  // pool here — workers:1 means a sibling spec would inherit the closed pool.
   if (aliceId && bobId) await clearFriendships([aliceId, bobId]);
 });
 
-// FriendsList lives inside the Groups tab (DashboardView). Tabs are accessed
-// via getByRole('tab', { name: /My Groups/ }) — same pattern as group-lifecycle.spec.js.
-async function openGroupsTab(page) {
-  await page.getByRole('tab', { name: /My Groups/ }).click();
+async function openFriendsTab(page) {
+  await page
+    .getByRole('tab', { name: /Social Friends/ })
+    .first()
+    .click();
   await expect(page.getByRole('heading', { name: 'Friends', level: 2 })).toBeVisible({
     timeout: 10_000,
   });
 }
 
+async function openFriendsSubTab(page, label) {
+  await page.getByRole('tab', { name: label, exact: true }).click();
+}
+
 async function sendFriendRequest(page, targetUsername) {
-  // Tier 19 Chunk 2 — FriendsList replaced the submit-form input with a
-  // debounced autocomplete dropdown. Flow: type → wait for matching row →
-  // click "Add friend" on that row. Input id is now `friend-search`.
+  // Find people sub-tab hosts the search input.
+  await openFriendsSubTab(page, 'Find people');
   await page.locator('#friend-search').fill(targetUsername);
-  // Wait for the result row to surface inside the dropdown panel. The row
-  // is rendered as a <li> containing the username + an Add-friend button.
-  // We scope by the `Add friend` button name + the surrounding text so
-  // we don't pick up an unrelated button elsewhere on the page.
   const row = page
     .locator('li')
     .filter({ hasText: targetUsername })
@@ -64,10 +65,11 @@ test('friend request accept: alice sends → bob accepts → both see each other
   const aliceCtx = await browser.newContext();
   const alicePage = await aliceCtx.newPage();
   await loginViaUI(alicePage, USERS.alice);
-  await openGroupsTab(alicePage);
+  await openFriendsTab(alicePage);
   await sendFriendRequest(alicePage, USERS.bob.username);
 
-  // Outgoing section appears with bob's username.
+  // Outgoing section lives in the Requests sub-tab.
+  await openFriendsSubTab(alicePage, 'Requests');
   const outgoing = alicePage
     .locator('div')
     .filter({ has: alicePage.getByRole('heading', { name: 'Outgoing requests' }) })
@@ -80,7 +82,8 @@ test('friend request accept: alice sends → bob accepts → both see each other
   const bobCtx = await browser.newContext();
   const bobPage = await bobCtx.newPage();
   await loginViaUI(bobPage, USERS.bob);
-  await openGroupsTab(bobPage);
+  await openFriendsTab(bobPage);
+  await openFriendsSubTab(bobPage, 'Requests');
 
   const incoming = bobPage
     .locator('div')
@@ -88,15 +91,14 @@ test('friend request accept: alice sends → bob accepts → both see each other
     .first();
   await expect(incoming).toContainText(USERS.alice.username, { timeout: 10_000 });
 
-  // Scope Accept to the row that mentions alice so we don't accidentally
-  // accept some other unrelated request.
   const aliceRow = incoming
     .locator('> div > div')
     .filter({ hasText: USERS.alice.username })
     .first();
   await aliceRow.getByRole('button', { name: 'Accept', exact: true }).click();
 
-  // After accept, alice appears in Bob's Friends section.
+  // After accept, alice appears in Bob's All sub-tab (Friends section).
+  await openFriendsSubTab(bobPage, 'All');
   const friends = bobPage
     .locator('div')
     .filter({ has: bobPage.getByRole('heading', { name: 'Friends', level: 3 }) })
@@ -105,11 +107,12 @@ test('friend request accept: alice sends → bob accepts → both see each other
   await logoutViaUI(bobPage);
   await bobCtx.close();
 
-  // --- Phase 3: Alice also sees bob in her Friends list. ---
+  // --- Phase 3: Alice also sees bob in her All sub-tab. ---
   const verifyCtx = await browser.newContext();
   const verifyPage = await verifyCtx.newPage();
   await loginViaUI(verifyPage, USERS.alice);
-  await openGroupsTab(verifyPage);
+  await openFriendsTab(verifyPage);
+  await openFriendsSubTab(verifyPage, 'All');
   const aliceFriends = verifyPage
     .locator('div')
     .filter({ has: verifyPage.getByRole('heading', { name: 'Friends', level: 3 }) })
@@ -125,8 +128,9 @@ test('friend request decline: alice sends → bob declines → both lists clear'
   const aliceCtx = await browser.newContext();
   const alicePage = await aliceCtx.newPage();
   await loginViaUI(alicePage, USERS.alice);
-  await openGroupsTab(alicePage);
+  await openFriendsTab(alicePage);
   await sendFriendRequest(alicePage, USERS.bob.username);
+  await openFriendsSubTab(alicePage, 'Requests');
   await expect(alicePage.getByRole('heading', { name: 'Outgoing requests' })).toBeVisible({
     timeout: 10_000,
   });
@@ -137,30 +141,34 @@ test('friend request decline: alice sends → bob declines → both lists clear'
   const bobCtx = await browser.newContext();
   const bobPage = await bobCtx.newPage();
   await loginViaUI(bobPage, USERS.bob);
-  await openGroupsTab(bobPage);
+  await openFriendsTab(bobPage);
+  await openFriendsSubTab(bobPage, 'Requests');
   const incoming = bobPage
     .locator('div')
     .filter({ has: bobPage.getByRole('heading', { name: 'Incoming requests' }) })
     .first();
   await expect(incoming).toContainText(USERS.alice.username, { timeout: 10_000 });
   await incoming.getByRole('button', { name: 'Decline', exact: true }).click();
-  // Incoming section disappears once there are no pending rows.
+  // Incoming section disappears once there are no pending rows — the
+  // Requests sub-tab falls back to the empty-state EmptyState card.
   await expect(bobPage.getByRole('heading', { name: 'Incoming requests' })).toHaveCount(0, {
     timeout: 10_000,
   });
   await logoutViaUI(bobPage);
   await bobCtx.close();
 
-  // --- Alice's outgoing should also clear after decline (Friendship row is destroyed). ---
+  // --- Alice's outgoing should also clear after decline. ---
   const verifyCtx = await browser.newContext();
   const verifyPage = await verifyCtx.newPage();
   await loginViaUI(verifyPage, USERS.alice);
-  await openGroupsTab(verifyPage);
+  await openFriendsTab(verifyPage);
+  await openFriendsSubTab(verifyPage, 'Requests');
   await expect(verifyPage.getByRole('heading', { name: 'Outgoing requests' })).toHaveCount(0, {
     timeout: 10_000,
   });
   // Alice can re-send (no zombie row blocks her).
   await sendFriendRequest(verifyPage, USERS.bob.username);
+  await openFriendsSubTab(verifyPage, 'Requests');
   await expect(verifyPage.getByRole('heading', { name: 'Outgoing requests' })).toBeVisible({
     timeout: 10_000,
   });
@@ -170,12 +178,13 @@ test('friend request decline: alice sends → bob declines → both lists clear'
 test('autocomplete dropdown: per-row CTA flips Add → Request sent after sending; self shows You', async ({
   page,
 }) => {
-  // Tier 19 Chunk 2 — exercises the new dropdown's friendStatus-driven CTA
-  // states without leaning on the full send→accept→friends flow above.
-  // Three states covered: 'self' (You, disabled), 'none' (Add friend),
-  // 'pending-out' (Request sent, disabled).
+  // Tier 19 Chunk 2 — exercises the friendStatus-driven CTA states without
+  // leaning on the full send→accept→friends flow above. Three states:
+  // 'self' (You, disabled), 'none' (Add friend), 'pending-out' (Request
+  // sent, disabled).
   await loginViaUI(page, USERS.alice);
-  await openGroupsTab(page);
+  await openFriendsTab(page);
+  await openFriendsSubTab(page, 'Find people');
 
   // 1. Search for self → the You button renders disabled.
   await page.locator('#friend-search').fill(USERS.alice.username);
@@ -188,8 +197,7 @@ test('autocomplete dropdown: per-row CTA flips Add → Request sent after sendin
     timeout: 5_000,
   });
 
-  // 2. Clear + search for bob → "Add friend" is enabled. Use a different
-  //    fill value first to force the debounced query to drop and re-fire.
+  // 2. Clear + search for bob → "Add friend" is enabled.
   await page.locator('#friend-search').fill('');
   await page.locator('#friend-search').fill(USERS.bob.username);
   const bobRow = page
@@ -201,12 +209,14 @@ test('autocomplete dropdown: per-row CTA flips Add → Request sent after sendin
   await expect(addBtn).toBeEnabled({ timeout: 5_000 });
   await addBtn.click();
 
-  // 3. After Add the dropdown closes + Outgoing section appears.
+  // 3. After Add → switching to Requests reveals the Outgoing section.
+  await openFriendsSubTab(page, 'Requests');
   await expect(page.getByRole('heading', { name: 'Outgoing requests' })).toBeVisible({
     timeout: 10_000,
   });
 
   // 4. Re-search bob → CTA is now disabled "Request sent" (pending-out).
+  await openFriendsSubTab(page, 'Find people');
   await page.locator('#friend-search').fill(USERS.bob.username);
   const bobRowAfter = page
     .locator('li')
@@ -224,8 +234,9 @@ test('friend request cancel: alice cancels before bob acts → bob has no incomi
   const aliceCtx = await browser.newContext();
   const alicePage = await aliceCtx.newPage();
   await loginViaUI(alicePage, USERS.alice);
-  await openGroupsTab(alicePage);
+  await openFriendsTab(alicePage);
   await sendFriendRequest(alicePage, USERS.bob.username);
+  await openFriendsSubTab(alicePage, 'Requests');
 
   const outgoing = alicePage
     .locator('div')
@@ -233,7 +244,8 @@ test('friend request cancel: alice cancels before bob acts → bob has no incomi
     .first();
   await expect(outgoing).toContainText(USERS.bob.username, { timeout: 10_000 });
 
-  // FriendsList wires Cancel → handleUnfriend → DELETE /api/friends/:id.
+  // Cancel → handleUnfriend → DELETE /api/friends/:id. Outgoing section
+  // collapses to the empty-state EmptyState card.
   await outgoing.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(alicePage.getByRole('heading', { name: 'Outgoing requests' })).toHaveCount(0, {
     timeout: 10_000,
@@ -245,7 +257,8 @@ test('friend request cancel: alice cancels before bob acts → bob has no incomi
   const bobCtx = await browser.newContext();
   const bobPage = await bobCtx.newPage();
   await loginViaUI(bobPage, USERS.bob);
-  await openGroupsTab(bobPage);
+  await openFriendsTab(bobPage);
+  await openFriendsSubTab(bobPage, 'Requests');
   await expect(bobPage.getByRole('heading', { name: 'Incoming requests' })).toHaveCount(0, {
     timeout: 10_000,
   });

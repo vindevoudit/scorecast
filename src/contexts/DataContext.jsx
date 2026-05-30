@@ -271,52 +271,72 @@ export function DataProvider({ children }) {
   //                                                     pre-select the group
   // Consumed params are stripped via history.replaceState so a refresh
   // doesn't re-fire the side effects.
-  const consumeDeepLinks = useCallback((gamesList) => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const viewParam = params.get('view');
-    const gameIdParam = params.get('gameId');
-    const groupIdParam = params.get('groupId');
-    if (!viewParam && !gameIdParam && !groupIdParam) return;
+  const consumeDeepLinks = useCallback(
+    (gamesList, groupsList) => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      const viewParam = params.get('view');
+      const gameIdParam = params.get('gameId');
+      const groupIdParam = params.get('groupId');
+      if (!viewParam && !gameIdParam && !groupIdParam) return;
 
-    let viewToSet = null;
-    if (viewParam && DEEP_LINK_ALLOWED_VIEWS.includes(viewParam)) viewToSet = viewParam;
+      let viewToSet = null;
+      if (viewParam && DEEP_LINK_ALLOWED_VIEWS.includes(viewParam)) viewToSet = viewParam;
 
-    if (gameIdParam && DEEP_LINK_UUID_RE.test(gameIdParam)) {
-      const game = (gamesList || []).find((g) => g.id === gameIdParam);
-      if (game) {
-        const targetKey = dayKey(new Date(game.date));
-        const todayKey = dayKey(new Date());
-        if (targetKey === todayKey) params.delete('date');
-        else params.set('date', targetKey);
+      if (gameIdParam && DEEP_LINK_UUID_RE.test(gameIdParam)) {
+        const game = (gamesList || []).find((g) => g.id === gameIdParam);
+        if (game) {
+          const targetKey = dayKey(new Date(game.date));
+          const todayKey = dayKey(new Date());
+          if (targetKey === todayKey) params.delete('date');
+          else params.set('date', targetKey);
+        } else {
+          // Phase 0 P0-6 — game referenced by the deep link no longer
+          // exists (deleted, or anon viewer who never had access). Toast
+          // and strip the param instead of silently landing the user on
+          // an empty calendar day.
+          showStatus('That game is no longer available');
+        }
+        if (!viewToSet) viewToSet = 'games';
       }
-      if (!viewToSet) viewToSet = 'games';
-    }
 
-    if (groupIdParam && DEEP_LINK_UUID_RE.test(groupIdParam)) {
-      setSelectedGroupId(groupIdParam);
-      if (!viewToSet) viewToSet = 'groups';
-    }
+      if (groupIdParam && DEEP_LINK_UUID_RE.test(groupIdParam)) {
+        const knownList = groupsList || [];
+        const known = knownList.find((g) => g.id === groupIdParam);
+        if (known || knownList.length === 0) {
+          // Either resolved or we don't have a definitive list yet
+          // (e.g. boot consumer firing before groups land — anon mode
+          // doesn't populate `groups`). Set blindly; UI will resolve
+          // when the data arrives, and a truly-missing group falls
+          // through to the toast on the next consume.
+          setSelectedGroupId(groupIdParam);
+        } else {
+          showStatus('That group is no longer available');
+        }
+        if (!viewToSet) viewToSet = 'groups';
+      }
 
-    if (viewToSet) setView(viewToSet);
+      if (viewToSet) setView(viewToSet);
 
-    params.delete('view');
-    params.delete('gameId');
-    params.delete('groupId');
-    const qs = params.toString();
-    const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
-    window.history.replaceState({}, '', next);
-    // Tier 20 follow-up — pushState/replaceState don't fire popstate, so
-    // components that initialized state from the URL (notably GamesCalendar's
-    // `selectedKey` useState initializer reading `?date=`) won't pick up the
-    // change while they remain mounted. Notify subscribers so they can re-
-    // read. Only fires when something actually changed (we early-returned
-    // above if nothing matched). Cold loads + cross-tab navigation still
-    // work without the listener via the existing useState initializer path.
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('scorecast:url-changed'));
-    }
-  }, []);
+      params.delete('view');
+      params.delete('gameId');
+      params.delete('groupId');
+      const qs = params.toString();
+      const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', next);
+      // Tier 20 follow-up — pushState/replaceState don't fire popstate, so
+      // components that initialized state from the URL (notably GamesCalendar's
+      // `selectedKey` useState initializer reading `?date=`) won't pick up the
+      // change while they remain mounted. Notify subscribers so they can re-
+      // read. Only fires when something actually changed (we early-returned
+      // above if nothing matched). Cold loads + cross-tab navigation still
+      // work without the listener via the existing useState initializer path.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('scorecast:url-changed'));
+      }
+    },
+    [showStatus],
+  );
 
   // In-app deep-link navigator (Tier 19 follow-up). Used by the NotificationBell
   // to make a notification row's stored `link` actually go somewhere — pushes
@@ -332,16 +352,16 @@ export function DataProvider({ children }) {
       } catch {
         return;
       }
-      consumeDeepLinks(games);
+      consumeDeepLinks(games, groups);
     },
-    [consumeDeepLinks, games],
+    [consumeDeepLinks, games, groups],
   );
 
   // Initial boot. Try the authed path first; on 401 (no session) fall back to
   // the anonymous path so visitors land on a populated browse-mode dashboard.
   useEffect(() => {
     loadDashboard()
-      .then((result) => consumeDeepLinks(result?.games))
+      .then((result) => consumeDeepLinks(result?.games, result?.groups))
       .catch(async (error) => {
         if (
           error.status === 401 ||
@@ -350,7 +370,11 @@ export function DataProvider({ children }) {
         ) {
           try {
             const anonResult = await loadAnonDashboard();
-            consumeDeepLinks(anonResult?.games);
+            // Anon path has no groups in scope — pass null so consumeDeepLinks
+            // doesn't false-toast on a missing groupId (the only valid anon
+            // groupId target is a public group, which is reachable but the
+            // anon payload doesn't carry membership).
+            consumeDeepLinks(anonResult?.games, null);
           } catch (anonError) {
             if (anonError.message !== 'Session expired') showStatus(anonError.message);
           }

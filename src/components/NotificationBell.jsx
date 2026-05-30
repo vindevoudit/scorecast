@@ -9,12 +9,14 @@ import { timeAgo } from '../utils/time';
 import { useRequest } from '../hooks/useRequest';
 import { useNotifications } from '../hooks/useNotifications';
 import { useData } from '../hooks/useData';
+import { useAuth } from '../hooks/useAuth';
 import { Popover, PopoverTrigger, PopoverContent } from './ui';
 
 function NotificationBell() {
   const request = useRequest();
   const { showStatus } = useNotifications();
   const { navigateToDeepLink } = useData();
+  const { user } = useAuth();
   const onError = (msg) => {
     if (msg && msg !== 'Session expired') showStatus(msg);
   };
@@ -33,7 +35,19 @@ function NotificationBell() {
     }
   };
 
+  // Phase 0 P0-5 — gate the load + poll on user?.id. Without this, a tab
+  // that loaded while authed but lost its session (e.g. user signed out
+  // in a sibling tab, or refresh-token expired in the background) would
+  // keep polling /api/notifications. Each tick 401'd, useRequest's
+  // refresh-retry path failed, clearSession() fired, and the next tick
+  // started the cycle over — log spam + battery drain. Gating on user
+  // means the existing 401 → clearSession path cleanly stops the loop.
   useEffect(() => {
+    if (!user?.id) {
+      setItems([]);
+      setUnreadCount(0);
+      return undefined;
+    }
     load();
     // PWA Chunk 5 — drop the poll cadence from 30s to 5 min when a service
     // worker is active. Active SW => the user is on a build that wires Web
@@ -54,7 +68,7 @@ function NotificationBell() {
       window.removeEventListener('scorecast:revalidate', onRevalidate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.id]);
 
   const markRead = async (id) => {
     try {

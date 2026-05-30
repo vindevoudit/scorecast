@@ -4,9 +4,18 @@
 // Fluid UI tier — mobile drawer migrated to Radix Dialog (via low-level
 // primitives so the overlay can be md:hidden and the content can anchor
 // to the left edge as a slide-in sheet). Desktop sidebar untouched.
+// Tier 30 Phase 2 Chunk 2.3 — active-tab indicator promoted to a
+// motion `<m.span layoutId>` so it slides between tabs instead of
+// snapping; icon size bumped from h-5 to h-6 for a beefier hit-target
+// feel; mobile drawer header gets the `.bg-arena-grid-bold` backdrop
+// so it reads as a stadium broadcast header. Desktop sidebar untouched
+// — the indicator is now smoothly animated but the surrounding chrome
+// stays minimal.
 
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Dialog } from './ui';
+import { m } from '../lib/motion';
+import { sidebarTabIndicator } from '../lib/motionVariants';
 
 const ICONS = {
   games: (props) => (
@@ -89,6 +98,15 @@ function NavItem({ tab, active, collapsed, onSelect }) {
   // Tier 30 Phase 1 follow-up — kicker removed. Sidebar entries render
   // a single label per item. Playwright contracts switch from
   // `${kicker} ${label}` accessible name to just `label`.
+  //
+  // Tier 30 Phase 2 — active indicator is rendered as an `<m.span
+  // layoutId="sidebar-active-indicator">`. Because the same layoutId
+  // appears in exactly one NavItem at any time, motion auto-animates
+  // the indicator's position from the previous tab to the new one
+  // (springs via `sidebarTabIndicator`). prefers-reduced-motion users
+  // get an instant snap automatically — handled inside motion. The
+  // span sits absolute, so it never affects the button's accessible
+  // name or focus ring.
   return (
     <button
       role="tab"
@@ -101,12 +119,14 @@ function NavItem({ tab, active, collapsed, onSelect }) {
       } ${collapsed ? 'justify-center' : ''}`}
     >
       {active ? (
-        <span
+        <m.span
+          layoutId="sidebar-active-indicator"
+          transition={sidebarTabIndicator}
           aria-hidden="true"
-          className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r bg-accent"
+          className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r bg-accent shadow-led"
         />
       ) : null}
-      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+      <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />
       <span
         className={`min-w-0 flex-1 truncate text-sm font-semibold ${collapsed ? 'sr-only' : ''}`}
       >
@@ -130,7 +150,7 @@ function SidebarBody({
       <div
         className={`flex items-center gap-2 px-3 pb-3 pt-4 ${
           collapsed && !isMobile ? 'justify-center' : 'justify-between'
-        }`}
+        } ${isMobile ? 'bg-arena-grid-bold border-b border-default' : ''}`}
       >
         {!collapsed || isMobile ? (
           <span className="text-xs font-semibold uppercase tracking-[0.32em] text-accent/80">

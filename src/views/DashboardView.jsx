@@ -290,6 +290,11 @@ function DashboardView() {
                 <div className="flex min-w-0 items-center gap-3">{search}</div>
                 {brand}
                 <div className="flex items-center justify-end gap-3">
+                  {/* Tier 30 Phase 2 — 1px vertical divider anchors the
+                      right-side action cluster visually, separating it from
+                      the centered wordmark. Hidden on mobile (each row has
+                      its own composition). */}
+                  <span aria-hidden="true" className="h-6 w-px shrink-0 bg-divider" />
                   {user ? (
                     <>
                       <RefreshButton />

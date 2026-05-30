@@ -250,27 +250,50 @@ router.post('/auth/refresh', async (req, res) => {
     return res.status(401).json({ error: 'No refresh token' });
   }
   try {
-    const row = await RefreshToken.findOne({
-      where: {
-        tokenHash: crypto.createHash('sha256').update(raw).digest('hex'),
-        revokedAt: null,
-        expiresAt: { [Op.gt]: new Date() },
-      },
+    // Phase 0 P0-8 — refresh-token rotation race fix. Two parallel tabs
+    // sharing the same refresh cookie would BOTH find the still-active
+    // row, both revoke it, both issue fresh pairs — one wins, the other
+    // gets an invalid Set-Cookie + the tab thinks it succeeded but the
+    // next request 401s. SELECT ... FOR UPDATE serialises: the first
+    // request acquires the row lock, the second waits, and on the
+    // second's turn the row is already revoked so it returns the
+    // standard 401 → frontend useRequest retries via the new pair.
+    //
+    // Both row.save() and setAuthCookies (which creates the new
+    // RefreshToken row inside) must land inside the same transaction so
+    // the rotation is atomic.
+    const tokenHash = crypto.createHash('sha256').update(raw).digest('hex');
+    let user = null;
+    await sequelize.transaction(async (t) => {
+      const row = await RefreshToken.findOne({
+        where: { tokenHash },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+      if (!row || row.revokedAt || (row.expiresAt && new Date(row.expiresAt) <= new Date())) {
+        const err = new Error('Refresh token invalid or expired');
+        err.status = 401;
+        throw err;
+      }
+      user = await User.findByPk(row.userId, { transaction: t });
+      if (!user) {
+        const err = new Error('User not found');
+        err.status = 401;
+        throw err;
+      }
+      row.revokedAt = new Date();
+      await row.save({ hooks: false, transaction: t });
+      await setAuthCookies(res, user, {
+        userAgent: req.headers['user-agent'],
+        transaction: t,
+      });
     });
-    if (!row) {
-      clearAuthCookies(res);
-      return res.status(401).json({ error: 'Refresh token invalid or expired' });
-    }
-    const user = await User.findByPk(row.userId);
-    if (!user) {
-      clearAuthCookies(res);
-      return res.status(401).json({ error: 'User not found' });
-    }
-    row.revokedAt = new Date();
-    await row.save({ hooks: false });
-    await setAuthCookies(res, user, { userAgent: req.headers['user-agent'] });
     res.status(204).end();
   } catch (error) {
+    if (error?.status === 401) {
+      clearAuthCookies(res);
+      return res.status(401).json({ error: error.message || 'Refresh token invalid or expired' });
+    }
     req.log.error({ err: error.message }, 'refresh failed');
     clearAuthCookies(res);
     res.status(500).json({ error: 'Refresh failed' });

@@ -45,30 +45,41 @@ async function createPick({ userId, gameId, choice }) {
   // already-scored game" branch only applies on the bulk-import or
   // admin-driven paths (and the matrix arm "Pick created on already-
   // scored game" in tier24.md).
-  await sequelize.transaction(async (t) => {
-    let pick = await Pick.findOne({ where: { userId, gameId }, transaction: t });
-    if (pick) {
-      // Re-pick: reverse the prior delta (if any) before re-applying. The
-      // pick keeps its row identity; only choice + snapshot + applied*
-      // change. The reverse step is necessary because changing `choice`
-      // can flip won-counter contribution and (post-kickoff edge cases
-      // aside) re-snap probabilities can shift points too.
-      pick.choice = choice;
-      pick.submittedAt = new Date();
-      pick.pickedHomeProbability = snapshot.pickedHomeProbability;
-      pick.pickedDrawProbability = snapshot.pickedDrawProbability;
-      pick.pickedAwayProbability = snapshot.pickedAwayProbability;
-      await pick.save({ transaction: t });
-    } else {
-      pick = await Pick.create({ userId, gameId, choice, ...snapshot }, { transaction: t });
+  //
+  // Phase 0 P0-7 — idempotent create. Two concurrent POSTs from the same
+  // user on the same game (rapid double-tap, double-submit, redundant
+  // retry) would race the findOne above and both hit Pick.create, with
+  // one hitting picks_user_game_unique and 500ing. Catch the unique-
+  // violation, restart the transaction, and on the second pass the
+  // findOne resolves to the row the other writer just created → the
+  // user-visible result is a no-op (or a re-pick if choice changed).
+  let attempt = 0;
+  for (;;) {
+    try {
+      await sequelize.transaction(async (t) => {
+        let pick = await Pick.findOne({ where: { userId, gameId }, transaction: t });
+        if (pick) {
+          // Re-pick: reverse the prior delta (if any) before re-applying.
+          pick.choice = choice;
+          pick.submittedAt = new Date();
+          pick.pickedHomeProbability = snapshot.pickedHomeProbability;
+          pick.pickedDrawProbability = snapshot.pickedDrawProbability;
+          pick.pickedAwayProbability = snapshot.pickedAwayProbability;
+          await pick.save({ transaction: t });
+        } else {
+          pick = await Pick.create({ userId, gameId, choice, ...snapshot }, { transaction: t });
+        }
+        await UserScoreService.applyPickTransition(t, { pick, game });
+      });
+      break;
+    } catch (err) {
+      if (err?.name === 'SequelizeUniqueConstraintError') {
+        attempt += 1;
+        if (attempt < 3) continue;
+      }
+      throw err;
     }
-    // Idempotency matrix runs regardless — applyPickTransition is a no-op
-    // when game.result is null AND pick.appliedResult is null AND
-    // pick.appliedPoints is 0 (the standard "scheduled game, pre-kickoff"
-    // path). When the game IS scored (admin/bulk-import edge case), the
-    // delta lands inside the same transaction as the pick save.
-    await UserScoreService.applyPickTransition(t, { pick, game });
-  });
+  }
 
   BadgeService.evaluateBadges(userId).catch(() => {});
   LeaderboardService.invalidate('all');

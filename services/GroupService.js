@@ -425,12 +425,24 @@ async function requestToJoin({ groupId, requesterId, message }) {
   const isMember = await GroupMember.findOne({ where: { groupId, userId: requesterId } });
   if (isMember) throw errors.badRequest('Already a member');
 
-  // Active request? Partial-unique index will catch duplicates; checking
-  // here gives a friendlier 400 instead of the constraint error surface.
+  // Phase 0 P0-9 — idempotent re-request. Previously a rapid double-tap
+  // (or any second call before the user's pending request was resolved)
+  // 400'd with "You already have a pending request". User-visible result
+  // identical either way, but the second tap now just returns the
+  // existing row instead of surfacing an error.
   const active = await GroupJoinRequest.findOne({
     where: { groupId, requesterId, declinedAt: null },
   });
-  if (active) throw errors.badRequest('You already have a pending request for this group');
+  if (active) {
+    return {
+      id: active.id,
+      groupId: active.groupId,
+      requesterId: active.requesterId,
+      message: active.message,
+      createdAt: active.createdAt,
+      alreadyExisted: true,
+    };
+  }
 
   // Cooldown — most-recent decline must be ≥ 24h ago.
   const recentDecline = await GroupJoinRequest.findOne({
@@ -451,11 +463,34 @@ async function requestToJoin({ groupId, requesterId, message }) {
     throw err;
   }
 
-  const row = await GroupJoinRequest.create({
-    groupId,
-    requesterId,
-    message: message ? message.trim().slice(0, 160) : null,
-  });
+  // Race-window guard: if a concurrent request slipped past the active-
+  // check above, the partial unique index `group_join_requests_active_uniq`
+  // catches it. Re-resolve the existing row and return that.
+  let row;
+  try {
+    row = await GroupJoinRequest.create({
+      groupId,
+      requesterId,
+      message: message ? message.trim().slice(0, 160) : null,
+    });
+  } catch (err) {
+    if (err?.name === 'SequelizeUniqueConstraintError') {
+      const existing = await GroupJoinRequest.findOne({
+        where: { groupId, requesterId, declinedAt: null },
+      });
+      if (existing) {
+        return {
+          id: existing.id,
+          groupId: existing.groupId,
+          requesterId: existing.requesterId,
+          message: existing.message,
+          createdAt: existing.createdAt,
+          alreadyExisted: true,
+        };
+      }
+    }
+    throw err;
+  }
 
   const requester = await getUserById(requesterId);
   NotificationService.notify(

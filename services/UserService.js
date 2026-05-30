@@ -58,30 +58,45 @@ async function getProfileByUsername({ username, viewer }) {
     throw errors.notFound('User not found');
   }
 
-  const [userPicks, allGames, badges] = await Promise.all([
-    Pick.findAll({ where: { userId: target.id } }),
-    Game.findAll(),
+  // Phase 0 P0-3 — read the materialized totals from user_scores_overall
+  // (Tier 24 dual-writer keeps this row in sync on every score-affecting
+  // mutation). Fall back to the on-the-fly aggregate when the row is
+  // missing (legacy users with all picks pre-dating the migration whose
+  // backfill hasn't run yet). picksMade still comes from a Pick.count
+  // because the materialized table only tracks SCORED picks.
+  const [overallRow, picksMade, badges] = await Promise.all([
+    UserScoreOverall.findOne({ where: { userId: target.id } }),
+    Pick.count({ where: { userId: target.id } }),
     Badge.findAll({ where: { userId: target.id } }),
   ]);
 
-  const gameById = new Map(allGames.map((g) => [g.id, g]));
   let totalPoints = 0;
   let picksWon = 0;
   let picksScored = 0;
-  for (const pick of userPicks) {
-    const game = gameById.get(pick.gameId);
-    if (!game) continue;
-    if (game.result) {
-      picksScored += 1;
-      totalPoints += scorePick(pick, game);
-      if (pick.choice === game.result) picksWon += 1;
-    }
+  let usedMaterialized = false;
+  if (overallRow) {
+    totalPoints = overallRow.points;
+    picksScored = overallRow.picksScored;
+    picksWon = overallRow.picksWon;
+    usedMaterialized = true;
   }
-  const picksMade = userPicks.length;
-  const winRate = picksScored > 0 ? picksWon / picksScored : 0;
 
-  const recentPicks = [...userPicks]
-    .map((pick) => ({ pick, game: gameById.get(pick.gameId) }))
+  // Fetch the 10 most recent picks server-side. Narrow Game.findAll to
+  // ONLY the games these picks point at instead of the previous full-
+  // table scan. (Previously Game.findAll() loaded every game in the
+  // database — fine in beta with a few thousand rows, scary at launch
+  // with multi-league multi-season state.)
+  const recentPickRows = await Pick.findAll({
+    where: { userId: target.id },
+    order: [['createdAt', 'DESC']],
+    limit: 50, // wide net so we can drop picks whose game vanished
+  });
+  const pickGameIds = [...new Set(recentPickRows.map((p) => p.gameId))];
+  const recentGames =
+    pickGameIds.length > 0 ? await Game.findAll({ where: { id: { [Op.in]: pickGameIds } } }) : [];
+  const recentGameById = new Map(recentGames.map((g) => [g.id, g]));
+  const recentPicks = recentPickRows
+    .map((pick) => ({ pick, game: recentGameById.get(pick.gameId) }))
     .filter((row) => row.game)
     .sort((a, b) => new Date(b.game.date) - new Date(a.game.date))
     .slice(0, 10)
@@ -95,6 +110,29 @@ async function getProfileByUsername({ username, viewer }) {
       points: scorePick(pick, game),
     }));
 
+  // Fallback path: no materialized row → recompute from full pick set.
+  // Same math as the legacy code, just behind the if so the common case
+  // skips loading every game in the DB.
+  if (!usedMaterialized) {
+    const allUserPicks = await Pick.findAll({ where: { userId: target.id } });
+    const allPickGameIds = [...new Set(allUserPicks.map((p) => p.gameId))];
+    const allRelevantGames =
+      allPickGameIds.length > 0
+        ? await Game.findAll({ where: { id: { [Op.in]: allPickGameIds } } })
+        : [];
+    const allGameById = new Map(allRelevantGames.map((g) => [g.id, g]));
+    for (const pick of allUserPicks) {
+      const game = allGameById.get(pick.gameId);
+      if (!game) continue;
+      if (game.result) {
+        picksScored += 1;
+        totalPoints += scorePick(pick, game);
+        if (pick.choice === game.result) picksWon += 1;
+      }
+    }
+  }
+  const winRate = picksScored > 0 ? picksWon / picksScored : 0;
+
   // Anonymous viewers don't have friendship or head-to-head data.
   let friendship = null;
   let friendStatus = null;
@@ -103,13 +141,26 @@ async function getProfileByUsername({ username, viewer }) {
     friendship = await getFriendshipBetween(viewer.id, target.id);
     friendStatus = friendStatusFrom(friendship, viewer.id, target.id);
     if (friendStatus === 'friends') {
-      const viewerPicks = await Pick.findAll({ where: { userId: viewer.id } });
+      // Phase 0 P0-3 — H2H now joins on the intersection of the two
+      // users' picks instead of loading every game in the DB. Pull each
+      // user's picks, find shared gameIds, then a single targeted
+      // Game.findAll for just those rows.
+      const [targetPicks, viewerPicks] = await Promise.all([
+        Pick.findAll({ where: { userId: target.id } }),
+        Pick.findAll({ where: { userId: viewer.id } }),
+      ]);
       const viewerByGame = new Map(viewerPicks.map((p) => [p.gameId, p]));
+      const sharedGameIds = targetPicks.map((p) => p.gameId).filter((gid) => viewerByGame.has(gid));
+      const sharedGames =
+        sharedGameIds.length > 0
+          ? await Game.findAll({ where: { id: { [Op.in]: sharedGameIds } } })
+          : [];
+      const sharedGameById = new Map(sharedGames.map((g) => [g.id, g]));
       let viewerWins = 0;
       let targetWins = 0;
       let ties = 0;
-      for (const pick of userPicks) {
-        const game = gameById.get(pick.gameId);
+      for (const pick of targetPicks) {
+        const game = sharedGameById.get(pick.gameId);
         if (!game || !game.result) continue;
         const viewerPick = viewerByGame.get(pick.gameId);
         if (!viewerPick) continue;

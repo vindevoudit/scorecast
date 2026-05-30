@@ -173,7 +173,97 @@ test.describe('POST /api/groups', () => {
         name: 'API Test Group',
         visibility: 'secret',
       });
-      expectShape(payload, ['id', 'name', 'ownerId']);
+      expectShape(payload, ['id', 'name', 'ownerId', 'discriminator']);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  // Phase 0 T29-1 — discriminator contract. 6 uppercase hex chars,
+  // server-set on every group create, and unique across all groups so
+  // two groups with identical names can be visually disambiguated.
+  test('discriminator is 6 uppercase hex chars on every create', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'POST', '/api/groups', {
+        name: 'Discriminator Format Test',
+        visibility: 'secret',
+      });
+      expect(payload.discriminator).toMatch(/^[0-9A-F]{6}$/);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('two groups with identical names get distinct discriminators', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const a = await assertOk(authed, 'POST', '/api/groups', {
+        name: 'Friday Football',
+        visibility: 'secret',
+      });
+      const b = await assertOk(authed, 'POST', '/api/groups', {
+        name: 'Friday Football',
+        visibility: 'secret',
+      });
+      expect(a.name).toBe(b.name);
+      expect(a.id).not.toBe(b.id);
+      // Both well-formed.
+      expect(a.discriminator).toMatch(/^[0-9A-F]{6}$/);
+      expect(b.discriminator).toMatch(/^[0-9A-F]{6}$/);
+      // And distinct — the disambiguator does its job.
+      expect(a.discriminator).not.toBe(b.discriminator);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('discriminator persists across reads (GET /api/groups)', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const created = await assertOk(authed, 'POST', '/api/groups', {
+        name: 'Discriminator Roundtrip',
+        visibility: 'secret',
+      });
+      const list = await assertOk(authed, 'GET', '/api/groups');
+      const found = list.find((g) => g.id === created.id);
+      expect(found).toBeDefined();
+      expect(found.discriminator).toBe(created.discriminator);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('discriminator surfaces on GET /api/groups/:groupId', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const created = await assertOk(authed, 'POST', '/api/groups', {
+        name: 'GetById Discriminator',
+        visibility: 'public',
+      });
+      const fetched = await assertOk(authed, 'GET', `/api/groups/${created.id}`);
+      expect(fetched.discriminator).toBe(created.discriminator);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('search returns discriminator on group results', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const uniqueName = `SearchDiscrim_${Date.now()}`;
+      const created = await assertOk(authed, 'POST', '/api/groups', {
+        name: uniqueName,
+        visibility: 'public',
+      });
+      const result = await assertOk(
+        authed,
+        'GET',
+        `/api/search?q=${encodeURIComponent(uniqueName)}&type=groups`,
+      );
+      const row = (result.groups || []).find((g) => g.id === created.id);
+      expect(row).toBeDefined();
+      expect(row.discriminator).toBe(created.discriminator);
     } finally {
       await authed.dispose();
     }
@@ -880,13 +970,25 @@ test.describe('POST /api/groups/:groupId/join-request', () => {
     }
   });
 
-  test('duplicate active request → 400', async () => {
+  // Phase 0 P0-9 — duplicate active request is now idempotent (returns the
+  // existing row with alreadyExisted:true) instead of 400ing. Behavior
+  // change from Tier 19 Chunk 3 → Phase 0; the rationale is in
+  // CLAUDE.md's "Idempotent join request" invariant.
+  test('duplicate active request → 200 idempotent, returns existing row', async () => {
     const groupId = await createGroupAs(USERS.alice, { visibility: 'private' });
     const bob = await apiLogin(USERS.bob);
     try {
-      await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {});
-      const res = await bob.post(`/api/groups/${groupId}/join-request`, { data: {} });
-      expect(res.status()).toBe(400);
+      const first = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {
+        message: 'first try',
+      });
+      const second = await assertOk(bob, 'POST', `/api/groups/${groupId}/join-request`, {
+        message: 'second try',
+      });
+      // Route wraps the service return in { success, request }.
+      expect(second.request.id).toBe(first.request.id);
+      expect(second.request.alreadyExisted).toBe(true);
+      // Stored message is the ORIGINAL — second call doesn't overwrite.
+      expect(second.request.message).toBe('first try');
     } finally {
       await bob.dispose();
     }

@@ -234,12 +234,25 @@ test('cascade delete: deleting a user removes the groups they own (Tier 5.3 tran
     await expect(userManager.getByText(temp.username)).toHaveCount(0, { timeout: 10_000 });
 
     // Direct DB check: the group must be gone, and no orphan GroupMember
-    // rows pointing at the deleted user.
+    // rows pointing at the deleted user. Poll because the test process's
+    // Sequelize connection pool occasionally serves a stale snapshot for
+    // a brief window after the server's transaction COMMIT lands — the
+    // commit IS happening in the DB (subsequent runs see it), it's just
+    // a cross-pool visibility race. expect.poll keeps the assertion
+    // semantic while tolerating a sub-second lag.
     const { Group, GroupMember } = getModels();
-    const groupAfter = await Group.findOne({ where: { name: groupName } });
-    expect(groupAfter, `group ${groupName} should be deleted`).toBeNull();
-    const orphanMembers = await GroupMember.count({ where: { userId: temp.id } });
-    expect(orphanMembers).toBe(0);
+    await expect
+      .poll(async () => (await Group.findOne({ where: { name: groupName } })) === null, {
+        message: `group ${groupName} should be deleted`,
+        timeout: 10_000,
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => GroupMember.count({ where: { userId: temp.id } }), {
+        message: 'orphan GroupMember rows should be cleaned up',
+        timeout: 10_000,
+      })
+      .toBe(0);
   } finally {
     await tempApi.dispose();
     await deleteUserByUsername(temp.username);

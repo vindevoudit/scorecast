@@ -301,17 +301,22 @@ export function DataProvider({ children }) {
       }
 
       if (groupIdParam && DEEP_LINK_UUID_RE.test(groupIdParam)) {
-        const knownList = groupsList || [];
-        const known = knownList.find((g) => g.id === groupIdParam);
-        if (known || knownList.length === 0) {
-          // Either resolved or we don't have a definitive list yet
-          // (e.g. boot consumer firing before groups land — anon mode
-          // doesn't populate `groups`). Set blindly; UI will resolve
-          // when the data arrives, and a truly-missing group falls
-          // through to the toast on the next consume.
+        // Three states for groupsList:
+        //   null      → anon caller (loadAnonDashboard); never toast
+        //   [...]     → authed list, may be empty for users with 0 groups
+        //   undefined → caller didn't pass it (shouldn't happen post-Phase 0
+        //               but guard for completeness — treated as anon)
+        if (groupsList == null) {
+          // Anon / no-info path — set blindly so a valid public-group
+          // deep-link still works.
           setSelectedGroupId(groupIdParam);
         } else {
-          showStatus('That group is no longer available');
+          const known = groupsList.find((g) => g.id === groupIdParam);
+          if (known) {
+            setSelectedGroupId(groupIdParam);
+          } else {
+            showStatus('That group is no longer available');
+          }
         }
         if (!viewToSet) viewToSet = 'groups';
       }

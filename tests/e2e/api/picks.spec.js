@@ -154,6 +154,31 @@ test.describe('POST /api/picks', () => {
       await authed.dispose();
     }
   });
+
+  // Phase 0 P0-7 — concurrent POSTs from the same user on the same game
+  // both succeed instead of one 500ing on picks_user_game_unique. The
+  // service wraps the transaction in a retry loop that catches the
+  // SequelizeUniqueConstraintError. This test exercises the retry branch
+  // by firing both POSTs in parallel.
+  test('parallel POSTs from the same client → both 200, single pick row (P0-7)', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const [a, b] = await Promise.all([
+        authed.post('/api/picks', { data: { gameId: GAMES.lions.id, choice: 'home' } }),
+        authed.post('/api/picks', { data: { gameId: GAMES.lions.id, choice: 'home' } }),
+      ]);
+      expect(a.status()).toBe(200);
+      expect(b.status()).toBe(200);
+      // Verify only one Pick row exists for (alice, lions).
+      const list = await assertOk(authed, 'GET', '/api/picks');
+      const matching = list.filter(
+        (p) => p.gameId === GAMES.lions.id && p.userId === USERS.alice.id,
+      );
+      expect(matching.length).toBe(1);
+    } finally {
+      await authed.dispose();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

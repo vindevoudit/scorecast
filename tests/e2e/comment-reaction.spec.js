@@ -4,7 +4,18 @@ const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
 const { selectGameDate } = require('./helpers/games');
 const { closestCard } = require('./helpers/selectors');
+const { clearGameResults, clearPicksAndBadges } = require('./helpers/api');
 const { USERS, GAMES } = require('./fixtures/data');
+
+// Phase 0 verification — under suite load, a prior spec sometimes leaves
+// the Eagles game with a `result` set (and alice with a scored pick on
+// it). The CommentThread surface renders the same regardless, but the
+// "Pick X to win" button vanishes once the game has a result, so the
+// test's initial visibility wait fails. Reset both before the test runs.
+test.beforeAll(async () => {
+  await clearGameResults([GAMES.eagles.id]);
+  await clearPicksAndBadges([USERS.alice.id]);
+});
 
 // 5.5.5 — Comment + reaction: post → edit → react → delete.
 test('comment thread: alice posts, edits, reacts, deletes', async ({ browser }) => {

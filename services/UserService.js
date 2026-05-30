@@ -86,9 +86,12 @@ async function getProfileByUsername({ username, viewer }) {
   // table scan. (Previously Game.findAll() loaded every game in the
   // database — fine in beta with a few thousand rows, scary at launch
   // with multi-league multi-season state.)
+  //
+  // Pick model has `timestamps: false` — order by `submittedAt` (the
+  // pick's own timestamp column), NOT `createdAt` which doesn't exist.
   const recentPickRows = await Pick.findAll({
     where: { userId: target.id },
-    order: [['createdAt', 'DESC']],
+    order: [['submittedAt', 'DESC']],
     limit: 50, // wide net so we can drop picks whose game vanished
   });
   const pickGameIds = [...new Set(recentPickRows.map((p) => p.gameId))];

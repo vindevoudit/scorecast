@@ -39,6 +39,9 @@ test.describe('GET /api/me', () => {
         'displayName',
         'email',
         'emailVerifiedAt',
+        // Phase 0 P0-4 — observability column surfaced for the ChangeEmailPanel
+        // "Sent N min ago" copy. Always present on every /me response.
+        'lastVerificationSentAt',
         // twoFactorEnabled stays in the response (always false post-Tier-22)
         // until 2FA is revived; expectShape just checks the listed keys.
         'twoFactorEnabled',
@@ -324,6 +327,74 @@ test.describe('PATCH /api/me/email', () => {
         email: 'x@example.test',
         currentPassword: USERS.alice.password,
       });
+    } finally {
+      await authed.dispose();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// POST /api/me/resend-verification (Phase 0 P0-4)
+// ---------------------------------------------------------------------------
+
+test.describe('POST /api/me/resend-verification', () => {
+  // Test users (bob in particular) ship as verified per the seed. Toggling
+  // emailVerifiedAt around tests lets us cover both branches without
+  // permanently changing seed state.
+
+  test.afterEach(async () => {
+    // Restore bob's verified state + clear lastVerificationSentAt to a
+    // known baseline so order across tests in this file stays harmless.
+    await updateUserFields(USERS.bob.id, {
+      emailVerifiedAt: new Date(),
+      lastVerificationSentAt: null,
+    });
+  });
+
+  test('unverified user → 200 with sent:true and lastVerificationSentAt populated', async () => {
+    // Stage: bob is unverified.
+    await updateUserFields(USERS.bob.id, {
+      emailVerifiedAt: null,
+      lastVerificationSentAt: null,
+    });
+    const authed = await apiLogin(USERS.bob);
+    try {
+      const payload = await assertOk(authed, 'POST', '/api/me/resend-verification', {});
+      expect(payload.sent).toBe(true);
+      // ISO timestamp string; loose check that it's a parseable date.
+      expect(payload.lastVerificationSentAt).toBeTruthy();
+      expect(Number.isFinite(new Date(payload.lastVerificationSentAt).getTime())).toBe(true);
+
+      // GET /me reflects the same value.
+      const me = await assertOk(authed, 'GET', '/api/me');
+      expect(me.lastVerificationSentAt).toBe(payload.lastVerificationSentAt);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('already-verified → 200 with sent:false alreadyVerified:true (idempotent)', async () => {
+    // Bob's seeded as verified — no setup needed.
+    await updateUserFields(USERS.bob.id, { emailVerifiedAt: new Date() });
+    const authed = await apiLogin(USERS.bob);
+    try {
+      const payload = await assertOk(authed, 'POST', '/api/me/resend-verification', {});
+      expect(payload.sent).toBe(false);
+      expect(payload.alreadyVerified).toBe(true);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('no auth → 401', async () => {
+    await assertUnauthorized('POST', '/api/me/resend-verification', {});
+  });
+
+  test('no CSRF → 403', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      await assertCsrfRejected(authed, 'POST', '/api/me/resend-verification', {});
     } finally {
       await authed.dispose();
     }

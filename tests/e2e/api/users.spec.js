@@ -235,4 +235,75 @@ test.describe('GET /api/users/:username/profile', () => {
       await anon.dispose();
     }
   });
+
+  // Phase 0 P0-3 — profile query optimization. The service now reads
+  // totalPoints / picksWon / picksScored from UserScoreOverall (Tier 24
+  // materialized) instead of recomputing from the full picks × games
+  // table on every request. These tests lock the response shape so any
+  // refactor that drops a field is caught by CI.
+  test('profile shape includes the totals + recentPicks (P0-3 contract)', async () => {
+    const anon = await apiAnon();
+    try {
+      const payload = await assertOk(anon, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      expectShape(payload, [
+        'username',
+        'totalPoints',
+        'picksMade',
+        'picksWon',
+        'picksScored',
+        'winRate',
+        'recentPicks',
+        'badges',
+        'catalog',
+      ]);
+      expect(typeof payload.totalPoints).toBe('number');
+      expect(typeof payload.picksMade).toBe('number');
+      expect(typeof payload.picksWon).toBe('number');
+      expect(typeof payload.picksScored).toBe('number');
+      expect(typeof payload.winRate).toBe('number');
+      expect(Array.isArray(payload.recentPicks)).toBe(true);
+      // Cap is 10 — anyone who has more picks than that shouldn't blow
+      // the response payload up.
+      expect(payload.recentPicks.length).toBeLessThanOrEqual(10);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test('winRate stays in [0, 1] for users with picks', async () => {
+    const anon = await apiAnon();
+    try {
+      const payload = await assertOk(anon, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      expect(payload.winRate).toBeGreaterThanOrEqual(0);
+      expect(payload.winRate).toBeLessThanOrEqual(1);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test('headToHead present only for friend viewers', async () => {
+    // Default state: alice and bob are NOT friends (test reset before).
+    await clearFriendships(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const payload = await assertOk(bob, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      // Non-friend → no H2H block.
+      expect(payload.headToHead).toBeNull();
+    } finally {
+      await bob.dispose();
+    }
+    // Now make them friends and re-verify H2H surfaces.
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob2 = await apiLogin(USERS.bob);
+    try {
+      const payload = await assertOk(bob2, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      expect(payload.headToHead).not.toBeNull();
+      expect(typeof payload.headToHead.viewerWins).toBe('number');
+      expect(typeof payload.headToHead.targetWins).toBe('number');
+      expect(typeof payload.headToHead.ties).toBe('number');
+    } finally {
+      await bob2.dispose();
+      await clearFriendships(USERS.alice.id, USERS.bob.id);
+    }
+  });
 });

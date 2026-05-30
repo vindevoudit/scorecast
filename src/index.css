@@ -52,6 +52,29 @@
    * radial-glow area without competing with the BANTRYX wordmark. */
   --shadow-soft-glow: 0 0 8px rgba(34, 211, 238, 0.55), 0 0 18px rgba(34, 211, 238, 0.3);
 
+  /* Tier 30 Phase 2 — refined-stadium tokens.
+   *
+   * --shadow-brand-glow-strong: four-layer cyan bloom used on the Landing
+   *   hero wordmark only. Heavier than --shadow-brand-glow; reserved for
+   *   the single dominant visual element per page.
+   * --shadow-led: drop-shadow tuned for `.font-led` digits — short, sharp
+   *   throw that reads as scoreboard glass at scoreboard sizes (~2-4rem).
+   * --gradient-ticker-mask: linear mask applied to ticker strips so the
+   *   text fades to transparent at the edges instead of clipping mid-glyph.
+   *   Used via `.mask-fade-x` utility.
+   */
+  --shadow-brand-glow-strong:
+    0 0 14px rgba(34, 211, 238, 0.7), 0 0 28px rgba(34, 211, 238, 0.45),
+    0 0 56px rgba(34, 211, 238, 0.25), 0 0 96px rgba(34, 211, 238, 0.12);
+  --shadow-led: 0 0 6px rgba(34, 211, 238, 0.5), 0 0 12px rgba(34, 211, 238, 0.25);
+  --gradient-ticker-mask: linear-gradient(
+    to right,
+    transparent 0%,
+    black 8%,
+    black 92%,
+    transparent 100%
+  );
+
   /* Radii */
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
@@ -111,6 +134,12 @@
   --shadow-glow: 0 20px 60px rgba(8, 145, 178, 0.12);
   --shadow-brand-glow: 0 0 8px rgba(8, 145, 178, 0.4), 0 0 16px rgba(8, 145, 178, 0.25);
   --shadow-soft-glow: 0 0 6px rgba(8, 145, 178, 0.3);
+  /* Light-theme variants dial the bloom down so it doesn't dominate a white
+   * background — same spread, ~half the alpha. */
+  --shadow-brand-glow-strong:
+    0 0 10px rgba(8, 145, 178, 0.55), 0 0 22px rgba(8, 145, 178, 0.35),
+    0 0 44px rgba(8, 145, 178, 0.2), 0 0 72px rgba(8, 145, 178, 0.1);
+  --shadow-led: 0 0 4px rgba(8, 145, 178, 0.45), 0 0 8px rgba(8, 145, 178, 0.2);
 }
 
 /* When the user actively switches themes, briefly disable transitions on
@@ -234,8 +263,16 @@ input {
     text-shadow: var(--shadow-brand-glow);
   }
 
+  .text-shadow-brand-glow-strong {
+    text-shadow: var(--shadow-brand-glow-strong);
+  }
+
   .text-shadow-soft-glow {
     text-shadow: var(--shadow-soft-glow);
+  }
+
+  .text-shadow-led {
+    text-shadow: var(--shadow-led);
   }
 
   /* Stadium scoreboard grid — subtle 56px grid in foreground/4% opacity,
@@ -248,5 +285,76 @@ input {
     background-size: 56px 56px;
     -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
     mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  }
+
+  /* Tier 30 Phase 2 — denser variant of .bg-arena-grid used as a ticker
+   * backdrop and on mobile-drawer headers. 40px cell, ~9% opacity, no
+   * radial mask (callers pair with .mask-fade-x for horizontal fades on
+   * ticker strips, or leave un-masked for header chrome). */
+  .bg-arena-grid-bold {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.09) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.09) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Tier 30 Phase 2 — stadium-vignette utility. Layers a radial darkening
+   * over a surface so the edges fall off and the eye lands on the centre.
+   * Used as a wrapper on hero panels and the auth ambient scene. */
+  .bg-stadium-vignette {
+    background-image: radial-gradient(
+      ellipse at center,
+      transparent 35%,
+      rgba(0, 0, 0, 0.35) 100%
+    );
+  }
+
+  /* Tier 30 Phase 2 — horizontal fade-to-transparent mask for ticker strips
+   * and chip rails. Both the standard and webkit prefixes are emitted so
+   * Safari renders the mask correctly. */
+  .mask-fade-x {
+    -webkit-mask-image: var(--gradient-ticker-mask);
+    mask-image: var(--gradient-ticker-mask);
+  }
+
+  /* Tier 30 Phase 2 — `.font-led` is the scoreboard-digit utility. Orbitron
+   * is a geometric sans loaded in index.html; tabular-nums keeps every
+   * digit the same advance so flipping scores never reflows the row. The
+   * fallback chain stays mono so the layout doesn't break if Google Fonts
+   * is unreachable (rare-but-not-impossible behind some corporate proxies). */
+  .font-led {
+    font-family: 'Orbitron', 'JetBrains Mono', 'Courier New', monospace;
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  /* Tier 30 Phase 2 — `.input-stadium` is the Auth/search-bar input shell.
+   * Darker fill than the page surface + a hairline border + accent ring on
+   * focus. Mirrors the focus-visible affordance already used by Button so
+   * keyboard navigation feels consistent across surfaces. */
+  .input-stadium {
+    background-color: rgb(var(--c-bg-overlay) / 0.7);
+    border: 1px solid rgb(var(--c-border-default));
+    border-radius: var(--radius-lg);
+    padding: 0.625rem 0.875rem;
+    color: rgb(var(--c-fg));
+    transition:
+      border-color 180ms cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+      background-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .input-stadium::placeholder {
+    color: rgb(var(--c-fg-subtle));
+  }
+  .input-stadium:hover:not(:disabled):not(:focus-visible) {
+    border-color: rgb(var(--c-border-strong));
+  }
+  .input-stadium:focus-visible {
+    outline: none;
+    border-color: rgb(var(--c-accent) / 0.6);
+    box-shadow:
+      0 0 0 3px rgb(var(--c-accent) / 0.18),
+      inset 0 1px 0 rgb(var(--c-accent) / 0.12);
   }
 }

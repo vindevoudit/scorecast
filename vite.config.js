@@ -91,6 +91,14 @@ export default defineConfig({
           if (id.includes('node_modules/@radix-ui/')) {
             return 'radix';
           }
+          // Tier 30 Phase 2 — motion/react gets its own chunk (~12-15 KB
+          // gzip) so the main bundle delta stays under 5 KB and the
+          // motion-heavy paths (Landing hero, GameCard score flip,
+          // sidebar tab indicator) don't pull animation code into the
+          // critical path.
+          if (id.includes('node_modules/motion/') || id.includes('node_modules/framer-motion/')) {
+            return 'motion';
+          }
           return undefined;
         },
       },

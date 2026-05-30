@@ -14,6 +14,11 @@ module.exports = {
     extend: {
       boxShadow: {
         glow: 'var(--shadow-glow)',
+        // Tier 30 Phase 2 — heavier four-layer bloom for Landing hero / cards
+        // that want the "stadium broadcast" feel. Token in src/index.css so
+        // light theme dials the alpha down automatically.
+        'brand-glow-strong': 'var(--shadow-brand-glow-strong)',
+        led: 'var(--shadow-led)',
       },
       colors: {
         // Legacy alias retained so existing references don't break during
@@ -78,6 +83,26 @@ module.exports = {
       transitionDuration: {
         180: '180ms',
         220: '220ms',
+      },
+
+      // Tier 30 Phase 2 — keyframes for the ticker strip and live-dot
+      // flicker. ticker-scroll is the pure-CSS fallback for the motion-
+      // driven Landing ticker; led-flicker is the entire animation for
+      // the live dot on GamesCalendar chips (no JS involvement).
+      keyframes: {
+        'ticker-scroll': {
+          '0%': { transform: 'translateX(0%)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
+        'led-flicker': {
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '45%': { opacity: '0.82', transform: 'scale(0.94)' },
+          '50%': { opacity: '1', transform: 'scale(1)' },
+        },
+      },
+      animation: {
+        'ticker-scroll': 'ticker-scroll 24s linear infinite',
+        'led-flicker': 'led-flicker 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite',
       },
     },
   },

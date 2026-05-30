@@ -2,8 +2,6 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { lazyWithReload } from '../lib/lazyWithReload';
 import GamesCalendar from '../components/GamesCalendar';
 import Footer from '../components/Footer';
-import LeaderboardCard from '../components/LeaderboardCard';
-import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
 import ConfirmModal from '../components/ConfirmModal';
 import ProfileDrawer from '../components/ProfileDrawer';
 import NotificationBell from '../components/NotificationBell';
@@ -15,7 +13,6 @@ import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InstallPrompt from '../components/InstallPrompt';
 import GameFiltersBar from '../components/GameFiltersBar';
-import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
 import { Button } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
@@ -31,6 +28,7 @@ const AdminPanel = lazyWithReload(() => import('../components/admin/AdminPanel')
 const SettingsView = lazyWithReload(() => import('./SettingsView'));
 const FriendsView = lazyWithReload(() => import('./FriendsView'));
 const GroupsView = lazyWithReload(() => import('./GroupsView'));
+const LeaderboardView = lazyWithReload(() => import('./LeaderboardView'));
 
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-fg-muted">{label}</p>;
@@ -65,28 +63,8 @@ function DashboardView() {
     setShowAuth,
   } = useAuth();
   const { gate } = useAuthGate();
-  const {
-    loading,
-    view,
-    setView,
-    groups,
-    friends,
-    leaderboard,
-    groupOrderBy,
-    groupOffset,
-    groupLimit,
-    selectedGroupId,
-    ownProfile,
-    picks,
-    handleJoinPublicGroup,
-    openProfile,
-    handleChangeGroupOrder,
-    handleChangeGroupOffset,
-    handleGroupSelection,
-    leaderboardFilters,
-    navigateToDeepLink,
-  } = useData();
-  const isLeaderboardFiltered = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
+  const { loading, view, setView, ownProfile, picks, handleJoinPublicGroup, navigateToDeepLink } =
+    useData();
   const { games, byDay } = useGames();
 
   const tabs = useMemo(() => {
@@ -388,37 +366,9 @@ function DashboardView() {
           ) : null}
 
           {view === 'leaderboard' ? (
-            <div className="space-y-4 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
-              <LeaderboardFiltersBar />
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <LeaderboardCard
-                  title="Overall Leaderboard"
-                  entries={leaderboard.overall}
-                  currentUserId={user?.id}
-                  onSelectUser={openProfile}
-                  isFiltered={isLeaderboardFiltered}
-                  // Tier 18 Chunk 3 — drives the compact view: top-3 + self
-                  // + every accepted friend are always shown; the rest
-                  // collapses into "… N more players" until expanded.
-                  friendUserIds={(friends?.friends || []).map((f) => f.id)}
-                />
-                <GroupLeaderboardCard
-                  groups={groups}
-                  selectedGroupId={selectedGroupId}
-                  onGroupSelection={handleGroupSelection}
-                  leaderboardGroup={leaderboard.group}
-                  currentUserId={user?.id}
-                  onSelectUser={openProfile}
-                  groupMeta={leaderboard.groupMeta}
-                  orderBy={groupOrderBy}
-                  offset={groupOffset}
-                  limit={groupLimit}
-                  onChangeOrder={handleChangeGroupOrder}
-                  onChangeOffset={handleChangeGroupOffset}
-                  isFiltered={isLeaderboardFiltered}
-                />
-              </div>
-            </div>
+            <Suspense fallback={<LazyFallback label="Loading leaderboards…" />}>
+              <LeaderboardView />
+            </Suspense>
           ) : null}
 
           {view === 'admin' && user?.role === 'admin' ? (

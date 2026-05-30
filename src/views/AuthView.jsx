@@ -161,7 +161,7 @@ function AuthView() {
     );
   } else {
     body = (
-      <div className="mx-auto w-full max-w-5xl py-6">
+      <div className="mx-auto w-full max-w-6xl py-6">
         <button
           type="button"
           onClick={() => setShowAuth(false)}
@@ -181,29 +181,71 @@ function AuthView() {
           </svg>
           {browseAsGuest ? 'Back to browsing' : 'Back to home'}
         </button>
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <LoginForm
-            authData={authData}
-            setAuthData={setAuthData}
-            onSubmit={handleLogin}
-            onForgotPassword={() => {
-              setForgotSent(false);
-              setAuthView('forgot');
-            }}
-          />
-          <RegisterForm
-            authData={authData}
-            setAuthData={setAuthData}
-            onSubmit={handleRegister}
-            errors={registerErrors}
-            clearError={clearRegisterError}
-          />
+        {/* Tier 30 Phase 2 — md+ split layout. Left column carries the
+            ambient stadium scene; right column stacks the auth forms.
+            Below md the ambient scene is hidden entirely and the forms
+            stack as before (mobile UX is unchanged). */}
+        <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] md:items-start">
+          <AuthAmbient />
+          <div className="grid gap-6">
+            <LoginForm
+              authData={authData}
+              setAuthData={setAuthData}
+              onSubmit={handleLogin}
+              onForgotPassword={() => {
+                setForgotSent(false);
+                setAuthView('forgot');
+              }}
+            />
+            <RegisterForm
+              authData={authData}
+              setAuthData={setAuthData}
+              onSubmit={handleRegister}
+              errors={registerErrors}
+              clearError={clearRegisterError}
+            />
+          </div>
         </div>
       </div>
     );
   }
 
   return <main id="main">{body}</main>;
+}
+
+// Tier 30 Phase 2 — decorative side panel for the md+ auth layout. Static
+// (no motion), self-contained. Hidden below md so mobile users don't get
+// half a screen of marketing chrome when they just want to sign in.
+// `bg-arena-grid-bold` provides the 40px scoreboard grid; `bg-stadium-
+// vignette` darkens the corners; the LIVE chip uses the new
+// `animate-led-flicker` Tailwind animation (pure CSS — pauses cleanly
+// under `prefers-reduced-motion`).
+function AuthAmbient() {
+  return (
+    <aside
+      aria-hidden="true"
+      className="bg-arena-grid-bold bg-stadium-vignette relative hidden min-h-[480px] flex-col items-center justify-center overflow-hidden rounded-3xl border border-default p-12 text-center md:flex"
+    >
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2 rounded-full bg-accent/10 blur-3xl"
+      />
+      <p className="text-xs font-light tracking-[0.5em] text-accent">PREDICT · COMPETE · CLIMB</p>
+      <h2 className="text-shadow-brand-glow font-display mt-6 text-5xl leading-[0.92] tracking-[0.02em] text-accent-soft lg:text-6xl">
+        Welcome back
+        <br />
+        to the booth.
+      </h2>
+      <p className="mt-8 max-w-sm text-fg-muted">
+        Sign in to see your picks, live leaderboards, and what your friends are calling for this
+        match-week.
+      </p>
+      <span className="mt-10 inline-flex items-center gap-2 rounded-full border border-accent/30 bg-overlay/40 px-4 py-1.5 text-xs tracking-[0.3em] text-fg-muted motion-safe:animate-led-flicker">
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent shadow-led" />
+        LIVE
+      </span>
+    </aside>
+  );
 }
 
 export default AuthView;

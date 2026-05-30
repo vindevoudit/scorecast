@@ -1,30 +1,58 @@
-// Tier 11 Chunk 2 — Landing tokenized. The BANTRYX wordmark uses the
-// `text-shadow-brand-glow` utility from index.css (so light mode dials the
-// bloom down via tokens) rather than the inline three-layer style.
+// Tier 30 Phase 2 — Landing visual paint.
+//
+// Adds the refined-stadium identity on top of the Tier 11 / Tier 18 wordmark
+// scaffold:
+//   - Hero cascade reveal (kicker -> wordmark scale -> slogan -> CTAs) via
+//     motion variants. Reduced-motion users land at the final state instantly.
+//   - League-name ticker strip between hero + stats. Motion-driven horizontal
+//     scroll on a two-up duplicate so the wrap is seamless. Reduced-motion
+//     skips the animate prop entirely.
+//   - Stats grid count-up — animate() integer interpolation, 1.4s out-expo.
+//   - Asymmetric 3-col feature grid (cards 1, 4 tall via md:row-span-2;
+//     cards 2, 3 short, centre column). FeatureIcon plaques replace the
+//     four emoji.
+//   - Steps numerals in .font-led (Orbitron + tabular-nums).
+//
+// Playwright sentinels preserved verbatim: `BANTRYX` h1, "Get started" /
+// "Sign in" / "browse as a guest" CTAs. Auth helpers depend on these.
 
+import { useEffect, useState } from 'react';
 import { Button } from './ui';
 import Footer from './Footer';
+import FeatureIcon from './FeatureIcon';
+import { m, animate, useReducedMotion } from '../lib/motion';
+import {
+  heroRevealTimeline,
+  heroRevealItem,
+  heroWordmark,
+  featureCardHover,
+  statsCountUp,
+} from '../lib/motionVariants';
 
 const FEATURES = [
   {
-    icon: '🎯',
+    icon: 'target',
     title: 'Probability-weighted scoring',
     body: 'Underdog wins are worth more than favorite wins. A 38% upset pays +62 points; a 52% home win pays +48. Pick smart, not safe.',
+    tall: true,
   },
   {
-    icon: '👥',
+    icon: 'group',
     title: 'Private groups & friends',
     body: 'Spin up an invite-only league for your group chat. Track friends, send requests, and race to the top of your own leaderboard.',
+    tall: false,
   },
   {
-    icon: '🏆',
+    icon: 'trophy',
     title: 'Live leaderboards',
     body: 'Standings update the moment a match result lands — no waiting until Monday morning. Climb in real time.',
+    tall: false,
   },
   {
-    icon: '🎖️',
+    icon: 'medal',
     title: 'Badges & milestones',
     body: 'Unlock achievements for streaks, upsets, perfect weekends, and 100-point picks. Bragging rights, codified.',
+    tall: true,
   },
 ];
 
@@ -46,12 +74,33 @@ const STEPS = [
   },
 ];
 
+const TICKER_LEAGUES = [
+  'PREMIER LEAGUE',
+  'LA LIGA',
+  'BUNDESLIGA',
+  'SERIE A',
+  'LIGUE 1',
+  'CHAMPIONS LEAGUE',
+  'WORLD CUP',
+  'COPA AMÉRICA',
+  'EUROS',
+  'PRIMEIRA LIGA',
+  'BRASILEIRO',
+];
+
 function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
+  const reduceMotion = useReducedMotion();
+
   return (
     <div className="space-y-20 pb-12 md:space-y-32">
-      <section className="relative overflow-hidden pt-8 md:pt-16">
-        {/* Layered atmosphere: arena grid backdrop + two cyan blooms +
-            a horizon line that anchors the wordmark on a "field" */}
+      {/* Hero — orchestrated reveal cascade. Parent timeline staggers the
+          children (kicker -> wordmark -> slogan -> tagline -> CTAs). */}
+      <m.section
+        className="relative overflow-hidden pt-8 md:pt-16"
+        variants={heroRevealTimeline}
+        initial={reduceMotion ? 'visible' : 'hidden'}
+        animate="visible"
+      >
         <div
           aria-hidden="true"
           className="bg-arena-grid pointer-events-none absolute inset-0 -z-20"
@@ -66,9 +115,8 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
         />
 
         <div className="relative z-10 mx-auto max-w-4xl px-4 text-center">
-          {/* Kicker — thin spaced-out sans for a refined ticker-tape feel.
-              The diamond separators are dimmer than the words for rhythm. */}
-          <p
+          <m.p
+            variants={heroRevealItem}
             className="flex items-center justify-center gap-3 text-xs font-light tracking-[0.5em] text-accent sm:gap-4 sm:text-sm"
             aria-label="Predict, Compete, Climb"
           >
@@ -81,16 +129,19 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
               ◆
             </span>
             <span>CLIMB</span>
-          </p>
+          </m.p>
 
-          <h1 className="text-shadow-brand-glow font-display mt-7 select-none text-[clamp(3.5rem,13vw,9rem)] leading-[0.85] tracking-[0.02em] text-accent-soft">
+          {/* Wordmark gets its own variant — heavier reveal (scale + blur
+              unwrap) and the stronger four-layer cyan bloom from
+              --shadow-brand-glow-strong (`.text-shadow-brand-glow-strong`). */}
+          <m.h1
+            variants={heroWordmark}
+            className="text-shadow-brand-glow-strong font-display mt-7 select-none text-[clamp(3.5rem,13vw,9rem)] leading-[0.85] tracking-[0.02em] text-accent-soft"
+          >
             BANTRYX
-          </h1>
+          </m.h1>
 
-          {/* Slogan: editorial italic serif, framed by short neon accent
-              lines. No glow on the text itself — the surrounding lines do
-              the brand work so the letters read crisply white. */}
-          <div className="mt-7 flex items-center justify-center gap-4">
+          <m.div variants={heroRevealItem} className="mt-7 flex items-center justify-center gap-4">
             <span
               aria-hidden="true"
               className="h-px w-10 bg-gradient-to-r from-transparent to-accent shadow-[0_0_8px_rgba(34,211,238,0.6)] sm:w-16"
@@ -102,21 +153,27 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
               aria-hidden="true"
               className="h-px w-10 bg-gradient-to-l from-transparent to-accent shadow-[0_0_8px_rgba(34,211,238,0.6)] sm:w-16"
             />
-          </div>
+          </m.div>
 
-          <p className="mx-auto mt-10 max-w-2xl text-lg text-fg sm:text-xl">
+          <m.p
+            variants={heroRevealItem}
+            className="mx-auto mt-10 max-w-2xl text-lg text-fg sm:text-xl"
+          >
             Football prediction made <span className="font-semibold text-fg">social</span>,{' '}
             <span className="font-semibold text-fg">competitive</span>, and{' '}
             <span className="font-semibold text-fg">fun</span>. Pick winners, earn points for risky
             calls and underdog upsets, and climb the live leaderboards against your friends.
-          </p>
+          </m.p>
 
-          <div className="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+          <m.div
+            variants={heroRevealItem}
+            className="mt-10 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center"
+          >
             <Button
               variant="primary"
               size="lg"
               onClick={onSignUp}
-              className="px-8 py-4 text-base shadow-[0_0_30px_-4px_rgba(34,211,238,0.6)]"
+              className="px-8 py-4 text-base shadow-brand-glow-strong"
             >
               Get started — it's free
             </Button>
@@ -128,20 +185,31 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
             >
               Sign in
             </Button>
-          </div>
+          </m.div>
           {onBrowseAsGuest ? (
-            <Button variant="link" onClick={onBrowseAsGuest} className="mt-6 text-sm text-fg-muted">
-              Or just browse as a guest →
-            </Button>
+            <m.div variants={heroRevealItem}>
+              <Button
+                variant="link"
+                onClick={onBrowseAsGuest}
+                className="mt-6 text-sm text-fg-muted"
+              >
+                Or just browse as a guest →
+              </Button>
+            </m.div>
           ) : null}
         </div>
-      </section>
+      </m.section>
+
+      {/* League ticker — broadcast-style scroll between hero and stats. The
+          inner row is duplicated; the parent translates by -50% to land at
+          the start of the duplicate, creating a seamless loop. */}
+      <LeagueTicker reduceMotion={reduceMotion} />
 
       <section className="mx-auto max-w-5xl px-4">
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-3xl border border-default bg-divider sm:grid-cols-3">
-          <Stat number="+62" label="points for a 38% underdog upset" />
-          <Stat number="∞" label="private groups you can build" />
-          <Stat number="30s" label="from sign-up to first pick" />
+          <Stat target={62} prefix="+" label="points for a 38% underdog upset" />
+          <Stat infinity label="private groups you can build" />
+          <Stat target={30} suffix="s" label="from sign-up to first pick" />
         </div>
       </section>
 
@@ -150,7 +218,9 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
           eyebrow="Why Bantryx"
           title="Built for people who don't just want to pick — they want to win."
         />
-        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* Asymmetric 3-col layout on md: card 1 (tall) | cards 2+3 (short) |
+            card 4 (tall). On mobile the cards stack in source order. */}
+        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3 md:grid-rows-2">
           {FEATURES.map((feature) => (
             <FeatureCard key={feature.title} {...feature} />
           ))}
@@ -192,11 +262,67 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
   );
 }
 
-function Stat({ number, label }) {
+function LeagueTicker({ reduceMotion }) {
+  // Doubled list so translateX(-50%) lands at the start of the duplicate
+  // and the loop is visually seamless. Second copy is aria-hidden so AT
+  // doesn't announce duplicates.
+  return (
+    <div
+      aria-hidden={reduceMotion ? 'true' : undefined}
+      className="bg-arena-grid-bold relative overflow-hidden border-y border-default py-3"
+    >
+      <div className="mask-fade-x">
+        <m.div
+          className="flex whitespace-nowrap will-change-transform"
+          animate={reduceMotion ? { x: '0%' } : { x: ['0%', '-50%'] }}
+          transition={
+            reduceMotion ? { duration: 0 } : { duration: 32, repeat: Infinity, ease: 'linear' }
+          }
+        >
+          {TICKER_LEAGUES.map((name) => (
+            <span
+              key={`a-${name}`}
+              className="font-display mr-12 text-sm tracking-[0.3em] text-fg-muted"
+            >
+              {name}
+            </span>
+          ))}
+          {TICKER_LEAGUES.map((name) => (
+            <span
+              key={`b-${name}`}
+              aria-hidden="true"
+              className="font-display mr-12 text-sm tracking-[0.3em] text-fg-muted"
+            >
+              {name}
+            </span>
+          ))}
+        </m.div>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ target, suffix = '', prefix = '', infinity = false, label }) {
+  const reduceMotion = useReducedMotion();
+  const [display, setDisplay] = useState(infinity || reduceMotion ? (target ?? 0) : 0);
+
+  useEffect(() => {
+    if (infinity) return undefined;
+    if (reduceMotion) {
+      setDisplay(target);
+      return undefined;
+    }
+    const controls = animate(0, target, {
+      ...statsCountUp,
+      onUpdate: (v) => setDisplay(Math.round(v)),
+    });
+    return () => controls.stop();
+  }, [target, infinity, reduceMotion]);
+
   return (
     <div className="bg-elevated/85 p-8 text-center">
-      <p className="text-shadow-brand-glow text-4xl font-black text-accent-soft sm:text-5xl">
-        {number}
+      <p className="text-shadow-brand-glow font-display text-4xl text-accent-soft sm:text-5xl">
+        {infinity ? '∞' : `${prefix}${display}${suffix}`}
       </p>
       <p className="mt-3 text-xs uppercase tracking-[0.2em] text-fg-muted">{label}</p>
     </div>
@@ -212,13 +338,17 @@ function SectionHeader({ eyebrow, title }) {
   );
 }
 
-function FeatureCard({ icon, title, body }) {
+function FeatureCard({ icon, title, body, tall }) {
+  const reduceMotion = useReducedMotion();
   return (
-    <div className="group relative overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 transition duration-300 hover:border-accent/30 hover:bg-elevated/85">
-      <div className="flex items-center gap-3">
-        <span className="text-3xl" aria-hidden="true">
-          {icon}
-        </span>
+    <m.div
+      whileHover={reduceMotion ? undefined : featureCardHover}
+      className={`group relative flex flex-col overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85 ${
+        tall ? 'md:row-span-2' : ''
+      }`}
+    >
+      <div className="flex items-center gap-4">
+        <FeatureIcon name={icon} />
         <h3 className="text-xl font-semibold text-fg">{title}</h3>
       </div>
       <p className="mt-4 text-fg">{body}</p>
@@ -226,14 +356,17 @@ function FeatureCard({ icon, title, body }) {
         aria-hidden="true"
         className="pointer-events-none absolute -bottom-12 -right-12 h-32 w-32 rounded-full bg-accent/5 blur-2xl transition duration-300 group-hover:bg-accent/15"
       />
-    </div>
+    </m.div>
   );
 }
 
 function Step({ number, title, body }) {
   return (
     <li className="rounded-3xl border border-default bg-elevated/50 p-8">
-      <p className="text-5xl font-black text-accent/40">{number}</p>
+      {/* `.font-led` swaps the numeral to Orbitron + tabular-nums + the
+          subtle led drop-shadow so the step number reads as a scoreboard
+          digit instead of a generic display font. */}
+      <p className="font-led text-shadow-led text-5xl text-accent/60">{number}</p>
       <h3 className="mt-4 text-xl font-semibold text-fg">{title}</h3>
       <p className="mt-3 text-sm text-fg">{body}</p>
     </li>

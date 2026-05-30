@@ -29,6 +29,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
     handleApproveJoinRequest,
     handleDeclineJoinRequest,
     handleSetGroupPassword,
+    openProfile,
   } = useData();
 
   const [confirmingLeave, setConfirmingLeave] = useState(false);
@@ -137,11 +138,17 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
                 (member && typeof member === 'object' ? member.userId : member) || member;
               const username =
                 (member && typeof member === 'object' ? member.username : member) || member;
-              return (
-                <span
-                  key={userId}
-                  className="flex min-w-0 items-center gap-2 rounded-2xl bg-elevated/80 px-3 py-2"
-                >
+              // Phase 0 follow-up — member names render as profile links so
+              // behavior matches FriendsList, LeaderboardCard, ProfileDrawer
+              // results everywhere else in the app. Self + Tier 8.6-masked
+              // rows stay as static <span>s — the profile drawer would
+              // either 404 (masked friends/private) or render the same user
+              // already on screen.
+              const isMasked = Boolean(member && typeof member === 'object' && member.isMasked);
+              const isSelf = userId === currentUserId;
+              const clickable = !isMasked && !isSelf && Boolean(openProfile);
+              const inner = (
+                <>
                   <Avatar username={username} size={22} />
                   <span className="min-w-0 truncate">{username}</span>
                   {userId === group.ownerId ? (
@@ -149,6 +156,26 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
                       owner
                     </span>
                   ) : null}
+                </>
+              );
+              if (clickable) {
+                return (
+                  <button
+                    key={userId}
+                    type="button"
+                    onClick={() => openProfile(username)}
+                    className="flex min-w-0 items-center gap-2 rounded-2xl bg-elevated/80 px-3 py-2 text-left transition-colors duration-150 hover:bg-overlay focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    {inner}
+                  </button>
+                );
+              }
+              return (
+                <span
+                  key={userId}
+                  className="flex min-w-0 items-center gap-2 rounded-2xl bg-elevated/80 px-3 py-2"
+                >
+                  {inner}
                 </span>
               );
             })}
@@ -179,9 +206,19 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
                         displayName={request.displayName}
                         size={22}
                       />
-                      <span className="truncate font-medium text-fg">
-                        {request.displayName || request.username}
-                      </span>
+                      {openProfile ? (
+                        <button
+                          type="button"
+                          onClick={() => openProfile(request.username)}
+                          className="truncate text-left font-medium text-fg hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
+                          {request.displayName || request.username}
+                        </button>
+                      ) : (
+                        <span className="truncate font-medium text-fg">
+                          {request.displayName || request.username}
+                        </span>
+                      )}
                     </div>
                     {request.message ? (
                       <p className="mt-1 text-xs text-fg-muted">{request.message}</p>

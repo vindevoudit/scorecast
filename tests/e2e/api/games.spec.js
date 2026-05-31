@@ -432,3 +432,88 @@ test.describe('Win-streak (Tier 30 Phase 3 A1 Revision)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 30 Phase 3 A6 — Pick of the Day / Coin Flip Master badge
+// ---------------------------------------------------------------------------
+
+test.describe('Coin flip (Tier 30 Phase 3 A6)', () => {
+  test.afterEach(async () => {
+    // Wipe coin-flip stamps + the picks/badges that test the flow.
+    await updateGameFields(GAMES.lions.id, { coinFlipDayKey: null });
+    await updateGameFields(GAMES.eagles.id, { coinFlipDayKey: null });
+    await clearGameResults([GAMES.lions.id, GAMES.eagles.id]);
+    await clearPicksAndBadges([USERS.alice.id]);
+  });
+
+  test('coinFlipDayKey surfaces on GET /api/games when stamped', async () => {
+    await updateGameFields(GAMES.lions.id, { coinFlipDayKey: '2026-05-31' });
+    const anon = await apiAnon();
+    try {
+      const games = await assertOk(anon, 'GET', '/api/games');
+      const lions = games.find((g) => g.id === GAMES.lions.id);
+      expect(lions).toBeTruthy();
+      expect(lions.coinFlipDayKey).toBe('2026-05-31');
+      const eagles = games.find((g) => g.id === GAMES.eagles.id);
+      expect(eagles.coinFlipDayKey).toBeNull();
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test('winning a pick on a coin-flip game progresses Coin Flip Master', async () => {
+    await updateGameFields(GAMES.lions.id, { coinFlipDayKey: '2026-05-31' });
+
+    const alice = await apiLogin(USERS.alice);
+    const admin = await apiLogin(USERS.admin);
+    try {
+      await createPick(alice, GAMES.lions.id, 'home');
+      await setGameResult(admin, GAMES.lions.id, 'home');
+
+      // Fan-out is fire-and-forget — give the badge service a beat.
+      await new Promise((r) => setTimeout(r, 250));
+
+      const profile = await assertOk(alice, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      expect(profile.badgeProgress).toBeTruthy();
+      expect(profile.badgeProgress.coinFlipWins).toBe(1);
+    } finally {
+      await alice.dispose();
+      await admin.dispose();
+    }
+  });
+
+  test('losing a pick on a coin-flip game does NOT progress the badge', async () => {
+    await updateGameFields(GAMES.lions.id, { coinFlipDayKey: '2026-05-31' });
+
+    const alice = await apiLogin(USERS.alice);
+    const admin = await apiLogin(USERS.admin);
+    try {
+      await createPick(alice, GAMES.lions.id, 'home');
+      await setGameResult(admin, GAMES.lions.id, 'away');
+      await new Promise((r) => setTimeout(r, 250));
+
+      const profile = await assertOk(alice, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      expect(profile.badgeProgress.coinFlipWins).toBe(0);
+    } finally {
+      await alice.dispose();
+      await admin.dispose();
+    }
+  });
+
+  test('winning a pick on a non-coin-flip game does NOT progress the badge', async () => {
+    // eagles intentionally left without coinFlipDayKey.
+    const alice = await apiLogin(USERS.alice);
+    const admin = await apiLogin(USERS.admin);
+    try {
+      await createPick(alice, GAMES.eagles.id, 'home');
+      await setGameResult(admin, GAMES.eagles.id, 'home');
+      await new Promise((r) => setTimeout(r, 250));
+
+      const profile = await assertOk(alice, 'GET', `/api/users/${USERS.alice.username}/profile`);
+      expect(profile.badgeProgress.coinFlipWins).toBe(0);
+    } finally {
+      await alice.dispose();
+      await admin.dispose();
+    }
+  });
+});

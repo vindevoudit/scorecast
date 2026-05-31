@@ -152,6 +152,14 @@ const BADGE_CATALOG = [
     metric: 'longestStreak',
   },
   {
+    slug: 'coin-flip-master',
+    name: 'Coin Flip Master',
+    description: 'Won 5 picks on Pick-of-the-Day coin-flip games.',
+    emoji: '🪙',
+    threshold: 5,
+    metric: 'coinFlipWins',
+  },
+  {
     slug: 'conversationalist',
     name: 'Conversationalist',
     description: 'Posted 25+ comments.',

@@ -58,8 +58,13 @@ function RefreshButton() {
       disabled={refreshing}
       aria-label="Refresh data"
       title="Refresh data"
-      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-default bg-elevated/80 text-fg transition-colors duration-200 hover:bg-overlay hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 md:h-10 md:w-10"
+      // Mirrors NotificationBell's top-bar shell: full-width pill on mobile
+      // with a "Refresh" label + icon, icon-only square on desktop. Same
+      // bg-overlay / text-accent / hover-accent-tinted styling so the two
+      // adjacent buttons read as a matched pair.
+      className="relative flex h-12 w-full items-center justify-between gap-2 rounded-3xl bg-overlay px-4 text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60 md:w-12 md:justify-center md:px-0"
     >
+      <span className="text-sm font-semibold md:hidden">Refresh</span>
       <svg
         viewBox="0 0 24 24"
         fill="none"

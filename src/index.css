@@ -339,22 +339,17 @@ input {
    * digit the same advance so flipping scores never reflows the row. The
    * fallback chain stays mono so the layout doesn't break if Google Fonts
    * is unreachable (rare-but-not-impossible behind some corporate proxies). */
-  /* Tier 30 Phase 2 follow-up — `.font-led` is gated to desktop (md+).
-   * Mobile users reported the Orbitron download is slow over cellular
-   * and the FOUT (flash of fallback monospace) reads as visual lag.
-   * Below md the class still applies tabular-nums (CSS feature setting,
-   * no font load needed) so digits stay aligned in the inherited Inter,
-   * but the Orbitron typeface + custom letter-spacing only kick in at
-   * the desktop breakpoint where the perf penalty isn't an issue. */
+  /* Tier 30 Phase 2 follow-up — `.font-led` applies on every viewport.
+   * The earlier mobile gate was added when Orbitron was loaded via
+   * Google Fonts (cross-origin FOUT was visible on mobile). Now that
+   * the typeface is self-hosted via `@fontsource/orbitron` and ships
+   * in the same bundle as the main CSS, the load is fast enough on
+   * mobile that the gate isn't necessary. */
   .font-led {
+    font-family: 'Orbitron', 'JetBrains Mono', 'Courier New', monospace;
     font-feature-settings: 'tnum' 1;
     font-variant-numeric: tabular-nums;
-  }
-  @media (min-width: 768px) {
-    .font-led {
-      font-family: 'Orbitron', 'JetBrains Mono', 'Courier New', monospace;
-      letter-spacing: 0.02em;
-    }
+    letter-spacing: 0.02em;
   }
 
   /* Tier 30 Phase 2 — `.input-stadium` is the Auth/search-bar input shell.

@@ -99,6 +99,13 @@ export default defineConfig({
           if (id.includes('node_modules/motion/') || id.includes('node_modules/framer-motion/')) {
             return 'motion';
           }
+          // Tier 30 Phase 3 A4 — html-to-image (~3 KB gzip) gets its own
+          // chunk so the GameCard's eager bundle stays lean. The
+          // ShareSheet itself is lazy-imported, so this just guarantees
+          // a dedicated chunk filename for cache eviction tracking.
+          if (id.includes('node_modules/html-to-image/')) {
+            return 'html-to-image';
+          }
           return undefined;
         },
       },

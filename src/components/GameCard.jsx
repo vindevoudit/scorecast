@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scoring';
 import { displayTeamName } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
@@ -10,6 +10,11 @@ import { useAuthGate } from '../hooks/useAuthGate';
 import { Badge } from './ui';
 import { m, AnimatePresence, useReducedMotion } from '../lib/motion';
 import { scoreboardFlip } from '../lib/motionVariants';
+
+// Tier 30 Phase 3 A4 — lazy-loaded share modal. Keeps html-to-image
+// (~3KB gzip) out of the GameCard's eager bundle; the chunk only loads
+// when the user opens the share UI.
+const ShareSheet = lazy(() => import('./ShareSheet'));
 
 function formatDate(dateText) {
   // Date-only — the kickoff time is already shown prominently in the
@@ -396,6 +401,7 @@ function LockedPickChip({
 function GameCard({ game }) {
   const { pickMap, submitPick, removePick } = usePicks();
   const { gate } = useAuthGate();
+  const [shareOpen, setShareOpen] = useState(false);
   const existingPick = pickMap.get(game.id) || null;
   const live = isLiveGame(game);
   const finished = isFinishedGame(game);
@@ -545,6 +551,37 @@ function GameCard({ game }) {
       ) : null}
 
       <CrowdMeter crowd={game.crowd} />
+
+      {/* Tier 30 Phase 3 A4 — Share button. Visible whenever the viewer
+          has a pick on this game (gives them something to brag about,
+          regardless of whether the game is upcoming / live / finished).
+          Lazy-loaded modal — the html-to-image chunk only loads on
+          first click. */}
+      {existingPickId ? (
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            aria-label="Share this pick as an image"
+          >
+            <span aria-hidden="true">📤</span>
+            Share pick
+          </button>
+        </div>
+      ) : null}
+
+      {shareOpen ? (
+        <Suspense fallback={null}>
+          <ShareSheet
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            game={game}
+            choice={existingChoice}
+            points={pointsIfWon}
+          />
+        </Suspense>
+      ) : null}
 
       <FriendPicksPanel game={game} />
 

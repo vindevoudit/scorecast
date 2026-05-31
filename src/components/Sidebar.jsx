@@ -157,7 +157,7 @@ function SidebarBody({
       <div
         className={`flex items-center gap-2 px-3 pb-3 pt-4 ${
           collapsed && !isMobile ? 'justify-center' : 'justify-between'
-        } ${isMobile ? 'border-b border-default' : ''}`}
+        }`}
       >
         {!collapsed || isMobile ? (
           <span className="text-xs font-semibold uppercase tracking-[0.32em] text-accent/80">

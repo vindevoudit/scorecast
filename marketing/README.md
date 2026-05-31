@@ -28,32 +28,33 @@ npm run assets:marketing       # → marketing/out/*.png
 All squares are **1080×1080** (IG/FB feed, carousels), stories **1080×1920**
 (IG/FB/TikTok stories & reels).
 
-| File                                     | Size       | Use it for                                                    |
-| ---------------------------------------- | ---------- | ------------------------------------------------------------- |
-| `launch-square.png`                      | 1080×1080  | Launch-day feed hero (IG/FB)                                  |
-| `launch-story.png`                       | 1080×1920  | Launch-day story/reel                                         |
-| `launch-x.png`                           | 1600×900   | Launch tweet / X post image                                   |
-| `launch-card.png`                        | 1200×630   | Link-preview / OG card, LinkedIn, Discord, Slack              |
-| `feature-scoring-square/-story.png`      | sq + story | Probability scoring (+62 for a 38% upset)                     |
-| `feature-groups-square/-story.png`       | sq + story | Private groups & friends                                      |
-| `feature-leaderboards-square/-story.png` | sq + story | Live leaderboards                                             |
-| `feature-badges-square/-story.png`       | sq + story | Badges & milestones                                           |
-| `howto-square.png` / `howto-story.png`   | sq + story | 3-step "how it works" explainer                               |
-| `stat-62-square/-story.png`              | sq + story | Teaser: **+62** points for a 38% underdog                     |
-| `stat-groups-square/-story.png`          | sq + story | Teaser: **∞** private groups                                  |
-| `stat-30s-square/-story.png`             | sq + story | Teaser: **30s** to first pick                                 |
-| `stat-free-square/-story.png`            | sq + story | Teaser: **$0** free to play, no betting                       |
-| `flyer-a4.png`                           | 2480×3508  | Printable A4 poster (300 dpi) with scannable QR → bantryx.com |
-| `product-gamecard-upcoming.png`          | 1080×1080  | Real GameCard — upcoming game: odds + pick buttons            |
-| `product-gamecard-live.png`              | 1080×1080  | Real GameCard — live score + your points on the line          |
-| `product-gamecard-final.png`             | 1080×1080  | Real GameCard — final result, winning pick + points           |
-| `product-game-lifecycle.png`             | 1080×1920  | One fixture, all 3 states stacked (pick → live → result)      |
-| `product-leaderboard.png`                | 1080×1080  | Leaderboard snapshot — rank medals + points (5 rows)          |
-| `product-leaderboard-story.png`          | 1080×1920  | Leaderboard snapshot — full 8-row table                       |
-| `product-stats.png`                      | 1080×1080  | Stats page — profile header + 5 stat tiles + recent activity  |
-| `product-stats-story.png`                | 1080×1920  | Stats page — full profile with 3 recent-activity rows         |
-| `product-stats-charts.png`               | 1080×1080  | Stats dashboard — points-over-time line chart + summary tiles |
-| `product-stats-charts-story.png`         | 1080×1920  | Stats dashboard — line chart + per-league bars + heatmap      |
+| File                                     | Size       | Use it for                                                                            |
+| ---------------------------------------- | ---------- | ------------------------------------------------------------------------------------- |
+| `launch-square.png`                      | 1080×1080  | Launch-day feed hero (IG/FB)                                                          |
+| `launch-story.png`                       | 1080×1920  | Launch-day story/reel                                                                 |
+| `launch-x.png`                           | 1600×900   | Launch tweet / X post image                                                           |
+| `launch-card.png`                        | 1200×630   | Link-preview / OG card, LinkedIn, Discord, Slack                                      |
+| `profile-pic.png`                        | 1080×1080  | Profile / display picture — centred wordmark, safe for a circle crop (IG/X/FB avatar) |
+| `feature-scoring-square/-story.png`      | sq + story | Probability scoring (+62 for a 38% upset)                                             |
+| `feature-groups-square/-story.png`       | sq + story | Private groups & friends                                                              |
+| `feature-leaderboards-square/-story.png` | sq + story | Live leaderboards                                                                     |
+| `feature-badges-square/-story.png`       | sq + story | Badges & milestones                                                                   |
+| `howto-square.png` / `howto-story.png`   | sq + story | 3-step "how it works" explainer                                                       |
+| `stat-62-square/-story.png`              | sq + story | Teaser: **+62** points for a 38% underdog                                             |
+| `stat-groups-square/-story.png`          | sq + story | Teaser: **∞** private groups                                                          |
+| `stat-30s-square/-story.png`             | sq + story | Teaser: **30s** to first pick                                                         |
+| `stat-free-square/-story.png`            | sq + story | Teaser: **$0** free to play, no betting                                               |
+| `flyer-a4.png`                           | 2480×3508  | Printable A4 poster (300 dpi) with scannable QR → bantryx.com                         |
+| `product-gamecard-upcoming.png`          | 1080×1080  | Real GameCard — upcoming game: odds + pick buttons                                    |
+| `product-gamecard-live.png`              | 1080×1080  | Real GameCard — live score + your points on the line                                  |
+| `product-gamecard-final.png`             | 1080×1080  | Real GameCard — final result, winning pick + points                                   |
+| `product-game-lifecycle.png`             | 1080×1920  | One fixture, all 3 states stacked (pick → live → result)                              |
+| `product-leaderboard.png`                | 1080×1080  | Leaderboard snapshot — rank medals + points (5 rows)                                  |
+| `product-leaderboard-story.png`          | 1080×1920  | Leaderboard snapshot — full 8-row table                                               |
+| `product-stats.png`                      | 1080×1080  | Stats page — profile header + 5 stat tiles + recent activity                          |
+| `product-stats-story.png`                | 1080×1920  | Stats page — full profile with 3 recent-activity rows                                 |
+| `product-stats-charts.png`               | 1080×1080  | Stats dashboard — points-over-time line chart + summary tiles                         |
+| `product-stats-charts-story.png`         | 1080×1920  | Stats dashboard — line chart + per-league bars + heatmap                              |
 
 > **Product mockups** are faithful re-creations of the live app UI (real dark-theme
 > tokens, real component layout) populated with past Premier League fixtures + fake users.

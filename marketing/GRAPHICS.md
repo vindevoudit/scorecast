@@ -16,7 +16,7 @@ round-trip — you edit a `.mjs` file and re-run one command.
 
 | Generator                                                                           | Output                                                                                                                             | Serves                                                                |
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs) | `marketing/out/*.png` (33 files)                                                                                                   | Social campaign — **not** served by the site; you post these manually |
+| [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs) | `marketing/out/*.png` (34 files)                                                                                                   | Social campaign — **not** served by the site; you post these manually |
 | [`scripts/generate-pwa-assets.mjs`](../scripts/generate-pwa-assets.mjs)             | `public/favicon.ico`, `public/pwa-*.png`, `public/apple-touch-icon-*.png`, `public/maskable-*.png`, `public/og-image-1200x630.png` | **Live site** — favicon, installed-app icons, link-share card         |
 
 Both rasterize hand-authored SVG → PNG with [`@resvg/resvg-js`](https://github.com/yisibl/resvg-js)

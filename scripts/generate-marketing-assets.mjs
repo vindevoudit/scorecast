@@ -159,6 +159,21 @@ function renderLaunchCard() {
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.42 } });
 }
 
+// Profile picture — just the centred BANTRYX wordmark on the brand
+// background. Square, but composed for a CIRCLE crop (IG/social avatars):
+// the wordmark + underline sit centred and well inside the inscribed circle.
+function renderProfilePic() {
+  const [w, h] = SIZE.square;
+  const cx = w / 2;
+  const wmSize = wmSizeFor(820); // ~76% width keeps the B…X inside the circle
+  const wmY = h / 2 + wmSize * 0.34 - 26; // nudge up so wordmark+rule centre
+  const body = `
+  ${background(w, h)}
+  ${wordmark({ x: cx, y: wmY, size: wmSize, anchor: 'middle' })}
+  ${rule({ x: cx - 165, y: wmY + 46, w: 330 })}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.5, glowR: 0.62 } });
+}
+
 // ── Feature highlight (square / story) ───────────────────────────────────
 function renderFeature(feat, format) {
   const [w, h] = SIZE[format];
@@ -623,6 +638,7 @@ async function main() {
   await emit('launch-story', renderLaunch('story'), SIZE.story[0]);
   await emit('launch-x', renderLaunch('landscape'), SIZE.landscape[0]);
   await emit('launch-card', renderLaunch('card'), SIZE.card[0]);
+  await emit('profile-pic', renderProfilePic(), SIZE.square[0]);
 
   for (const feat of FEATURES) {
     await emit(`feature-${feat.key}-square`, renderFeature(feat, 'square'), SIZE.square[0]);

@@ -177,10 +177,14 @@ const PUSH_NOTIFICATION_TYPES = [
   'join-request',
   'join-request-approved',
   'join-request-declined',
-  // Tier 30 Phase 3 A1 — fires from StreakService.applyPickForUser when
-  // the user's currentDailyStreak hits 7 / 14 / 30 / 60 / 100. Mirror
+  // Tier 30 Phase 3 A1 Revision — fires from StreakService.applyForUser
+  // when currentWinStreak crosses 5 / 10 / 15 / 20 / 30 / 50. Mirror
   // entry in PushSettingsPanel.NOTIFICATION_TYPES.
   'streak-milestone',
+  // Tier 30 Phase 3 A5 — Monday 02:00 UTC recap of the trailing 7-day
+  // pick performance. One push per user with at least one scored pick
+  // in the window. Mirror entry in PushSettingsPanel.NOTIFICATION_TYPES.
+  'weekly-recap',
 ];
 
 const PUSH_NOTIFICATION_TYPE_SET = new Set(PUSH_NOTIFICATION_TYPES);

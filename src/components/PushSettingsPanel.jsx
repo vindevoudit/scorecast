@@ -75,13 +75,21 @@ const NOTIFICATION_TYPES = [
     label: 'Join request declined',
     description: 'When a group owner declines your request to join.',
   },
-  // Tier 30 Phase 3 A1 — fires when your daily pick streak hits 7, 14,
-  // 30, 60, or 100. Mirror entry in validation/schemas.js
+  // Tier 30 Phase 3 A1 Revision — fires when your win streak crosses
+  // 5 / 10 / 15 / 20 / 30 / 50 wins. Mirror entry in validation/schemas.js
   // PUSH_NOTIFICATION_TYPES.
   {
     key: 'streak-milestone',
     label: 'Streak milestones',
-    description: 'When your daily pick streak hits a milestone (7, 14, 30, 60, 100).',
+    description: 'When your win streak hits a milestone (5, 10, 15, 20, 30, 50).',
+  },
+  // Tier 30 Phase 3 A5 — Monday 02:00 UTC recap of how you did this week.
+  // Skipped if you had no picks that scored. Mirror entry in
+  // validation/schemas.js PUSH_NOTIFICATION_TYPES.
+  {
+    key: 'weekly-recap',
+    label: 'Weekly recap',
+    description: 'A summary of your wins, losses, and points every Monday.',
   },
 ];
 

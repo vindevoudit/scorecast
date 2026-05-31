@@ -45,6 +45,7 @@ const syncLiveScoresJob = require('./lib/jobs/syncLiveScores');
 const reconcileInProgressGamesJob = require('./lib/jobs/reconcileInProgressGames');
 const sendKickoffRemindersJob = require('./lib/jobs/sendKickoffReminders');
 const lockPickProbabilitiesJob = require('./lib/jobs/lockPickProbabilities');
+const sendWeeklyRecapJob = require('./lib/jobs/sendWeeklyRecap');
 const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
 // Tier 18 Chunk 2 — 30 s live poll (was every minute). Sits comfortably in
 // the 20 req/min TIER_ONE budget (~2 req/min steady state for the global
@@ -63,6 +64,11 @@ const KICKOFF_REMINDER_CRON = process.env.KICKOFF_REMINDER_CRON || '*/15 * * * *
 // scheduled game whose kickoff has passed. Cost-gated by a count() short-
 // circuit, so off-season ticks are near-free.
 const LOCK_PICK_PROBABILITIES_CRON = process.env.LOCK_PICK_PROBABILITIES_CRON || '* * * * *';
+// Tier 30 Phase 3 A5 — weekly recap push, fires Mondays 02:00 UTC.
+// Scoped to users with picks scored in the trailing 7-day window.
+// Cost-gated by a count() short-circuit so off-season Mondays are
+// near-free.
+const WEEKLY_RECAP_CRON = process.env.WEEKLY_RECAP_CRON || '0 2 * * 1';
 scheduler.register('syncFixtures', FIXTURE_SYNC_CRON, syncFixturesJob.run);
 scheduler.register('syncLiveScores', LIVE_SCORE_SYNC_CRON, syncLiveScoresJob.run);
 scheduler.register(
@@ -76,6 +82,7 @@ scheduler.register(
   LOCK_PICK_PROBABILITIES_CRON,
   lockPickProbabilitiesJob.run,
 );
+scheduler.register('sendWeeklyRecap', WEEKLY_RECAP_CRON, sendWeeklyRecapJob.run);
 
 const PORT = process.env.PORT || 3000;
 

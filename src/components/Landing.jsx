@@ -127,10 +127,18 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
 
           {/* Wordmark gets its own variant — heavier reveal (scale + blur
               unwrap) and the stronger four-layer cyan bloom from
-              --shadow-brand-glow-strong (`.text-shadow-brand-glow-strong`). */}
+              --shadow-brand-glow-strong (`.text-shadow-brand-glow-strong`).
+              Tier 30 Phase 2 follow-up — typeface swap from Bebas Neue
+              (font-display) to Orbitron (.font-led) so the hero matches
+              the dashboard top-bar wordmark + the scoreboard digit
+              treatment elsewhere. Clamp max trimmed 9rem → 7.5rem to
+              compensate for Orbitron's wider geometric letters (Bebas
+              Neue is condensed ~0.6em per glyph; Orbitron is ~0.85em),
+              so BANTRYX still fits within the centred max-w-4xl
+              container on a wide desktop. */}
           <m.h1
             variants={heroWordmark}
-            className="text-shadow-brand-glow-strong font-display mt-7 select-none text-[clamp(3.5rem,13vw,9rem)] leading-[0.85] tracking-[0.02em] text-accent-soft"
+            className="text-shadow-brand-glow-strong font-led mt-7 select-none text-[clamp(3rem,11vw,7.5rem)] leading-[0.85] tracking-[0.02em] text-accent-soft"
           >
             BANTRYX
           </m.h1>

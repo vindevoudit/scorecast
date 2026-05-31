@@ -10,9 +10,11 @@ npm run assets:marketing       # → marketing/out/*.png
 
 - **Edit copy** (headlines, features, stats, steps): the `FEATURES` / `STATS` / `STEPS`
   arrays near the top of [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs).
-- **Edit colours / logo / type**: [`marketing/lib/brand.mjs`](lib/brand.mjs) (`COLOR`, `FONT`,
-  `logoB`, `wordmark`). These are copied verbatim from the live brand (`public/logo.svg` +
-  `public/og-template.svg`).
+- **Edit colours / wordmark / icons / type**: [`marketing/lib/brand.mjs`](lib/brand.mjs)
+  (`COLOR`, `FONT`, `wordmark`, `brandTag`, `iconBadge`).
+- **Full maintainer guide** — how the system is built and how to modify graphics or add new
+  ones (fragment API, icon system, layout renderers, the live favicon/PWA/OG pipeline):
+  **[GRAPHICS.md](GRAPHICS.md)**.
 - **Fonts** ([`fonts/`](fonts/)): Orbitron (BANTRYX wordmark + B mark), Bebas Neue
   (headlines + big numbers), Inter (body) — all **SIL OFL 1.1**, free to embed and
   redistribute. Fed to the rasterizer directly so type renders in the real brand faces

@@ -29,30 +29,25 @@ import {
   statsCountUp,
 } from '../lib/motionVariants';
 
+// 3 feature cards laid out symmetrically in a single row on md+. The
+// previous 4-card 1+4-tall / 2+3-short asymmetric grid was visually
+// unbalanced; user-confirmed cleanup drops the Badges card so all three
+// remaining cards sit equal-height in one row.
 const FEATURES = [
   {
     icon: 'target',
     title: 'Probability-weighted scoring',
     body: 'Underdog wins are worth more than favorite wins. A 38% upset pays +62 points; a 52% home win pays +48. Pick smart, not safe.',
-    tall: true,
   },
   {
     icon: 'group',
     title: 'Private groups & friends',
     body: 'Spin up an invite-only league for your group chat. Track friends, send requests, and race to the top of your own leaderboard.',
-    tall: false,
   },
   {
     icon: 'trophy',
     title: 'Live leaderboards',
     body: 'Standings update the moment a match result lands — no waiting until Monday morning. Climb in real time.',
-    tall: false,
-  },
-  {
-    icon: 'medal',
-    title: 'Badges & milestones',
-    body: 'Unlock achievements for streaks, upsets, perfect weekends, and 100-point picks. Bragging rights, codified.',
-    tall: true,
   },
 ];
 
@@ -74,18 +69,17 @@ const STEPS = [
   },
 ];
 
+// User-curated set — only competitions Bantryx actively tracks today are
+// surfaced here so the ticker stays honest. Adding a new competition?
+// Append after wiring it up in League Manager.
 const TICKER_LEAGUES = [
+  'WORLD CUP',
   'PREMIER LEAGUE',
   'LA LIGA',
-  'BUNDESLIGA',
   'SERIE A',
+  'BUNDESLIGA',
   'LIGUE 1',
   'CHAMPIONS LEAGUE',
-  'WORLD CUP',
-  'COPA AMÉRICA',
-  'EUROS',
-  'PRIMEIRA LIGA',
-  'BRASILEIRO',
 ];
 
 function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
@@ -218,9 +212,9 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
           eyebrow="Why Bantryx"
           title="Built for people who don't just want to pick — they want to win."
         />
-        {/* Asymmetric 3-col layout on md: card 1 (tall) | cards 2+3 (short) |
-            card 4 (tall). On mobile the cards stack in source order. */}
-        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3 md:grid-rows-2">
+        {/* Symmetric 3-col layout on md+: three equal-height cards in a
+            single row. On mobile the cards stack in source order. */}
+        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3">
           {FEATURES.map((feature) => (
             <FeatureCard key={feature.title} {...feature} />
           ))}
@@ -338,14 +332,12 @@ function SectionHeader({ eyebrow, title }) {
   );
 }
 
-function FeatureCard({ icon, title, body, tall }) {
+function FeatureCard({ icon, title, body }) {
   const reduceMotion = useReducedMotion();
   return (
     <m.div
       whileHover={reduceMotion ? undefined : featureCardHover}
-      className={`group relative flex flex-col overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85 ${
-        tall ? 'md:row-span-2' : ''
-      }`}
+      className="group relative flex flex-col overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85"
     >
       <div className="flex items-center gap-4">
         <FeatureIcon name={icon} />

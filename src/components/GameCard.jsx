@@ -224,7 +224,12 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
           </div>
         ) : (
           <>
-            <p className="font-led text-sm tabular-nums tracking-tight text-fg sm:text-3xl">
+            {/* Kickoff time matches the team-name typography (text-sm
+                sm:text-lg, font-bold) so the three middle-row elements
+                read as a balanced triplet rather than the time
+                dominating. .font-led keeps the digital readout feel
+                without inflating the size. */}
+            <p className="font-led text-sm font-bold tabular-nums tracking-tight text-fg sm:text-lg">
               {formatKickoffTime(game.date)}
             </p>
             <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-fg-subtle sm:text-[10px] sm:tracking-[0.3em]">

@@ -15,6 +15,18 @@ import { AuthProvider } from './contexts/AuthContext';
 import { AuthGateProvider } from './contexts/AuthGateContext';
 import { DataProvider } from './contexts/DataContext';
 import { LazyMotion, domAnimation } from './lib/motion';
+// Tier 30 Phase 2 follow-up — self-host Orbitron via @fontsource so the
+// WOFF2 ships with our bundle instead of cross-origin from fonts.gstatic.
+// User reported FOUT on first desktop load: Google Fonts CSS would parse
+// after the JS bundle started, the WOFF2 download then raced React's
+// first paint, and BANTRYX flashed in the fallback monospace before
+// swapping to Orbitron. Bundling the latin-600/700 subsets puts the
+// font request on the same critical path as the main CSS — Vite emits
+// the WOFF2 as a hashed asset, browser caches it aggressively. Imported
+// BEFORE ./index.css so the @font-face declarations land before any
+// utility using `font-led` is parsed.
+import '@fontsource/orbitron/latin-600.css';
+import '@fontsource/orbitron/latin-700.css';
 import './index.css';
 
 // Apply theme SYNCHRONOUSLY before React mounts so we never flash the wrong

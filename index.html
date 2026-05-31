@@ -70,8 +70,13 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Tier 30 Phase 2 follow-up — Orbitron dropped from the Google
+         Fonts request; now self-hosted via @fontsource/orbitron
+         (imported in src/main.jsx). Self-hosting eliminates the FOUT
+         that happens on first desktop load when Google Fonts' WOFF2
+         download races React's first paint. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Libre+Baskerville:ital,wght@1,400&family=Orbitron:wght@600;700&family=Inter:wght@200;300;400;500;600;700;800;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Libre+Baskerville:ital,wght@1,400&family=Inter:wght@200;300;400;500;600;700;800;900&display=swap"
       rel="stylesheet"
     />
   </head>

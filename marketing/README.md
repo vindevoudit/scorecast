@@ -44,6 +44,16 @@ All squares are **1080×1080** (IG/FB feed, carousels), stories **1080×1920**
 | `stat-30s-square/-story.png`             | sq + story | Teaser: **30s** to first pick                                 |
 | `stat-free-square/-story.png`            | sq + story | Teaser: **$0** free, no ads, no betting                       |
 | `flyer-a4.png`                           | 2480×3508  | Printable A4 poster (300 dpi) with scannable QR → bantryx.com |
+| `product-gamecard-upcoming.png`          | 1080×1080  | Real GameCard — upcoming game: odds + pick buttons            |
+| `product-gamecard-live.png`              | 1080×1080  | Real GameCard — live score + your points on the line          |
+| `product-gamecard-final.png`             | 1080×1080  | Real GameCard — final result, winning pick + payout           |
+| `product-game-lifecycle.png`             | 1080×1920  | One fixture, all 3 states stacked (pick → live → result)      |
+| `product-leaderboard.png`                | 1080×1080  | Leaderboard snapshot — rank medals + points (5 rows)          |
+| `product-leaderboard-story.png`          | 1080×1920  | Leaderboard snapshot — full 8-row table                       |
+
+> **Product mockups** are faithful re-creations of the live app UI (real dark-theme
+> tokens, real component layout) populated with past Premier League fixtures + fake users.
+> They're the most credible "here's what you actually get" assets — lead with them.
 
 > **Flyer printing**: `flyer-a4.png` is 300 dpi A4. Print "actual size / 100%" (not
 > "fit to page") so the QR stays crisp. The QR encodes `https://bantryx.com` and includes
@@ -84,6 +94,16 @@ Keep the voice **playful, confident, no-gambling**. Always close with the link.
 
 > New here? Three steps: 1) sign up free 2) pick your winners 3) climb the rankings.
 > That's it. No catch, no paywall. → bantryx.com
+
+**Product — game lifecycle** (pair with `product-game-lifecycle` or the 3 `product-gamecard-*`)
+
+> This is the whole game: back Aston Villa at 34% → +66 points when they pull off the upset.
+> Pick before kickoff, watch it live, cash in at full-time. → bantryx.com
+
+**Product — leaderboard** (pair with `product-leaderboard*`)
+
+> Climb your group's table on correct picks × probability — the riskier the call, the faster
+> you rise. → bantryx.com
 
 **Stat teasers** (short, punchy — pair with the matching `stat-*` graphic)
 
@@ -132,7 +152,7 @@ The script is deterministic — re-running produces identical PNGs. To change an
 1. Edit copy in `scripts/generate-marketing-assets.mjs` (content arrays) or brand tokens
    in `marketing/lib/brand.mjs`.
 2. `npm run assets:marketing`
-3. The 23 PNGs in `out/` are overwritten in place.
+3. The 29 PNGs in `out/` are overwritten in place.
 
 To add a new format, add an entry to `SIZE` and a `renderX` layout function, then an
 `emit(...)` call in `main()`.

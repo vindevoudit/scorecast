@@ -16,7 +16,7 @@ round-trip — you edit a `.mjs` file and re-run one command.
 
 | Generator                                                                           | Output                                                                                                                             | Serves                                                                |
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs) | `marketing/out/*.png` (23 files)                                                                                                   | Social campaign — **not** served by the site; you post these manually |
+| [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs) | `marketing/out/*.png` (29 files)                                                                                                   | Social campaign — **not** served by the site; you post these manually |
 | [`scripts/generate-pwa-assets.mjs`](../scripts/generate-pwa-assets.mjs)             | `public/favicon.ico`, `public/pwa-*.png`, `public/apple-touch-icon-*.png`, `public/maskable-*.png`, `public/og-image-1200x630.png` | **Live site** — favicon, installed-app icons, link-share card         |
 
 Both rasterize hand-authored SVG → PNG with [`@resvg/resvg-js`](https://github.com/yisibl/resvg-js)
@@ -28,6 +28,7 @@ kit and the live site stay visually identical.
 ```
 marketing/
   lib/brand.mjs        # shared SVG fragment library (tokens, wordmark, icons, helpers)
+  lib/product.mjs      # faithful GameCard + Leaderboard UI mockups (real app tokens)
   fonts/*.ttf          # bundled OFL fonts (Orbitron, Bebas Neue, Inter ×5) — fed to resvg
   out/*.png            # generated campaign graphics (committed)
   README.md            # posting playbook (asset index, captions, hashtags, cadence)
@@ -222,6 +223,47 @@ icon mark lives in the static pipeline, §9.)
 
 **Adjust spacing** → edit the `L` layout object (or the inline y-values) in the renderer, then
 re-render and visually check the bands below.
+
+---
+
+## 8b. Product mockups — [`marketing/lib/product.mjs`](lib/product.mjs)
+
+The `product-*` graphics are **faithful SVG re-creations of the live app UI** (GameCard +
+LeaderboardCard), not abstract marketing. They exist so we can show "here's what you
+actually get" without screenshotting a running app + seeded DB.
+
+**Fidelity sources** (keep these in sync if the real components change):
+
+- **Colours** = the app's dark-theme tokens, mirrored in the `UI` object (from
+  [`src/index.css`](../src/index.css) `:root`). If the app's tokens change, update `UI`.
+- **Avatar colours** = `avatarColors()` re-implements the FNV-1a → HSL hash from
+  [`src/components/Avatar.jsx`](../src/components/Avatar.jsx) exactly, so a fake user gets the
+  same disc colour it would in-app.
+- **Layout** = `gameCard()` and `leaderboardCard()` recreate
+  [`src/components/GameCard.jsx`](../src/components/GameCard.jsx) +
+  [`LeaderboardCard.jsx`](../src/components/LeaderboardCard.jsx): status pill, score tiles
+  (Orbitron `.font-led`), payout grid, pick buttons, winner ring, rank medals, streak chips.
+
+**Where the data lives** (in the generator): `GAMES` (3 standalone fixtures), `LIFECYCLE`
+(one fixture across all 3 states), and `LEADERBOARD` (fake users). Edit those to change the
+shown matches/users.
+
+- A `gameCard({x, y, w, state, data})` returns `{ svg, h }` — it self-measures height so the
+  renderers can centre it. `state` ∈ `'upcoming' | 'live' | 'final'`. `data` carries
+  `home/away`, `payout`, `pickSide/pickTeam`, `homeScore/awayScore`, `minute`, `result`,
+  `points`.
+- Everything scales with `k = w/880`, so the same card renders crisply at any width.
+- A `you: true` row renders the accent-bordered "YOU" highlight.
+
+> ⚠️ **Win streaks are intentionally NOT shown.** An earlier mockup drew a 🔥 streak chip next
+> to names, but the **live leaderboard doesn't display streaks**, so showing them
+> misrepresented the product — they were removed. The `streakChip()` helper in `product.mjs`
+> is kept (unused) for if/when streaks ship in-app; re-enable by calling it in
+> `leaderboardCard()` and adding a `streak` field back to the `LEADERBOARD` data.
+
+> ⚠️ These mockups are **illustrative** — the payout/points numbers are hand-set in the data
+> objects, not computed by the real `scorePick`. Keep them plausible (the underdog story uses
+> a 34% away win → +66, i.e. `(1 − 0.34) × 100`).
 
 ---
 

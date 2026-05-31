@@ -33,6 +33,7 @@ import {
   iconBadge,
   svgDoc,
 } from '../marketing/lib/brand.mjs';
+import { gameCard, leaderboardCard } from '../marketing/lib/product.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fontsDir = resolve(root, 'marketing/fonts');
@@ -288,6 +289,160 @@ async function renderFlyer() {
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.18, glowR: 0.7 } });
 }
 
+// ── Product mockups — real GameCard + Leaderboard UI ─────────────────────
+// Past Premier League fixtures + fake users. The card visuals are faithful
+// re-creations of the live components (marketing/lib/product.mjs).
+
+const GAMES = {
+  upcoming: {
+    home: 'Arsenal',
+    away: 'Aston Villa',
+    dateLabel: 'Sat 31 May',
+    kickoff: '17:30',
+    payout: { home: 44, away: 66, drawH: 4, drawA: 6 },
+    pickSide: null,
+    pickTeam: null,
+  },
+  live: {
+    home: 'Man City',
+    away: 'Chelsea',
+    dateLabel: 'Today',
+    minute: "67'",
+    homeScore: 2,
+    awayScore: 1,
+    pickSide: 'home',
+    pickTeam: 'Man City',
+    points: 48,
+  },
+  final: {
+    home: 'Arsenal',
+    away: 'Aston Villa',
+    dateLabel: 'Sat 31 May',
+    homeScore: 0,
+    awayScore: 1,
+    result: 'away',
+    pickSide: 'away',
+    pickTeam: 'Aston Villa',
+    points: 66,
+  },
+};
+
+// One fixture across all three states, for the lifecycle story.
+const LIFECYCLE = {
+  upcoming: { ...GAMES.upcoming, pickSide: 'away', pickTeam: 'Aston Villa' },
+  live: {
+    home: 'Arsenal',
+    away: 'Aston Villa',
+    dateLabel: 'Today',
+    minute: "73'",
+    homeScore: 0,
+    awayScore: 1,
+    pickSide: 'away',
+    pickTeam: 'Aston Villa',
+    points: 66,
+  },
+  final: GAMES.final,
+};
+
+// NOTE: no `streak` field — the live leaderboard doesn't display win streaks,
+// so the mockup doesn't either (would misrepresent the product).
+const LEADERBOARD = [
+  { name: 'KingKenji', points: 1420 },
+  { name: 'PiratePam', points: 1280 },
+  { name: 'xGWizard', points: 1190 },
+  { name: 'TheGaffer', points: 1040, you: true },
+  { name: 'OffsideOllie', points: 980 },
+  { name: 'CleanSheetCleo', points: 905 },
+  { name: 'VARisReal', points: 860 },
+  { name: 'SundayLeaguer', points: 720 },
+];
+
+// Single product card centred on a square, with heading + footer.
+function renderProductCard({ state, data, heading, sub }) {
+  const [w, h] = SIZE.square;
+  const cx = w / 2;
+  const cardW = 840;
+  const cardX = (w - cardW) / 2;
+  // generate once to learn its height, then vertically centre between the
+  // heading block (~330) and the footer (~h-150).
+  const probe = gameCard({ x: cardX, y: 0, w: cardW, state, data });
+  const top = 350;
+  const bottom = h - 170;
+  const cardY = Math.max(top, top + (bottom - top - probe.h) / 2);
+  const card = gameCard({ x: cardX, y: cardY, w: cardW, state, data });
+
+  const body = `
+  ${background(w, h)}
+  ${brandTag({ x: 72, y: 116, size: 38 })}
+  <text x="${cx}" y="${236}" text-anchor="middle" font-family="${FONT.display}" font-size="74" fill="${COLOR.white}" letter-spacing="1">${esc(heading)}</text>
+  <text x="${cx}" y="${292}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="28" letter-spacing="1" fill="${COLOR.cyanSoft}">${esc(sub)}</text>
+  ${card.svg}
+  <text x="${cx}" y="${h - 96}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.18, glowR: 0.7 } });
+}
+
+// Three states of one fixture stacked — the full game lifecycle.
+function renderGameLifecycle() {
+  const [w, h] = SIZE.story;
+  const cx = w / 2;
+  const cardW = 880;
+  const cardX = (w - cardW) / 2;
+  const states = [
+    { state: 'upcoming', data: LIFECYCLE.upcoming, tag: 'PICK' },
+    { state: 'live', data: LIFECYCLE.live, tag: 'LIVE' },
+    { state: 'final', data: LIFECYCLE.final, tag: 'RESULT' },
+  ];
+  let cursor = 470;
+  const blocks = states
+    .map(({ state, data, tag }) => {
+      const card = gameCard({ x: cardX, y: cursor, w: cardW, state, data });
+      const label = `<text x="${cardX}" y="${cursor - 16}" font-family="${FONT.bodySemi}" font-size="24" letter-spacing="4" fill="${COLOR.cyan}">${tag}</text>`;
+      cursor += card.h + 74;
+      return label + card.svg;
+    })
+    .join('\n');
+
+  const body = `
+  ${background(w, h)}
+  ${brandTag({ x: 72, y: 250, size: 42 })}
+  <text x="${cx}" y="${364}" text-anchor="middle" font-family="${FONT.display}" font-size="96" fill="${COLOR.white}" letter-spacing="1">FROM PICK TO PAYOUT</text>
+  <text x="${cx}" y="${418}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="30" letter-spacing="2" fill="${COLOR.cyanSoft}">Back the underdog. Watch it pay off.</text>
+  ${blocks}
+  ${footer({ cx, y: h - 150, w: w * 0.64 })}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.12, glowR: 0.7 } });
+}
+
+function renderLeaderboard(format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const cardW = 880;
+  const cardX = (w - cardW) / 2;
+  const rows = story ? LEADERBOARD : LEADERBOARD.slice(0, 5);
+  const probe = leaderboardCard({ x: cardX, y: 0, w: cardW, title: 'Leaderboard', description: '', rows });
+  const top = story ? 470 : 300;
+  const bottom = story ? h - 170 : h - 110;
+  const cardY = story ? top : Math.max(top, top + (bottom - top - probe.h) / 2);
+  const card = leaderboardCard({
+    x: cardX,
+    y: cardY,
+    w: cardW,
+    title: 'Leaderboard',
+    description: 'Top performers by correct picks × probability scoring.',
+    rows,
+  });
+
+  const headSize = story ? 96 : 74;
+  const body = `
+  ${background(w, h)}
+  ${brandTag({ x: 72, y: story ? 250 : 110, size: story ? 42 : 38 })}
+  <text x="${cx}" y="${story ? 380 : 222}" text-anchor="middle" font-family="${FONT.display}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="1">CLIMB THE TABLE</text>
+  <text x="${cx}" y="${story ? 436 : 274}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Outpick your group. Rise up the table.</text>
+  ${card.svg}
+  ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
+}
+
 // Build an SVG <rect> grid from a qrcode module bitmap (dark modules only;
 // the surrounding white card supplies the quiet zone + light background).
 function qrToSvg(qr, px) {
@@ -344,6 +499,14 @@ async function main() {
   }
 
   await emit('flyer-a4', await renderFlyer(), SIZE.flyer[0]);
+
+  // Product mockups — real GameCard states + leaderboard
+  await emit('product-gamecard-upcoming', renderProductCard({ state: 'upcoming', data: GAMES.upcoming, heading: 'PICK BEFORE KICKOFF', sub: 'The bigger the upset, the bigger the payout' }), SIZE.square[0]);
+  await emit('product-gamecard-live', renderProductCard({ state: 'live', data: GAMES.live, heading: 'FOLLOW IT LIVE', sub: 'Scores + your points, updating in real time' }), SIZE.square[0]);
+  await emit('product-gamecard-final', renderProductCard({ state: 'final', data: GAMES.final, heading: 'CASH THE UPSET', sub: 'A 34% underdog away win paid +66' }), SIZE.square[0]);
+  await emit('product-game-lifecycle', renderGameLifecycle(), SIZE.story[0]);
+  await emit('product-leaderboard', renderLeaderboard('square'), SIZE.square[0]);
+  await emit('product-leaderboard-story', renderLeaderboard('story'), SIZE.story[0]);
 
   console.log('\ndone — marketing kit in marketing/out/');
 }

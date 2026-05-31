@@ -8,7 +8,7 @@
 // edit button + friend action) stays above the sub-tabs since it isn't
 // section-scoped.
 
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import BadgeWall from './BadgeWall';
 import Avatar from './Avatar';
 import EditProfileModal from './EditProfileModal';
@@ -17,6 +17,11 @@ import SubTabs from './SubTabs';
 import { useData } from '../hooks/useData';
 import { displayTeamName } from '../utils/teamNames';
 import { Badge, Button } from './ui';
+
+// Tier 30 Phase 3 C1 — Personal stats dashboard. React.lazy keeps the
+// recharts 'charts' chunk (~15 KB gzip) out of the Profile tab's eager
+// bundle; it only ships when the user clicks the Stats sub-tab.
+const StatsDashboard = lazy(() => import('./StatsDashboard'));
 
 // Tier 22 — TwoFactorSetup was removed. See routes/auth.js header for the
 // revival recipe; this file's diff in the removal commit shows the original
@@ -163,6 +168,26 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
     { value: 'badges', label: 'Badges', content: <BadgesSection profile={profile} /> },
     { value: 'activity', label: 'Activity', content: <ActivitySection profile={profile} /> },
   ];
+  // Stats sub-tab is self-only — the StatsService gate scopes to the calling
+  // user, and we don't want to expose another user's pick history through
+  // a public profile view.
+  if (profile.friendStatus === 'self') {
+    tabs.push({
+      value: 'stats',
+      label: 'Stats',
+      content: (
+        <Suspense
+          fallback={
+            <p className="rounded-3xl border border-default bg-elevated/40 px-4 py-8 text-center text-sm text-fg-muted">
+              Loading stats…
+            </p>
+          }
+        >
+          <StatsDashboard />
+        </Suspense>
+      ),
+    });
+  }
 
   return (
     <div className="space-y-6">

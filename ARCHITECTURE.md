@@ -4378,7 +4378,79 @@ The action row in `GameCard` is now `[ Share | icon-left ] ........ [ "Undo" | i
 
 **Verification gate (entire phase + A1 Revision)**: lint 2/2 baseline, 111/111 unit (35 new streak cases after the rewrite — replaces the 15 daily-state-machine cases), 24/24 games API (3 new win-streak boundary tests + 5 existing crowd-gate tests), 27/27 picks API, 7/7 me API, 3/3 notifications-badges, full Playwright sweeps green on each commit (auth + me + pick-and-result + notifications-badges + settings-view).
 
-**A5 shipped 2026-05-31** (commit `5a2b740`) — Monday 02:00 UTC weekly recap cron with optional league/group flair. **A6 attempted, parked** — commit `b74c682` reverted by `9c278f6` after the global single-coin-flip-per-day design proved too narrow (no chip on WC games, no look-ahead). Revival recipe in [`plans/tierCoinFlipParked.md`](../../.claude/plans/tierCoinFlipParked.md): per-league + 7-day look-ahead. **Deferred to Chunk 3.2**: C1 personal stats dashboard with recharts, C2 ML model-agreement chip, C3 watchlist / follow teams, C4 auto-generated match preview cards.
+**A5 shipped 2026-05-31** (commit `5a2b740`) — Monday 02:00 UTC weekly recap cron with optional league/group flair. **A6 attempted, parked** — commit `b74c682` reverted by `9c278f6` after the global single-coin-flip-per-day design proved too narrow (no chip on WC games, no look-ahead). Revival recipe in [`plans/tierCoinFlipParked.md`](../../.claude/plans/tierCoinFlipParked.md): per-league + 7-day look-ahead. **Chunk 3.2 in progress** — C1 personal stats dashboard shipped 2026-05-31 (see §8.35). **Still deferred**: C2 ML model-agreement chip, C3 watchlist / follow teams, C4 auto-generated match preview cards.
+
+---
+
+### 8.35 Tier 30 Phase 3 C1 — Personal Stats Dashboard (2026-05-31)
+
+First item of Chunk 3.2 (analytics & insight). Replaces the "lifetime stats only" experience on the Profile tab with a windowed dashboard showing trends, league breakdown, pick-time heatmap, and two templated insight cards.
+
+**Service** — [services/StatsService.js](services/StatsService.js).
+
+`getStatsForUser(userId, {window, now?})` returns a payload of:
+
+| Field                 | Shape                                                                        | Source                                                                                                                                                              |
+| --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `window`              | `'30d'` \| `'90d'` \| `'season'`                                             | echoed back from query                                                                                                                                              |
+| `generatedAt`         | ISO timestamp                                                                | cache-time marker                                                                                                                                                   |
+| `summary`             | `{picks, scored, wins, points}`                                              | direct count over windowed rows                                                                                                                                     |
+| `pointsOverTime`      | `[{date, points, cumulative}]`                                               | per-UTC-day, **zero-filled** across window so the line chart has no gaps                                                                                            |
+| `winRateTrend`        | `[{date, wins, scored, winRate, winRateMA}]`                                 | per-ACTIVE-day (no zero-fill so empty stretches don't pull the line to 0%) with 14-day trailing MA                                                                  |
+| `perLeague`           | `[{leagueName, picks, wins, draws, losses, points}]` sorted by `points DESC` | grouped over `game.leagueId` joined to `leagues.name`; `null leagueId` falls into `'Other'`                                                                         |
+| `pickTimeHeatmap`     | `number[7][24]` (UTC dow × hour)                                             | `pick.submittedAt` bucketed; fixed 7×24 shape regardless of activity                                                                                                |
+| `blindSpot`           | `{team, picks, losses, wins, insight} \| null`                               | worst-team by loss rate at ≥3 picks AND ≥1 loss; templated `"You've backed X N times — W wins, L losses."` (no LLM)                                                 |
+| `mostDisagreedFriend` | `{friendId, username, displayName, disagreements, sharedPicks} \| null`      | accepted Friendships → cross-join their picks against viewer's pick set → count where `friend.choice !== viewer.choice`; surfaces the friend with the highest count |
+
+Pure helpers exported for unit-testing:
+
+- `utcDayKey(date)` — `YYYY-MM-DD` (UTC)
+- `windowStartDate(window, now)` — back 30/90/365 days from `now` (season = rolling 1-year; an unknown window defaults to 30d defensively)
+- `buildPointsOverTime(rows, startDate, endDate)`, `buildWinRateTrend(rows)`, `buildPerLeagueBreakdown(rows)`, `buildPickTimeHeatmap(rows)`, `buildBlindSpot(rows)`, `buildMostDisagreedFriend(viewerChoiceByGame, friendPickRows)`
+
+`row` shape (built by `getStatsForUser`):
+
+```
+{
+  gameId, choice, submittedAt, result, gameDate, leagueId, leagueName,
+  homeTeam, awayTeam, points, isWin, isLoss, isDraw, scored
+}
+```
+
+`points` is computed via [lib/scoring.js](../lib/scoring.js) `scorePick(pick, game)` so the Tier 17 pick-time probability snapshot is honored — this matters because the dashboard would otherwise misreport totals for picks taken before the cascade locked their odds.
+
+**Cache** — 5-min in-memory via [lib/cache.js](lib/cache.js), keyed `stats:<userId>:<window>`. `StatsService.invalidateForUser(userId)` is exported but **not wired into score-affecting mutations today** — the 5-min TTL is acceptable drift for a stats surface, and wiring tight invalidation would couple every result-set / pick-create hook to one more service. If a sharper refresh becomes important (e.g. immediately reflecting a just-settled game), add the invalidate call to the same fan-out helper that runs `BadgeService.evaluateBadges` + `StreakService.applyForUser`.
+
+**Route** — [routes/me.js](routes/me.js): `GET /api/me/stats?window=<30d|90d|season>`. Auth required (`authMiddleware`). Returns 400 on unknown window value (defensive — frontend never sends one), 200 with the payload above on success. No CSRF needed (read-only).
+
+**Frontend** — [src/components/StatsDashboard.jsx](src/components/StatsDashboard.jsx) (~3.30 KB gzip):
+
+- Window picker (segmented control 30d / 90d / Season) at top.
+- 4 summary tiles (Picks / Scored / Wins / Win rate %).
+- 5 chart cards: PointsOverTime line (daily + running total), WinRateTrend line (daily + 14d MA, Y-axis 0-100%), PerLeague stacked bar (W/D/L), PickTimeHeatmap (UTC grid with cyan intensity per cell), BlindSpot + MostDisagreedFriend templated cards side-by-side.
+- Recharts `<ResponsiveContainer>` everywhere; `isAnimationActive={false}` to avoid the chart-anim flicker on tab switch.
+- Empty-state path when `summary.picks === 0`.
+
+**Mount point** — [src/components/ProfileView.jsx](src/components/ProfileView.jsx). Added as a **4th sub-tab** "Stats" alongside Overview / Badges / Activity, **only when `profile.friendStatus === 'self'`**. Mirrors the Tier 30 Phase 3 A2 badge-progress self-only convention — other users' profiles don't expose this granular pick-time / blind-spot / disagreement data. `React.lazy + Suspense` keeps the recharts bundle out of the eager Profile load.
+
+**Bundle** — new `'charts'` chunk in [vite.config.js](../vite.config.js) `manualChunks` routes `recharts`, every `d3-*`, and `victory-vendor` into a single chunk: 396.72 KB raw / **118.79 KB gzip**. Heavier than the original plan's "~15 KB gzip tree-shaken" estimate — recharts 3.x ships a wide d3 surface — but it's isolated to the Stats sub-tab open path so the main bundle delta is negligible (the StatsDashboard component itself is 20.43 KB / 3.30 KB gzip, separate chunk).
+
+**Privacy invariants**:
+
+- No `/api/users/:username/stats` endpoint exists. The blind-spot insight + heatmap + most-disagreed-friend would leak per-game pick history granular enough to defeat the Tier 8.6 `profileVisibility` gate; route is hard-scoped to `req.user.id`.
+- Sub-tab not rendered on other users' profiles. Even if a client manually crafts `/?view=profile&tab=stats` on a friend's username, the SubTabs primitive falls back to `defaultValue='overview'` because `stats` isn't in the rendered tab set.
+- Admin override does NOT extend here — admins can't fetch another user's stats via this endpoint. Adding such a surface would require a deliberate gate analogous to `profileVisibility`.
+
+**Tests**:
+
+- 29 new unit tests in [tests/statsService.test.js](../tests/statsService.test.js): `utcDayKey` formatting, `windowStartDate` boundaries, `buildPointsOverTime` zero-fill + aggregation + cumulative carry, `buildWinRateTrend` MA rolling-window math + active-day filtering, `buildPerLeagueBreakdown` sort + null-name handling + draws-as-separate, `buildPickTimeHeatmap` cell placement + invalid-date skip, `buildBlindSpot` 3-pick floor + worst-by-loss-rate + zero-loss skip + away-side team selection, `buildMostDisagreedFriend` agreed-skip + most-disagreements + viewer-set scoping.
+- 5 new e2e tests in [tests/e2e/api/me.spec.js](../tests/e2e/api/me.spec.js): default 30d payload shape, 90d echo, season echo, invalid window 400, no-auth 401.
+
+**Cost added**: $0/mo recurring. The aggregation runs entirely on the existing single Container Apps replica; cache absorbs duplicate requests; recharts is a build-time dependency only.
+
+**Operator post-deploy**: no manual steps. The dashboard reads existing data via the cached aggregate. First user open per replica self-warms the cache.
+
+**Future Chunk 3.2 items still pending**: C2 (ML model-agreement chip on GameCard), C3 (watchlist / follow teams), C4 (auto-generated match preview cards).
 
 ---
 

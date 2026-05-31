@@ -106,6 +106,16 @@ export default defineConfig({
           if (id.includes('node_modules/html-to-image/')) {
             return 'html-to-image';
           }
+          // Tier 30 Phase 3 C1 — recharts + its d3 deps go into a single
+          // 'charts' chunk. StatsDashboard is React.lazy'd in ProfileView
+          // so the chunk only loads when the Stats sub-tab is opened.
+          if (
+            id.includes('node_modules/recharts/') ||
+            id.includes('node_modules/d3-') ||
+            id.includes('node_modules/victory-vendor/')
+          ) {
+            return 'charts';
+          }
           return undefined;
         },
       },

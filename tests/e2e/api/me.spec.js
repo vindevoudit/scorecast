@@ -402,6 +402,75 @@ test.describe('POST /api/me/resend-verification', () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/me/stats — Tier 30 Phase 3 C1 personal stats dashboard endpoint.
+// ---------------------------------------------------------------------------
+
+test.describe('GET /api/me/stats', () => {
+  test('happy path with default window → 200 with full stats shape', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/me/stats');
+      expectShape(payload, [
+        'window',
+        'generatedAt',
+        'summary',
+        'pointsOverTime',
+        'winRateTrend',
+        'perLeague',
+        'pickTimeHeatmap',
+        'blindSpot',
+        'mostDisagreedFriend',
+      ]);
+      expect(payload.window).toBe('30d');
+      // Summary always present with 4 keys; values may be 0 if the seed
+      // user has no scored picks.
+      expectShape(payload.summary, ['picks', 'scored', 'wins', 'points']);
+      // Heatmap is fixed 7×24 regardless of pick history.
+      expect(payload.pickTimeHeatmap.length).toBe(7);
+      expect(payload.pickTimeHeatmap[0].length).toBe(24);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('window=90d → window field echoes back', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/me/stats?window=90d');
+      expect(payload.window).toBe('90d');
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('window=season → window field echoes back', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/me/stats?window=season');
+      expect(payload.window).toBe('season');
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('invalid window → 400', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const res = await authed.get('/api/me/stats?window=forever');
+      expect(res.status()).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/Invalid window/);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('no auth → 401', async () => {
+    await assertUnauthorized('GET', '/api/me/stats');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tier 22 — 2FA routes removed. Regression test to catch inadvertent
 // re-mount; all three should land on the /api 404 sentinel.
 // ---------------------------------------------------------------------------

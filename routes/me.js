@@ -27,6 +27,7 @@ const email = require('../lib/email');
 const { User, sequelize } = require('../models');
 const LeaderboardService = require('../services/LeaderboardService');
 const PushService = require('../services/PushService');
+const StatsService = require('../services/StatsService');
 
 const router = express.Router();
 
@@ -152,6 +153,24 @@ router.post('/me/onboarding-completed', lightWriteLimiter, authMiddleware, async
   } catch (error) {
     req.log.error({ err: error.message }, 'onboarding-completed failed');
     res.status(500).json({ error: 'Failed to update onboarding state' });
+  }
+});
+
+// Tier 30 Phase 3 C1 — Personal stats dashboard. Window options: 30d / 90d
+// / season. Result is cached 5 min server-side; the dashboard re-render is
+// cheap so the client doesn't need its own layer.
+router.get('/me/stats', authMiddleware, async (req, res) => {
+  const window = typeof req.query.window === 'string' ? req.query.window : '30d';
+  if (!StatsService.VALID_WINDOWS.has(window)) {
+    return res.status(400).json({ error: 'Invalid window — must be one of 30d, 90d, season' });
+  }
+  try {
+    const stats = await StatsService.getStatsForUser(req.user.id, { window });
+    if (!stats) return res.status(404).json({ error: 'User not found' });
+    res.json(stats);
+  } catch (error) {
+    req.log.error({ err: error.message }, 'stats-fetch failed');
+    res.status(500).json({ error: 'Failed to load stats' });
   }
 });
 

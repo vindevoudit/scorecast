@@ -12,6 +12,27 @@ import { useData } from '../hooks/useData';
 import { useAuth } from '../hooks/useAuth';
 import { Popover, PopoverTrigger, PopoverContent } from './ui';
 
+// Inline Lucide-style stroke bell so the top-bar icons share one visual
+// language with the GameCard Share/Undo glyphs (and avoid relying on the
+// system emoji font for chrome).
+function BellIcon({ className = 'h-5 w-5' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  );
+}
+
 function NotificationBell() {
   const request = useRequest();
   const { showStatus } = useNotifications();
@@ -100,11 +121,9 @@ function NotificationBell() {
             className="relative flex h-12 w-full items-center justify-between gap-2 rounded-3xl bg-overlay px-4 text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:w-12 md:justify-center md:px-0"
           >
             {/* Mobile: full-width pill with "Notifications" label on the left
-                and the bell emoji on the right. Desktop: icon-only square. */}
+                and the bell icon on the right. Desktop: icon-only square. */}
             <span className="text-sm font-semibold md:hidden">Notifications</span>
-            <span aria-hidden="true" className="text-xl">
-              🔔
-            </span>
+            <BellIcon className="h-5 w-5" />
             {unreadCount > 0 ? (
               <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-accent-fg">
                 {unreadCount > 99 ? '99+' : unreadCount}

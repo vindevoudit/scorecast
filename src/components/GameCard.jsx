@@ -677,7 +677,7 @@ function GameCard({ game }) {
             <button
               type="button"
               onClick={handleUndoClick}
-              className="inline-flex min-h-[44px] items-center gap-2 rounded-full px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-danger/40 hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               aria-label="Undo this pick"
             >
               Undo

@@ -113,16 +113,15 @@ function NotificationBell() {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <div className="relative w-full md:w-auto">
+      <div className="relative">
         <PopoverTrigger asChild>
           <button
             type="button"
             aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-            className="relative flex h-12 w-full items-center justify-between gap-2 rounded-3xl bg-overlay px-4 text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent md:w-12 md:justify-center md:px-0"
+            className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-3xl bg-overlay text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            {/* Mobile: full-width pill with "Notifications" label on the left
-                and the bell icon on the right. Desktop: icon-only square. */}
-            <span className="text-sm font-semibold md:hidden">Notifications</span>
+            {/* Icon-only square on every viewport — clicking expands the
+                popover with the full notification list. */}
             <BellIcon className="h-5 w-5" />
             {unreadCount > 0 ? (
               <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-accent-fg">

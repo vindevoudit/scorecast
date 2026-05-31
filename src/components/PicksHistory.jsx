@@ -327,7 +327,7 @@ function PicksHistory({ picks, games }) {
             ) : null}
           </div>
           <p className="mt-2 text-fg-muted">
-            Switch between your own picks and your friends'; filter by status or scope.
+            Switch between your own picks and friend picks. Filter by status or scope.
           </p>
         </div>
       </div>

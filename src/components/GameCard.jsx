@@ -440,7 +440,7 @@ function PayoutMatrix({ game }) {
           displayed payout will be what actually scores for whoever picks
           this side — regardless of when in the week they picked. */}
       <p className="bg-overlay/40 px-3 py-2 text-center text-[10px] font-medium normal-case tracking-normal text-fg-muted">
-        Payout locks in at kickoff.
+        Points allocation locks in at kickoff.
       </p>
     </div>
   );

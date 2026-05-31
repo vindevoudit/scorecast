@@ -201,6 +201,13 @@ async function getProfileByUsername({ username, viewer }) {
     picksWon,
     picksScored,
     winRate,
+    // Tier 30 Phase 3 A1 Revision — surface the persisted win-streak so
+    // ProfileView's Overview can render a "Best streak" tile alongside
+    // the existing 4-stat grid. Same field shape as GET /api/me.
+    streak: {
+      current: target.currentWinStreak || 0,
+      longest: target.longestWinStreak || 0,
+    },
     badges: badges.map((b) => ({ slug: b.slug, awardedAt: b.awardedAt })),
     catalog: BADGE_CATALOG,
     badgeProgress,

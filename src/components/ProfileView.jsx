@@ -59,6 +59,11 @@ function friendButtonProps(friendStatus) {
 
 function OverviewSection({ profile }) {
   const winRatePct = Math.round((profile.winRate || 0) * 100);
+  const bestStreak = profile.streak?.longest ?? 0;
+  // Tier 30 Phase 3 C1 follow-up — Orbitron (.font-led) on the stat
+  // numerals so the Overview reads in the same scoreboard typography
+  // as the StatsDashboard tiles. Headings keep the default UI font.
+  const valueClass = 'mt-2 font-led text-2xl tabular-nums text-fg';
   return (
     <div className="space-y-5">
       {profile.bio ? (
@@ -67,22 +72,26 @@ function OverviewSection({ profile }) {
         </p>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-3xl bg-overlay/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Total points</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{profile.totalPoints}</p>
+          <p className={valueClass}>{profile.totalPoints}</p>
         </div>
         <div className="rounded-3xl bg-overlay/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Picks made</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{profile.picksMade}</p>
+          <p className={valueClass}>{profile.picksMade}</p>
         </div>
         <div className="rounded-3xl bg-overlay/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Picks won</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{profile.picksWon}</p>
+          <p className={valueClass}>{profile.picksWon}</p>
         </div>
         <div className="rounded-3xl bg-overlay/70 p-4">
           <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Win rate</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-fg">{winRatePct}%</p>
+          <p className={valueClass}>{winRatePct}%</p>
+        </div>
+        <div className="rounded-3xl bg-overlay/70 p-4">
+          <p className="text-xs uppercase tracking-[0.25em] text-fg-muted">Best streak</p>
+          <p className={valueClass}>{bestStreak}</p>
         </div>
       </div>
 
@@ -163,8 +172,13 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
     setEditOpen(false);
   };
 
+  // Tier 30 Phase 1 used "Overview" as the default tab id; "Summary" is
+  // shorter so the 4-tab row (Summary / Badges / Activity / Stats) fits on
+  // a 360 px viewport without horizontal scroll. Old links carrying
+  // `?tab=overview` fall through SubTabs' defaultValue fallback to
+  // `'summary'`, so this is a safe rename.
   const tabs = [
-    { value: 'overview', label: 'Overview', content: <OverviewSection profile={profile} /> },
+    { value: 'summary', label: 'Summary', content: <OverviewSection profile={profile} /> },
     { value: 'badges', label: 'Badges', content: <BadgesSection profile={profile} /> },
     { value: 'activity', label: 'Activity', content: <ActivitySection profile={profile} /> },
   ];
@@ -241,7 +255,7 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
         />
       ) : null}
 
-      <SubTabs tabs={tabs} defaultValue="overview" ariaLabel="Profile sections" />
+      <SubTabs tabs={tabs} defaultValue="summary" ariaLabel="Profile sections" />
     </div>
   );
 }

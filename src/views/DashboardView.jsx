@@ -269,32 +269,35 @@ function DashboardView() {
 
           return (
             <>
-              {/* Mobile (< md:): 3 stacked rows. Tier 18 Chunk 1 —
-                  three-slot flex with the brand in a centered `flex-1`
-                  middle so the wordmark sits true-center regardless of
-                  whether the right slot is the (narrow) homePill or the
-                  (wider) UserMenu. */}
+              {/* Mobile (< md:): 2 stacked rows. Row 1 uses a
+                  `grid-cols-[1fr_auto_1fr]` so BANTRYX sits true-centered
+                  in the viewport regardless of the side-cell widths
+                  (hamburger left, UserMenu/homePill right). Row 2 lays
+                  out Refresh / Search (flex-grows) / Bell so the search
+                  bar fills the space freed up by collapsing the action
+                  buttons to icon-only squares. */}
               <div className="flex flex-col gap-3 md:hidden">
-                <div className="flex items-center gap-3">
-                  <div className="flex-none">{hamburger}</div>
-                  <div className="flex flex-1 justify-center">{brand}</div>
-                  <div className="flex-none">{user ? <UserMenu /> : homePill}</div>
+                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                  <div>{hamburger}</div>
+                  <div className="flex justify-center">{brand}</div>
+                  <div className="justify-self-end">{user ? <UserMenu /> : homePill}</div>
                 </div>
-                <div className="flex items-center justify-end gap-3">
+                <div className="flex items-center gap-3">
                   {user ? (
                     <>
                       <RefreshButton />
+                      <div className="min-w-0 flex-1">{search}</div>
                       <NotificationBell />
                     </>
                   ) : (
                     <>
                       <RefreshButton />
+                      <div className="min-w-0 flex-1">{search}</div>
                       {signInBtn}
                       {signUpBtn}
                     </>
                   )}
                 </div>
-                <div>{search}</div>
               </div>
 
               {/* Desktop (md+): original 1-row grid */}

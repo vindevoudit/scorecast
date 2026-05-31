@@ -76,7 +76,6 @@ function UserMenu() {
           className="inline-flex items-center gap-2 rounded-3xl border border-default bg-elevated/80 px-3 py-2 text-sm font-semibold text-fg transition-colors duration-200 hover:border-strong hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Avatar username={user.username} displayName={user.displayName} size={28} />
-          <StreakFlame current={user.streak?.current} />
           <span className="hidden max-w-[10rem] truncate sm:inline">{user.username}</span>
           <CaretIcon />
         </button>
@@ -86,12 +85,13 @@ function UserMenu() {
           <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-subtle">
             Signed in as
           </span>
-          <span className="mt-0.5 block truncate text-sm font-semibold text-fg">
-            {user.username}
+          <span className="mt-0.5 flex items-center gap-2 truncate text-sm font-semibold text-fg">
+            <span className="truncate">{user.username}</span>
+            <StreakFlame current={user.streak?.current} />
           </span>
           {user.streak?.current ? (
             <span className="mt-1.5 block text-[11px] font-medium text-fg-muted">
-              <span aria-hidden="true">🔥</span> {user.streak.current}-game win streak
+              {user.streak.current}-game win streak
               {user.streak.longest > user.streak.current ? ` · best ${user.streak.longest}` : null}
             </span>
           ) : null}

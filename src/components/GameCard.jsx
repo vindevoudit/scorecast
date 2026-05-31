@@ -79,25 +79,6 @@ function ShareIcon({ className = 'h-4 w-4' }) {
   );
 }
 
-function InstagramIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-      <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
-    </svg>
-  );
-}
-
 function UndoIcon({ className = 'h-4 w-4' }) {
   return (
     <svg
@@ -682,28 +663,16 @@ function GameCard({ game }) {
           on mobile or a PNG download on desktop. */}
       {existingPickId ? (
         <div className="mt-4 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleShare('square')}
-              disabled={Boolean(sharing)}
-              className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
-              aria-label="Share this pick as an image"
-            >
-              <ShareIcon />
-              {sharing === 'square' ? 'Sharing…' : 'Share'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleShare('story')}
-              disabled={Boolean(sharing)}
-              className="inline-flex h-11 min-h-[44px] w-11 items-center justify-center rounded-full border border-default bg-overlay/40 text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
-              aria-label="Share as Instagram Story"
-              title="Share as Story"
-            >
-              <InstagramIcon />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => handleShare('square')}
+            disabled={Boolean(sharing)}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+            aria-label="Share this pick as an image"
+          >
+            <ShareIcon />
+            {sharing ? 'Sharing…' : 'Share'}
+          </button>
           {upcoming ? (
             <button
               type="button"

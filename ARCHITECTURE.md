@@ -4323,7 +4323,7 @@ Pending picks (`game.result === null`) are filtered out of the input set entirel
 | `threes-a-crowd`            | Three's a Crowd       | groups (member)                          | 3                                   |
 | `recruiter-1` / `-2` / `-3` | Recruiter I/II/III    | referrals (referees with ≥1 scored pick) | 1 / 5 / 25                          |
 
-`coin-flip-master` reserved for A6 (Pick of the Day). New `BadgeService.computeProgressForUser(userId)` returns a 16-key metric snapshot — single function feeds BOTH the unlock decisions in `evaluateBadges` AND the progress-bar UI on the BadgeWall. Self-view-only gate in `getProfileByUsername` (`viewer.id === target.id`) keeps the granular pick / win counts behind public profiles.
+New `BadgeService.computeProgressForUser(userId)` returns a 16-key metric snapshot — single function feeds BOTH the unlock decisions in `evaluateBadges` AND the progress-bar UI on the BadgeWall. Self-view-only gate in `getProfileByUsername` (`viewer.id === target.id`) keeps the granular pick / win counts behind public profiles. (A6 Coin Flip Master was originally reserved here but is now **parked** — see [`plans/tierCoinFlipParked.md`](../../.claude/plans/tierCoinFlipParked.md) for the revival recipe.)
 
 **Recruiter referrer fan-out.** At the end of `evaluateBadges(userId)`, if the user has both a `referredByUserId` AND at least one scored pick (`metrics.scoredPicks > 0`), the function fires `evaluateBadges(referredByUserId)` fire-and-forget. Bounded at one level deep — the referrer's referrer is NOT triggered by this picker scoring (different user, different chain). Locks the Recruiter tier onto the moment a referee's first pick settles instead of waiting for the referrer's next badge-eval event.
 
@@ -4378,7 +4378,7 @@ The action row in `GameCard` is now `[ Share | icon-left ] ........ [ "Undo" | i
 
 **Verification gate (entire phase + A1 Revision)**: lint 2/2 baseline, 111/111 unit (35 new streak cases after the rewrite — replaces the 15 daily-state-machine cases), 24/24 games API (3 new win-streak boundary tests + 5 existing crowd-gate tests), 27/27 picks API, 7/7 me API, 3/3 notifications-badges, full Playwright sweeps green on each commit (auth + me + pick-and-result + notifications-badges + settings-view).
 
-**Deferred to later commits in Chunk 3.1**: A5 (post-match weekly recap cron + push), A6 (Pick of the Day + Coin Flip Master badge). **Deferred to Chunk 3.2**: C1 personal stats dashboard with recharts, C2 ML model-agreement chip, C3 watchlist / follow teams, C4 auto-generated match preview cards.
+**A5 shipped 2026-05-31** (commit `5a2b740`) — Monday 02:00 UTC weekly recap cron with optional league/group flair. **A6 attempted, parked** — commit `b74c682` reverted by `9c278f6` after the global single-coin-flip-per-day design proved too narrow (no chip on WC games, no look-ahead). Revival recipe in [`plans/tierCoinFlipParked.md`](../../.claude/plans/tierCoinFlipParked.md): per-league + 7-day look-ahead. **Deferred to Chunk 3.2**: C1 personal stats dashboard with recharts, C2 ML model-agreement chip, C3 watchlist / follow teams, C4 auto-generated match preview cards.
 
 ---
 

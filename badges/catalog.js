@@ -12,7 +12,7 @@
 // progress-computation helper in the same commit.
 //
 // Tier 30 Phase 3 A2 — expanded catalog (12 new badges + Recruiter I/II/III
-// tier). Coin Flip Master is reserved for A6 (Pick of the Day).
+// tier). A6 Coin Flip Master parked — see plans/tierCoinFlipParked.md.
 
 const BADGE_CATALOG = [
   {

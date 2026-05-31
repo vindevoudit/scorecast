@@ -147,18 +147,26 @@ function DashboardView() {
           // be a no-op refresh.
           const brandClass =
             'text-shadow-brand-glow select-none rounded text-sm font-normal uppercase tracking-[0.35em] text-accent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+          // Tier 30 Phase 2 follow-up — wordmark uses the scoreboard font
+          // (Orbitron). Applied inline so the wide letter-spacing from
+          // `tracking-[0.35em]` survives (`.font-led` utility would
+          // collapse it to 0.02em, killing the marquee feel).
+          const brandFontStyle = {
+            fontFamily: "'Orbitron', 'JetBrains Mono', 'Courier New', monospace",
+          };
           const brand =
             user && !browseAsGuest ? (
               <button
                 type="button"
                 onClick={() => setView('games')}
                 aria-label="Go to games"
+                style={brandFontStyle}
                 className={`${brandClass} ${view === 'games' ? '' : 'hover:text-white'}`}
               >
                 BANTRYX
               </button>
             ) : (
-              <h2 aria-hidden="true" className={brandClass}>
+              <h2 aria-hidden="true" style={brandFontStyle} className={brandClass}>
                 BANTRYX
               </h2>
             );

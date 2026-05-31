@@ -61,8 +61,23 @@ const router = express.Router();
 // the hash itself is never of interest to attackers.
 const LOGIN_DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10);
 
+// Tier 30 Phase 3 A2 — server-side referral code generator. 4 random
+// bytes → 8-char uppercase hex. Same shape as groups.discriminator
+// (Phase 0 T29-1). Collision retry is handled at the User.create call
+// site so a unique-constraint hit can re-roll without bubbling up as
+// a 500.
+function generateReferralCode() {
+  return crypto.randomBytes(4).toString('hex').toUpperCase();
+}
+
 router.post('/register', registerLimiter, validate(registerSchema), async (req, res) => {
-  const { username, password, email: emailAddress, acceptedTermsVersion } = req.body;
+  const {
+    username,
+    password,
+    email: emailAddress,
+    acceptedTermsVersion,
+    referralCode: rawReferralCode,
+  } = req.body;
 
   const existingUser = await getUserByUsername(username);
   if (existingUser) {
@@ -76,17 +91,50 @@ router.post('/register', registerLimiter, validate(registerSchema), async (req, 
     return res.status(400).json({ error: 'That email is already in use' });
   }
 
+  // Tier 30 Phase 3 A2 — Look up the referrer if a referral code was
+  // supplied. Unknown / case-mismatched / expired codes are silently
+  // ignored (registration still proceeds) so a typo can't block sign-up.
+  let referredByUserId = null;
+  if (rawReferralCode) {
+    const normalised = rawReferralCode.trim().toUpperCase();
+    const referrer = await User.findOne({ where: { referralCode: normalised } });
+    if (referrer) referredByUserId = referrer.id;
+  }
+
   try {
     // Tier 18 Chunk 6 — stamp terms acceptance at create so new users
     // never see the blocking TermsAcceptanceModal on first dashboard load.
     // Schema already gated on the literal `true` + current version.
-    const newUser = await User.create({
-      username,
-      password,
-      email: emailAddress,
-      termsAcceptedAt: new Date(),
-      termsAcceptedVersion: acceptedTermsVersion,
-    });
+    //
+    // Tier 30 Phase 3 A2 — generate referralCode upfront with collision
+    // retry. Username + email were already pre-checked above, so any
+    // SequelizeUniqueConstraintError here is most likely the referralCode
+    // colliding. 5 attempts ≈ 1 in 10^40 chance of all colliding at 4
+    // random bytes apiece.
+    let newUser = null;
+    let attempt = 0;
+    let referralCode = generateReferralCode();
+    for (;;) {
+      try {
+        newUser = await User.create({
+          username,
+          password,
+          email: emailAddress,
+          termsAcceptedAt: new Date(),
+          termsAcceptedVersion: acceptedTermsVersion,
+          referralCode,
+          referredByUserId,
+        });
+        break;
+      } catch (err) {
+        if (err?.name === 'SequelizeUniqueConstraintError' && attempt < 5) {
+          attempt += 1;
+          referralCode = generateReferralCode();
+          continue;
+        }
+        throw err;
+      }
+    }
     // Phase 0 P0-4 — bump severity warn → error so failed sends are
     // surfaced in alerting; users can still recover via the "Sent N min
     // ago + [Resend]" UI fed by users.lastVerificationSentAt.

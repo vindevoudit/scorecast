@@ -71,6 +71,10 @@ router.get('/me', authMiddleware, async (req, res) => {
       current: user.currentDailyStreak || 0,
       longest: user.longestDailyStreak || 0,
     },
+    // Tier 30 Phase 3 A2 — Referral code for the "invite a friend" flow.
+    // Server-set at User.create time, 8-char uppercase hex. Surfaced
+    // here so the frontend can render a shareable invite card.
+    referralCode: user.referralCode,
     joinedGroups,
     pendingInvites,
   });

@@ -145,6 +145,24 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(7),
         allowNull: true,
       },
+      // Tier 30 Phase 3 A2 — Referral fields.
+      // referralCode is generated server-side at User.create time
+      // (8-char uppercase hex via crypto.randomBytes(4)); never user
+      // input. Unique across all users.
+      // referredByUserId is stamped at create time when the registering
+      // user provides a valid code; null otherwise. Powers the Recruiter
+      // I/II/III badge tier in BadgeService.evaluateBadges.
+      referralCode: {
+        type: DataTypes.STRING(8),
+        allowNull: false,
+        unique: true,
+      },
+      referredByUserId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onDelete: 'SET NULL',
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,

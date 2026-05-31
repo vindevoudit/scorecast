@@ -91,6 +91,10 @@ async function seedFixtures() {
       // post-migration default and api/push.spec.js can rely on "no key =
       // implicitly enabled" semantics from a clean baseline.
       pushPreferences: {},
+      // Tier 30 Phase 3 A2 — deterministic referral code derived from the
+      // last 8 hex chars of the fixed test UUID. Unique across seed users
+      // because the IDs differ in their final position.
+      referralCode: u.id.replace(/-/g, '').slice(-8).toUpperCase(),
       createdAt: now,
     })),
   );

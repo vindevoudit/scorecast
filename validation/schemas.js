@@ -66,6 +66,17 @@ const registerSchema = z
     confirmedAge: z.literal(true, {
       errorMap: () => ({ message: 'You must confirm you are at least 13 years old' }),
     }),
+    // Tier 30 Phase 3 A2 — Optional referral code provided by an existing
+    // user. 8-char uppercase hex per the User.referralCode column shape.
+    // Lower-case input accepted; the route handler normalises before
+    // lookup. Unknown codes are silently ignored (typo-friendly UX) —
+    // the schema only rejects format errors here so the user gets clear
+    // feedback on garbled input.
+    referralCode: z
+      .string()
+      .trim()
+      .regex(/^[A-Fa-f0-9]{8}$/, { message: 'Referral code must be 8 hex characters' })
+      .optional(),
   })
   .openapi('RegisterRequest');
 const loginSchema = z

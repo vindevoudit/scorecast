@@ -310,14 +310,13 @@ function GamesCalendar({ byDay }) {
                       using `rgb(var(--c-accent))` so the day number still tracks the active
                       theme (the original hardcoded `rgb(34, 211, 238)` would have looked
                       wrong in light mode).
-                      Tier 30 Phase 2 — today's chip switches to `.font-led`
-                      (Orbitron tabular-nums) so the day number reads as a
-                      scoreboard digit; non-today chips stay on the default
-                      Inter face so the contrast itself anchors today. */}
+                      Tier 30 Phase 2 follow-up — every chip's day number
+                      now uses `.font-led` (Orbitron tabular-nums) so the
+                      whole calendar reads as a scoreboard strip. Today's
+                      accent border + chip-level treatment still anchors
+                      "today" without needing typographic contrast. */}
                   <span
-                    className={`text-sm font-semibold tabular-nums sm:text-base ${
-                      isTodayChip ? 'font-led' : ''
-                    }`}
+                    className="font-led text-sm font-semibold tabular-nums sm:text-base"
                     style={{ color: 'rgb(var(--c-accent))' }}
                   >
                     {dayNum}

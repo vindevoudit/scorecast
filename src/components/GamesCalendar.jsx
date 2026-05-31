@@ -178,6 +178,22 @@ function GamesCalendar({ byDay }) {
     return list.some((g) => g.status === 'in-progress');
   }, [byDay, todayKey]);
 
+  // Soonest future day (after today) that has at least one game. Powers
+  // the "Next game day" pill that replaces "Back to today" in the center
+  // slot when the selection is on today's chip. Keys are en-CA
+  // YYYY-MM-DD so lexicographic ordering equals chronological.
+  const nextGameDayKey = useMemo(() => {
+    const candidates = [];
+    for (const [key, list] of byDay.entries()) {
+      if (key > todayKey && list && list.length > 0) {
+        candidates.push(key);
+      }
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort();
+    return candidates[0];
+  }, [byDay, todayKey]);
+
   const selectedGames = useMemo(() => {
     const list = byDay.get(selectedKey) || [];
     return [...list].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -217,6 +233,14 @@ function GamesCalendar({ byDay }) {
     setSelectedKey(todayKey);
   };
 
+  const goToNextGameDay = () => {
+    if (!nextGameDayKey) return;
+    const nextDate = new Date(`${nextGameDayKey}T00:00:00`);
+    if (Number.isNaN(nextDate.getTime())) return;
+    setWindowIndex(windowIndexForOffset(diffInDays(today, nextDate)));
+    setSelectedKey(nextGameDayKey);
+  };
+
   return (
     <div className="space-y-4">
       <div className="rounded-3xl border border-default bg-elevated/80 p-4 shadow-glow">
@@ -245,6 +269,14 @@ function GamesCalendar({ byDay }) {
                   </span>
                 ) : null}
                 Back to today
+              </button>
+            ) : nextGameDayKey ? (
+              <button
+                type="button"
+                onClick={goToNextGameDay}
+                className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Next game day
               </button>
             ) : null}
           </div>

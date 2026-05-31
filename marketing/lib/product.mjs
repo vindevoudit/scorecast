@@ -119,28 +119,31 @@ export function gameCard({ x, y, w, state, data }) {
     );
   } else {
     parts.push(
-      txt(x + pad, cy + 26 * k, `${data.dateLabel} · ${final ? 'Final' : 'Upcoming'}`, {
-        size: 19 * k,
+      txt(x + pad, cy + 26 * k, `${data.dateLabel} · ${final ? 'Final' : 'Upcoming'}`.toUpperCase(), {
+        size: 18 * k,
         font: FONT.bodySemi,
         fill: 'rgba(34,211,238,0.8)',
-        ls: 3 * k,
+        ls: 4 * k,
       }),
     );
   }
-  // right-side pill / outcome badge
+  // right-side pill / outcome badge (uppercase, matching the live Badge)
   if (final) {
     const won = data.result === data.pickSide;
     const draw = data.result === 'draw';
+    // No ✓/✗ glyphs — Inter has no checkmark/cross glyph, so resvg renders
+    // them as tofu (a stray bar). The success/danger colour carries the
+    // correct/missed meaning instead.
     const badgeTxt = draw
-      ? `Drew +${data.points} pts`
+      ? `DREW +${data.points} PTS`
       : won
-        ? `✓ Correct +${data.points} pts`
-        : '✗ Missed';
+        ? `CORRECT +${data.points} PTS`
+        : 'MISSED';
     const tone = draw ? UI.warning : won ? UI.success : UI.danger;
     const bw = badgeTxt.length * 11.5 * k + 28 * k;
     parts.push(
-      rrect(x + w - pad - bw, cy + 2 * k, bw, 36 * k, 18 * k, `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`),
-      txt(x + w - pad - bw / 2, cy + 25 * k, badgeTxt, { size: 18 * k, font: FONT.bodySemi, fill: tone, anchor: 'middle' }),
+      rrect(x + w - pad - bw, cy - 10 * k, bw, 36 * k, 18 * k, `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`),
+      txt(x + w - pad - bw / 2, cy + 13 * k, badgeTxt, { size: 18 * k, font: FONT.bodySemi, fill: tone, anchor: 'middle' }),
     );
   } else {
     const pill = live
@@ -164,10 +167,12 @@ export function gameCard({ x, y, w, state, data }) {
   // home (left)
   const homeDim = winSide && winSide !== 'home' ? ' opacity="0.55"' : '';
   const awayDim = winSide && winSide !== 'away' ? ' opacity="0.55"' : '';
-  if (winSide === 'home') parts.push(rrect(x + pad - 12 * k, cy - 34 * k, 300 * k, 64 * k, 18 * k, `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`));
-  if (winSide === 'away') parts.push(rrect(x + w - pad - 300 * k + 12 * k, cy - 34 * k, 300 * k, 64 * k, 18 * k, `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`));
-  parts.push(`<g${homeDim}>${txt(x + pad, cy, data.home, { size: teamFont, font: FONT.bodySemi, fill: UI.fg })}${winSide === 'home' ? txt(x + pad, cy + 28 * k, 'Winner', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1 * k }) : ''}</g>`);
-  parts.push(`<g${awayDim}>${txt(x + w - pad, cy, data.away, { size: teamFont, font: FONT.bodySemi, fill: UI.fg, anchor: 'end' })}${winSide === 'away' ? txt(x + w - pad, cy + 28 * k, 'Winner', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1 * k, anchor: 'end' }) : ''}</g>`);
+  // Box vertically centred on its text: name cap-top ≈ cy−23k, WINNER baseline
+  // cy+28k → top cy−37k + height 79k gives ~14k equal padding top & bottom.
+  if (winSide === 'home') parts.push(rrect(x + pad - 12 * k, cy - 37 * k, 300 * k, 79 * k, 18 * k, `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`));
+  if (winSide === 'away') parts.push(rrect(x + w - pad - 300 * k + 12 * k, cy - 37 * k, 300 * k, 79 * k, 18 * k, `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`));
+  parts.push(`<g${homeDim}>${txt(x + pad, cy, data.home, { size: teamFont, font: FONT.bodySemi, fill: UI.fg })}${winSide === 'home' ? txt(x + pad, cy + 28 * k, 'WINNER', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1.5 * k }) : ''}</g>`);
+  parts.push(`<g${awayDim}>${txt(x + w - pad, cy, data.away, { size: teamFont, font: FONT.bodySemi, fill: UI.fg, anchor: 'end' })}${winSide === 'away' ? txt(x + w - pad, cy + 28 * k, 'WINNER', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1.5 * k, anchor: 'end' }) : ''}</g>`);
 
   // middle
   if (showScore) {
@@ -179,11 +184,12 @@ export function gameCard({ x, y, w, state, data }) {
     const ax = cx + gap / 2;
     const homeHi = leadSide === 'home';
     const awayHi = leadSide === 'away';
+    const tileAttr = `fill="rgba(15,23,42,0.6)" stroke="${UI.accent}" stroke-opacity="0.22" stroke-width="1"`;
     parts.push(
-      rrect(hx, ty, tileW, tileH, 10 * k, `fill="rgba(15,23,42,0.6)"`),
+      rrect(hx, ty, tileW, tileH, 10 * k, tileAttr),
       txt(hx + tileW / 2, ty + tileH / 2 + 16 * k, String(data.homeScore), { size: 44 * k, font: FONT.brand, weight: 700, fill: homeHi ? UI.accent : UI.fg, anchor: 'middle' }),
       txt(cx, cy - 6 * k, '-', { size: 34 * k, fill: UI.fgSubtle, anchor: 'middle' }),
-      rrect(ax, ty, tileW, tileH, 10 * k, `fill="rgba(15,23,42,0.6)"`),
+      rrect(ax, ty, tileW, tileH, 10 * k, tileAttr),
       txt(ax + tileW / 2, ty + tileH / 2 + 16 * k, String(data.awayScore), { size: 44 * k, font: FONT.brand, weight: 700, fill: awayHi ? UI.accent : UI.fg, anchor: 'middle' }),
     );
   } else {

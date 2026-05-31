@@ -22,10 +22,7 @@ import {
   background,
   wordmark,
   wordmarkWidth,
-  brandTag,
   rule,
-  chip,
-  chipWidth,
   ctaPill,
   textBlock,
   wrapLines,
@@ -94,11 +91,11 @@ const STATS = [
   { key: '62', icon: 'target', big: '+62', label: 'points for backing a 38% underdog' },
   { key: 'groups', icon: 'users', big: '∞', label: 'private groups for your crew' },
   { key: '30s', icon: 'zap', big: '30s', label: 'from sign-up to your first pick' },
-  { key: 'free', icon: 'gift', big: '$0', label: 'free forever — no ads, no betting' },
+  { key: 'free', icon: 'gift', big: '$0', label: 'free to play, no betting' },
 ];
 
 const STEPS = [
-  { n: '01', title: 'Sign up free', body: 'Under 30 seconds. No credit card, no ads, no betting.' },
+  { n: '01', title: 'Sign up free', body: 'Under 30 seconds. No credit card, no betting.' },
   { n: '02', title: 'Pick your winners', body: 'Browse matches and lock picks right up to kickoff.' },
   { n: '03', title: 'Climb the rankings', body: 'Earn points by probability and rise up the live board.' },
 ];
@@ -106,6 +103,20 @@ const STEPS = [
 // ── Hero kicker ──────────────────────────────────────────────────────────
 function kicker(cx, y, size = 26, ls = size * 0.45) {
   return `<text x="${cx}" y="${y}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${size}" letter-spacing="${ls}" fill="${COLOR.cyan}">${esc(KICKER)}</text>`;
+}
+
+// Centered top wordmark — small Orbitron BANTRYX at the top of a graphic.
+// (Replaces the old corner brandTag; no diamond.)
+function topMark(cx, y, size = 46) {
+  return wordmark({ x: cx, y, size, anchor: 'middle', fill: COLOR.cyanSoft });
+}
+
+// First-line baseline that vertically centres an n-line text block within the
+// gap [gapTop, gapBottom]. Used to sit a headline equidistant between the icon
+// circle above it and the sub copy below it.
+function centeredBlockBaseline(gapTop, gapBottom, n, size, lh) {
+  const gapCenter = (gapTop + gapBottom) / 2;
+  return gapCenter + size * 0.34 - ((n - 1) * lh) / 2;
 }
 
 // ── Launch hero (square / story / landscape) ─────────────────────────────
@@ -153,24 +164,27 @@ function renderFeature(feat, format) {
   const [w, h] = SIZE[format];
   const cx = w / 2;
   const story = format === 'story';
-  const tagY = story ? 250 : 130;
-  const iconCy = story ? h * 0.31 : h * 0.34;
+  const iconCy = story ? h * 0.32 : h * 0.34;
   const badgeR = story ? 200 : 168;
   const iconSize = story ? 200 : 168;
-  const headSize = story ? 92 : 78;
+  const headSize = story ? 72 : 58;
   const subSize = story ? 42 : 38;
-  const headLines = wrapLines(feat.headline, 22);
+  const headLines = wrapLines(feat.headline, story ? 18 : 20);
   const subLines = wrapLines(feat.sub, story ? 38 : 42);
-  const headY = iconCy + badgeR + (story ? 96 : 78);
-  const subY = headY + headLines.length * headSize * 1.04 + (story ? 44 : 34);
+
+  // Sub block sits a fixed distance above the footer; the headline is then
+  // centred in the gap between the icon circle and the sub.
+  const headLh = headSize * 1.08;
+  const subFirstBaseline = story ? 1190 : 792;
+  const iconBottom = iconCy + badgeR;
+  const headBaseline = centeredBlockBaseline(iconBottom, subFirstBaseline - subSize, headLines.length, headSize, headLh);
 
   const body = `
   ${background(w, h)}
-  ${brandTag({ x: 72, y: tagY, size: story ? 42 : 38 })}
-  ${chip({ x: w - 72 - chipWidth(feat.label), y: tagY - (story ? 22 : 20), label: feat.label, accent: true })}
+  ${topMark(cx, story ? 250 : 132, story ? 50 : 46)}
   ${iconBadge({ name: feat.icon, cx, cy: iconCy, badgeR, iconSize })}
-  ${textBlock({ x: cx, y: headY, anchor: 'middle', size: headSize, font: FONT.display, fill: COLOR.white, lines: headLines, lineHeight: headSize * 1.02, letterSpacing: 1 })}
-  ${textBlock({ x: cx, y: subY, anchor: 'middle', size: subSize, font: FONT.body, fill: COLOR.muted, lines: subLines, lineHeight: subSize * 1.4 })}
+  ${textBlock({ x: cx, y: headBaseline, anchor: 'middle', size: headSize, font: FONT.bodyBlack, fill: COLOR.white, lines: headLines, lineHeight: headLh })}
+  ${textBlock({ x: cx, y: subFirstBaseline, anchor: 'middle', size: subSize, font: FONT.body, fill: COLOR.muted, lines: subLines, lineHeight: subSize * 1.4 })}
   ${footer({ cx, y: h - (story ? 210 : 150), w: w * 0.64 })}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.32 } });
 }
@@ -180,18 +194,18 @@ function renderStat(stat, format) {
   const [w, h] = SIZE[format];
   const cx = w / 2;
   const story = format === 'story';
-  const bigCy = story ? h * 0.43 : h * 0.46;
-  const bigSize = story ? 540 : 440;
+  const bigCy = story ? h * 0.45 : h * 0.52;
+  const bigSize = story ? 540 : 350;
   const labelLines = wrapLines(stat.label, story ? 24 : 26);
-  const labelY = bigCy + bigSize * 0.34 + (story ? 64 : 44);
+  const labelY = bigCy + bigSize * 0.34 + (story ? 64 : 90);
 
   const body = `
   ${background(w, h)}
-  ${brandTag({ x: 72, y: story ? 250 : 120, size: story ? 42 : 38 })}
-  ${iconBadge({ name: stat.icon, cx, cy: story ? h * 0.2 : h * 0.2, badgeR: story ? 110 : 92, iconSize: story ? 96 : 80, color: COLOR.cyan })}
+  ${topMark(cx, story ? 235 : 132, story ? 50 : 46)}
+  ${iconBadge({ name: stat.icon, cx, cy: story ? h * 0.21 : h * 0.278, badgeR: story ? 110 : 82, iconSize: story ? 96 : 74, color: COLOR.cyan })}
   <text x="${cx}" y="${bigCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.display}" font-size="${bigSize}" fill="url(#mark)">${esc(stat.big)}</text>
   ${textBlock({ x: cx, y: labelY, anchor: 'middle', size: story ? 50 : 44, font: FONT.bodySemi, fill: COLOR.textHi, lines: labelLines, lineHeight: (story ? 50 : 44) * 1.35 })}
-  ${footer({ cx, y: h - (story ? 220 : 150), w: w * 0.64 })}`;
+  ${footer({ cx, y: h - (story ? 220 : 160), w: w * 0.64 })}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.42 } });
 }
 
@@ -212,20 +226,31 @@ function renderHowto(format) {
     const numSize = (story ? 150 : 110) * rowScale;
     const titleSize = (story ? 60 : 48) * rowScale;
     const bodySize = (story ? 38 : 32) * rowScale;
+    const bodyLh = bodySize * 1.35;
     const leftX = story ? 150 : 130;
-    const textX = leftX + numSize * 1.5;
-    const bodyLines = wrapLines(s.body, story ? 36 : 44);
+    const textX = leftX + numSize * 1.95; // Orbitron numerals are wider than Bebas
+    const bodyLines = wrapLines(s.body, story ? 30 : 34);
+
+    // Vertically centre BOTH the number and the title+body block on a shared
+    // mid-line so the guidance text reads centred against the big numeral.
+    const midY = y + numSize * 0.5;
+    const numBaseline = midY + numSize * 0.36;
+    const titleGap = titleSize * 0.95; // title baseline → first body baseline
+    const blockCenterRel =
+      (-0.72 * titleSize + titleGap + (bodyLines.length - 1) * bodyLh + 0.08 * bodySize) / 2;
+    const titleBaseline = midY - blockCenterRel;
+    const bodyFirstBaseline = titleBaseline + titleGap;
     return `
-    <text x="${leftX}" y="${y + numSize * 0.78}" font-family="${FONT.display}" font-size="${numSize}" fill="url(#mark)">${s.n}</text>
-    <text x="${textX}" y="${y + numSize * 0.42}" font-family="${FONT.display}" font-size="${titleSize}" fill="${COLOR.white}" letter-spacing="1">${esc(s.title)}</text>
-    ${textBlock({ x: textX, y: y + numSize * 0.42 + titleSize * 0.9, size: bodySize, font: FONT.body, fill: COLOR.muted, lines: bodyLines, lineHeight: bodySize * 1.35 })}
+    <text x="${leftX}" y="${numBaseline}" font-family="${FONT.brand}" font-weight="700" font-size="${numSize}" fill="url(#mark)">${s.n}</text>
+    <text x="${textX}" y="${titleBaseline}" font-family="${FONT.bodySemi}" font-size="${titleSize}" fill="${COLOR.white}" letter-spacing="0.5">${esc(s.title)}</text>
+    ${textBlock({ x: textX, y: bodyFirstBaseline, size: bodySize, font: FONT.body, fill: COLOR.muted, lines: bodyLines, lineHeight: bodyLh })}
     ${i < STEPS.length - 1 ? rule({ x: leftX, y: y + rowH - (story ? 90 : 60), w: w - leftX * 2 }) : ''}`;
   }).join('\n');
 
   const body = `
   ${background(w, h)}
-  ${brandTag({ x: 72, y: tagY, size: story ? 44 : 38 })}
-  <text x="${cx}" y="${headY}" text-anchor="middle" font-family="${FONT.display}" font-size="${story ? 110 : 86}" fill="${COLOR.white}" letter-spacing="1">HOW IT WORKS</text>
+  ${topMark(cx, story ? 235 : 116, story ? 50 : 46)}
+  <text x="${cx}" y="${headY}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${story ? 92 : 72}" fill="${COLOR.white}" letter-spacing="0.5">How it works</text>
   <text x="${cx}" y="${headY + (story ? 70 : 54)}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 38 : 32}" letter-spacing="2" fill="${COLOR.cyanSoft}">Three steps. No catch. No paywall.</text>
   ${rows}
   ${footer({ cx, y: h - (story ? 200 : 120), w: w * 0.64 })}`;
@@ -253,9 +278,9 @@ async function renderFlyer() {
       const cardH = 360;
       return `
       <rect x="${x}" y="${y}" rx="36" width="${cardW}" height="${cardH}" fill="rgba(15,23,42,0.7)" stroke="${COLOR.border}" stroke-width="3"/>
-      ${iconBadge({ name: s.icon, cx: x + cardW / 2, cy: y + 92, badgeR: 60, iconSize: 56, color: COLOR.cyan, disc: false })}
-      <text x="${x + cardW / 2}" y="${y + 240}" text-anchor="middle" font-family="${FONT.display}" font-size="150" fill="url(#mark)">${esc(s.big)}</text>
-      ${textBlock({ x: x + cardW / 2, y: y + 300, anchor: 'middle', size: 36, font: FONT.bodyMed, fill: COLOR.muted, lines: wrapLines(s.label, 26), lineHeight: 48 })}`;
+      ${iconBadge({ name: s.icon, cx: x + cardW / 2, cy: y + 66, badgeR: 60, iconSize: 52, color: COLOR.cyan, disc: false })}
+      <text x="${x + cardW / 2}" y="${y + 202}" text-anchor="middle" font-family="${FONT.display}" font-size="134" fill="url(#mark)">${esc(s.big)}</text>
+      ${textBlock({ x: x + cardW / 2, y: y + 268, anchor: 'middle', size: 34, font: FONT.bodyMed, fill: COLOR.muted, lines: wrapLines(s.label, 26), lineHeight: 44 })}`;
     })
     .join('\n');
 
@@ -264,8 +289,8 @@ async function renderFlyer() {
     const x = colW * i + colW / 2;
     const y = 2090;
     return `
-    <text x="${x}" y="${y}" text-anchor="middle" font-family="${FONT.display}" font-size="130" fill="url(#mark)">${s.n}</text>
-    <text x="${x}" y="${y + 92}" text-anchor="middle" font-family="${FONT.display}" font-size="58" fill="${COLOR.white}" letter-spacing="1">${esc(s.title)}</text>
+    <text x="${x}" y="${y}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="124" fill="url(#mark)">${s.n}</text>
+    <text x="${x}" y="${y + 92}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="54" fill="${COLOR.white}" letter-spacing="0.5">${esc(s.title)}</text>
     ${textBlock({ x, y: y + 152, anchor: 'middle', size: 32, font: FONT.body, fill: COLOR.muted, lines: wrapLines(s.body, 30), lineHeight: 44 })}`;
   }).join('\n');
 
@@ -278,14 +303,14 @@ async function renderFlyer() {
   <text x="${cx}" y="${1230}" text-anchor="middle" font-family="${FONT.body}" font-size="56" fill="${COLOR.textHi}">Predict football. Outpick your friends. Climb the leaderboard.</text>
   ${statCards}
   ${rule({ x: cx - 900, y: 1840, w: 1800 })}
-  <text x="${cx}" y="${1930}" text-anchor="middle" font-family="${FONT.display}" font-size="84" fill="${COLOR.white}" letter-spacing="2">HOW IT WORKS</text>
+  <text x="${cx}" y="${1930}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="72" fill="${COLOR.white}" letter-spacing="0.5">How it works</text>
   ${stepRow}
   <g transform="translate(${qrX} ${qrY})">
     <rect x="-40" y="-40" rx="40" width="${qrPx + 80}" height="${qrPx + 80}" fill="${COLOR.white}"/>
     ${qrSvg}
   </g>
-  <text x="${cx}" y="${qrY + qrPx + 170}" text-anchor="middle" font-family="${FONT.display}" font-size="116" letter-spacing="3" fill="url(#mark)">PLAY FREE AT BANTRYX.COM</text>
-  <text x="${cx}" y="${qrY + qrPx + 260}" text-anchor="middle" font-family="${FONT.bodyMed}" font-size="42" letter-spacing="2" fill="${COLOR.muted}">Scan the code  ·  Free forever  ·  No ads  ·  13+</text>`;
+  <text x="${cx}" y="${qrY + qrPx + 160}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="92" letter-spacing="0.5" fill="url(#mark)">Play free at bantryx.com</text>
+  <text x="${cx}" y="${qrY + qrPx + 260}" text-anchor="middle" font-family="${FONT.bodyMed}" font-size="42" letter-spacing="2" fill="${COLOR.muted}">Scan the code  ·  Free to play  ·  No betting  ·  13+</text>`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.18, glowR: 0.7 } });
 }
 
@@ -327,21 +352,40 @@ const GAMES = {
   },
 };
 
-// One fixture across all three states, for the lifecycle story.
+// One fixture across all three states, for the lifecycle story:
+// Man City vs Aston Villa, 1–2 — the user backs the underdog Villa and wins.
 const LIFECYCLE = {
-  upcoming: { ...GAMES.upcoming, pickSide: 'away', pickTeam: 'Aston Villa' },
+  upcoming: {
+    home: 'Man City',
+    away: 'Aston Villa',
+    dateLabel: 'May 24, 2026',
+    kickoff: '15:00',
+    payout: { home: 34, away: 74, drawH: 2, drawA: 6 },
+    pickSide: 'away',
+    pickTeam: 'Aston Villa',
+  },
   live: {
-    home: 'Arsenal',
+    home: 'Man City',
     away: 'Aston Villa',
     dateLabel: 'Today',
     minute: "73'",
-    homeScore: 0,
-    awayScore: 1,
+    homeScore: 1,
+    awayScore: 2,
     pickSide: 'away',
     pickTeam: 'Aston Villa',
-    points: 66,
+    points: 74,
   },
-  final: GAMES.final,
+  final: {
+    home: 'Man City',
+    away: 'Aston Villa',
+    dateLabel: 'May 24, 2026',
+    homeScore: 1,
+    awayScore: 2,
+    result: 'away',
+    pickSide: 'away',
+    pickTeam: 'Aston Villa',
+    points: 74,
+  },
 };
 
 // NOTE: no `streak` field — the live leaderboard doesn't display win streaks,
@@ -373,8 +417,8 @@ function renderProductCard({ state, data, heading, sub }) {
 
   const body = `
   ${background(w, h)}
-  ${brandTag({ x: 72, y: 116, size: 38 })}
-  <text x="${cx}" y="${236}" text-anchor="middle" font-family="${FONT.display}" font-size="74" fill="${COLOR.white}" letter-spacing="1">${esc(heading)}</text>
+  ${topMark(cx, 116, 46)}
+  <text x="${cx}" y="${232}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="54" fill="${COLOR.white}" letter-spacing="0.5">${esc(heading)}</text>
   <text x="${cx}" y="${292}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="28" letter-spacing="1" fill="${COLOR.cyanSoft}">${esc(sub)}</text>
   ${card.svg}
   <text x="${cx}" y="${h - 96}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`;
@@ -404,8 +448,8 @@ function renderGameLifecycle() {
 
   const body = `
   ${background(w, h)}
-  ${brandTag({ x: 72, y: 250, size: 42 })}
-  <text x="${cx}" y="${364}" text-anchor="middle" font-family="${FONT.display}" font-size="96" fill="${COLOR.white}" letter-spacing="1">FROM PICK TO PAYOUT</text>
+  ${topMark(cx, 250, 50)}
+  <text x="${cx}" y="${360}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="76" fill="${COLOR.white}" letter-spacing="0.5">From pick to payout</text>
   <text x="${cx}" y="${418}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="30" letter-spacing="2" fill="${COLOR.cyanSoft}">Back the underdog. Watch it pay off.</text>
   ${blocks}
   ${footer({ cx, y: h - 150, w: w * 0.64 })}`;
@@ -432,11 +476,11 @@ function renderLeaderboard(format) {
     rows,
   });
 
-  const headSize = story ? 96 : 74;
+  const headSize = story ? 80 : 60;
   const body = `
   ${background(w, h)}
-  ${brandTag({ x: 72, y: story ? 250 : 110, size: story ? 42 : 38 })}
-  <text x="${cx}" y="${story ? 380 : 222}" text-anchor="middle" font-family="${FONT.display}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="1">CLIMB THE TABLE</text>
+  ${topMark(cx, story ? 235 : 110, story ? 50 : 46)}
+  <text x="${cx}" y="${story ? 376 : 220}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="0.5">Climb the table</text>
   <text x="${cx}" y="${story ? 436 : 274}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Outpick your group. Rise up the table.</text>
   ${card.svg}
   ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
@@ -501,9 +545,9 @@ async function main() {
   await emit('flyer-a4', await renderFlyer(), SIZE.flyer[0]);
 
   // Product mockups — real GameCard states + leaderboard
-  await emit('product-gamecard-upcoming', renderProductCard({ state: 'upcoming', data: GAMES.upcoming, heading: 'PICK BEFORE KICKOFF', sub: 'The bigger the upset, the bigger the payout' }), SIZE.square[0]);
-  await emit('product-gamecard-live', renderProductCard({ state: 'live', data: GAMES.live, heading: 'FOLLOW IT LIVE', sub: 'Scores + your points, updating in real time' }), SIZE.square[0]);
-  await emit('product-gamecard-final', renderProductCard({ state: 'final', data: GAMES.final, heading: 'CASH THE UPSET', sub: 'A 34% underdog away win paid +66' }), SIZE.square[0]);
+  await emit('product-gamecard-upcoming', renderProductCard({ state: 'upcoming', data: GAMES.upcoming, heading: 'Pick before kickoff', sub: 'The bigger the upset, the bigger the payout' }), SIZE.square[0]);
+  await emit('product-gamecard-live', renderProductCard({ state: 'live', data: GAMES.live, heading: 'Follow it live', sub: 'Scores + your points, updating in real time' }), SIZE.square[0]);
+  await emit('product-gamecard-final', renderProductCard({ state: 'final', data: GAMES.final, heading: 'Cash the upset', sub: 'A 34% underdog away win paid +66' }), SIZE.square[0]);
   await emit('product-game-lifecycle', renderGameLifecycle(), SIZE.story[0]);
   await emit('product-leaderboard', renderLeaderboard('square'), SIZE.square[0]);
   await emit('product-leaderboard-story', renderLeaderboard('story'), SIZE.story[0]);

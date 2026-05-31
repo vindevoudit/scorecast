@@ -92,24 +92,25 @@ numbers, and icon glows fill with.
 
 Every renderer composes from these pure functions (each returns an SVG string).
 
-| Function                                                         | Purpose                                                                                        |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `svgDoc({w, h, body, glow})`                                     | Wraps a body in `<svg>` + `baseDefs`. `glow` sets the radial-glow centre (`glowCx/Cy/R`, 0–1). |
-| `background(w, h, {grid})`                                       | Gradient + cyan glow (+ optional arena grid).                                                  |
-| `arenaGrid(w, h, {step, opacity})`                               | Faint pitch-grid lines.                                                                        |
-| `wordmark({x, y, size, anchor, fill, text})`                     | Orbitron BANTRYX (or any `text`).                                                              |
-| `wordmarkWidth(size, text)`                                      | Predicts rendered width — used to fit/centre.                                                  |
-| `brandTag({x, y, size})`                                         | Compact corner brand: cyan diamond + small Orbitron BANTRYX.                                   |
-| `kicker(cx, y, size)`                                            | (in the generator) "PREDICT · COMPETE · CLIMB" eyebrow.                                        |
-| `chip({x, y, label, accent})` + `chipWidth(label)`               | Pill label (e.g. "GROUPS").                                                                    |
-| `ctaPill({cx, y, label, size})`                                  | Filled cyan call-to-action button.                                                             |
-| `iconBadge({name, cx, cy, badgeR, iconSize, color, disc})`       | Glowing icon centred in a disc (see §4).                                                       |
-| `lucideIcon(name, {cx, cy, size, color})`                        | Raw icon, no glow/disc.                                                                        |
-| `textBlock({x, y, lines, size, lineHeight, anchor, font, fill})` | Multi-line text (one `<text>` per line).                                                       |
-| `wrapLines(text, maxChars)`                                      | Word-wrap into a `lines[]` array by character budget.                                          |
-| `rule({x, y, w})`                                                | Horizontal pitch-line, fades at both ends.                                                     |
-| `footer({cx, y, w})`                                             | rule + "NO BETTING, JUST BANTRYX" + bantryx.com.                                               |
-| `esc(s)`                                                         | XML-escape text content. **Always** escape user/dynamic strings.                               |
+| Function                                                         | Purpose                                                                                                                                                                             |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `svgDoc({w, h, body, glow})`                                     | Wraps a body in `<svg>` + `baseDefs`. `glow` sets the radial-glow centre (`glowCx/Cy/R`, 0–1).                                                                                      |
+| `background(w, h, {grid})`                                       | Gradient + cyan glow (+ optional arena grid).                                                                                                                                       |
+| `arenaGrid(w, h, {step, opacity})`                               | Faint pitch-grid lines.                                                                                                                                                             |
+| `wordmark({x, y, size, anchor, fill, text})`                     | Orbitron BANTRYX (or any `text`).                                                                                                                                                   |
+| `wordmarkWidth(size, text)`                                      | Predicts rendered width — used to fit/centre.                                                                                                                                       |
+| `topMark(cx, y, size)`                                           | (in the generator) **centred** Orbitron BANTRYX at the top of a graphic — the current header convention.                                                                            |
+| `kicker(cx, y, size)`                                            | (in the generator) "PREDICT · COMPETE · CLIMB" eyebrow.                                                                                                                             |
+| `centeredBlockBaseline(top, bottom, n, size, lh)`                | (in the generator) baseline that vertically centres an n-line block in a gap (feature headlines).                                                                                   |
+| `brandTag({x, y, size})` · `chip(...)` · `chipWidth(...)`        | **Retired** — old corner diamond+wordmark tag and top-right category chips. Kept in brand.mjs but no longer used; headers now use centred `topMark` and features dropped the chips. |
+| `ctaPill({cx, y, label, size})`                                  | Filled cyan call-to-action button.                                                                                                                                                  |
+| `iconBadge({name, cx, cy, badgeR, iconSize, color, disc})`       | Glowing icon centred in a disc (see §4).                                                                                                                                            |
+| `lucideIcon(name, {cx, cy, size, color})`                        | Raw icon, no glow/disc.                                                                                                                                                             |
+| `textBlock({x, y, lines, size, lineHeight, anchor, font, fill})` | Multi-line text (one `<text>` per line).                                                                                                                                            |
+| `wrapLines(text, maxChars)`                                      | Word-wrap into a `lines[]` array by character budget.                                                                                                                               |
+| `rule({x, y, w})`                                                | Horizontal pitch-line, fades at both ends.                                                                                                                                          |
+| `footer({cx, y, w})`                                             | rule + "NO BETTING, JUST BANTRYX" + bantryx.com.                                                                                                                                    |
+| `esc(s)`                                                         | XML-escape text content. **Always** escape user/dynamic strings.                                                                                                                    |
 
 > ⚠️ **There is no auto-wrapping.** SVG `<text>` doesn't wrap — use `wrapLines()` to split,
 > then `textBlock()` to lay the lines out. If text overflows, widen the `maxChars` budget or
@@ -182,14 +183,14 @@ Each graphic type is one function returning an SVG string. They share a **per-fo
 object** pattern — a small `L` map keyed by format holds the y-coordinates/sizes, so tuning
 spacing means editing numbers in one place.
 
-| Renderer                      | Produces                          | Notes                                                                                       |
-| ----------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------- |
-| `renderLaunch(format)`        | launch square / story / landscape | `L` map at the top holds `kickY/wmY/tagY/bodyY/ctaY/urlY`. `format==='card'` delegates to ↓ |
-| `renderLaunchCard()`          | launch-card (1200×630)            | Centred wordmark; also the model for the live OG card                                       |
-| `renderFeature(feat, format)` | feature square / story            | `brandTag` + `chip` + `iconBadge` + headline + sub + footer                                 |
-| `renderStat(stat, format)`    | stat square / story               | Small `iconBadge` + giant Bebas number + label + footer                                     |
-| `renderHowto(format)`         | howto square / story              | `STEPS` rows with Bebas numbers + `rule` dividers                                           |
-| `renderFlyer()`               | flyer-a4 (2480×3508)              | async (QR via `qrcode`); stat cards + steps + QR block                                      |
+| Renderer                      | Produces                          | Notes                                                                                            |
+| ----------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `renderLaunch(format)`        | launch square / story / landscape | `L` map at the top holds `kickY/wmY/tagY/bodyY/ctaY/urlY`. `format==='card'` delegates to ↓      |
+| `renderLaunchCard()`          | launch-card (1200×630)            | Centred wordmark; also the model for the live OG card                                            |
+| `renderFeature(feat, format)` | feature square / story            | centred `topMark` + `iconBadge` + **Inter** headline (centred between icon & sub) + sub + footer |
+| `renderStat(stat, format)`    | stat square / story               | Small `iconBadge` + giant Bebas number + label + footer                                          |
+| `renderHowto(format)`         | howto square / story              | `STEPS` rows with Bebas numbers + `rule` dividers                                                |
+| `renderFlyer()`               | flyer-a4 (2480×3508)              | async (QR via `qrcode`); stat cards + steps + QR block                                           |
 
 ### Vertical-rhythm rule
 
@@ -262,8 +263,10 @@ shown matches/users.
 > `leaderboardCard()` and adding a `streak` field back to the `LEADERBOARD` data.
 
 > ⚠️ These mockups are **illustrative** — the payout/points numbers are hand-set in the data
-> objects, not computed by the real `scorePick`. Keep them plausible (the underdog story uses
-> a 34% away win → +66, i.e. `(1 − 0.34) × 100`).
+> objects, not computed by the real `scorePick`. Keep them plausible: the lifecycle uses Man
+> City 1–2 Aston Villa (a ~26% away win → +74, i.e. `(1 − 0.26) × 100`); the standalone cards
+> use Arsenal vs Aston Villa (34% → +66). Card header formatting (uppercase date · status,
+> uppercase WINNER + outcome badge, glowing score tiles) mirrors the live GameCard.
 
 ---
 

@@ -3,11 +3,12 @@
 // render with `role="menuitem"` so the Playwright selectors that pick the
 // "Sign out" menuitem still resolve.
 //
-// Tier 30 Phase 3 A1 — Streak flame chip rendered between the avatar and
-// the username on the trigger. Visible on every viewport size (mobile
-// hides the username text but keeps the flame so the streak indicator
-// survives the small-screen layout). Brightness tiers at 7 / 14 / 30
-// per the Phase 3 plan; `shadow-led` lights the chip at 30+.
+// Tier 30 Phase 3 A1 Revision (2026-05-31) — Win-streak flame chip.
+// Streak is now per-result: every winning pick increments, a loss
+// resets, a draw is a no-op. Brightness tiers at 5 / 10 / 15 mirror
+// the Streakmaster I/II/III badge thresholds; `shadow-led` lights the
+// chip at 15+ (mastery tier). Visible on every viewport size — mobile
+// hides the username text but keeps the flame.
 
 import Avatar from './Avatar';
 import { useAuth } from '../hooks/useAuth';
@@ -22,9 +23,9 @@ import {
 } from './ui/DropdownMenu';
 
 function streakChipClass(current) {
-  if (current >= 30) return 'bg-warning/35 text-warning shadow-led';
-  if (current >= 14) return 'bg-warning/25 text-warning';
-  if (current >= 7) return 'bg-warning/15 text-warning';
+  if (current >= 15) return 'bg-warning/35 text-warning shadow-led';
+  if (current >= 10) return 'bg-warning/25 text-warning';
+  if (current >= 5) return 'bg-warning/15 text-warning';
   return 'bg-overlay text-fg-muted';
 }
 
@@ -35,8 +36,8 @@ function StreakFlame({ current }) {
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${streakChipClass(
         current,
       )}`}
-      aria-label={`${current}-day streak`}
-      title={`${current}-day pick streak`}
+      aria-label={`${current}-game win streak`}
+      title={`${current}-game win streak`}
     >
       <span aria-hidden="true">🔥</span>
       {current}
@@ -90,7 +91,7 @@ function UserMenu() {
           </span>
           {user.streak?.current ? (
             <span className="mt-1.5 block text-[11px] font-medium text-fg-muted">
-              <span aria-hidden="true">🔥</span> {user.streak.current}-day streak
+              <span aria-hidden="true">🔥</span> {user.streak.current}-game win streak
               {user.streak.longest > user.streak.current ? ` · best ${user.streak.longest}` : null}
             </span>
           ) : null}

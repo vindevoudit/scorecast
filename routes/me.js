@@ -68,8 +68,8 @@ router.get('/me', authMiddleware, async (req, res) => {
     // 7 / 14 / 30. `longest` powers the "Personal best" copy in the
     // Profile view.
     streak: {
-      current: user.currentDailyStreak || 0,
-      longest: user.longestDailyStreak || 0,
+      current: user.currentWinStreak || 0,
+      longest: user.longestWinStreak || 0,
     },
     // Tier 30 Phase 3 A2 — Referral code for the "invite a friend" flow.
     // Server-set at User.create time, 8-char uppercase hex. Surfaced

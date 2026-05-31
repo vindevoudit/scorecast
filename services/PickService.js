@@ -15,7 +15,6 @@ const { getViewerFriendIdSet } = require('../lib/friends');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const UserScoreService = require('./UserScoreService');
-const StreakService = require('./StreakService');
 const GameService = require('./GameService');
 
 async function createPick({ userId, gameId, choice }) {
@@ -84,11 +83,10 @@ async function createPick({ userId, gameId, choice }) {
   }
 
   BadgeService.evaluateBadges(userId).catch(() => {});
-  // Tier 30 Phase 3 A1 — Pick-streak. Fires post-transaction so a streak
-  // outage can never break the pick. computeNextState is idempotent at
-  // day-key granularity, so two parallel picks on the same day resolve
-  // to a single increment.
-  StreakService.applyPickForUser(userId).catch(() => {});
+  // Tier 30 Phase 3 A1 Revision (2026-05-31) — streak is now driven by
+  // RESULT scoring, not pick creation. The hook fires from
+  // GameService.{setResult, bulkSetResult, applyLiveUpdate}; this site
+  // is intentionally silent.
   // Tier 30 Phase 3 A3 — drop the per-game crowd cache so the picker
   // sees their own count tick up on the very next GameCard render
   // instead of waiting up to 60s for the TTL.

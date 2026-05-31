@@ -1,181 +1,216 @@
 'use strict';
 
-// Tier 30 Phase 3 (Tier 27 Phase A — A1) — Streak service.
+// Tier 30 Phase 3 A1 Revision (2026-05-31) — Win-streak service.
 //
-// Pick-streak (NOT win-streak): every calendar day on which a user creates
-// at least one pick increments their `currentDailyStreak`. The streak
-// resets to 1 on a clean miss (≥2 missed days with no freeze available,
-// or 1 missed day with the monthly freeze already consumed). A monthly
-// auto-grant streak-freeze covers exactly one missed day per calendar
-// month — designed to absorb accidental skips (illness, travel, app
-// downtime) without nuking long streaks.
+// REPLACES the original calendar-day pick streak. Streaks are now per
+// scoring event:
 //
-// Called fire-and-forget from PickService.createPick AFTER the wrapping
-// transaction commits. Streak update is independent of the pick row
-// (different conceptual scope, no scoring or leaderboard interaction),
-// so a streak failure must never block the pick. Concurrency: two
-// parallel picks from the same user in the same tick resolve correctly
-// via the "same dayKey → no-op" branch even if they race; worst case is
-// one stale read that lands the same value the other writer would have
-// landed (idempotent at the day-key granularity).
+//   W (pick.choice === game.result, non-draw)  → current += 1
+//   D (game.result === 'draw')                 → no-op
+//   L (game scored, not draw, doesn't match)   → current = 0
+//   Pending (game.result === null)             → ignored
 //
-// Milestones at 7 / 14 / 30 / 60 / 100 fire a `streak-milestone`
-// notification (dual-update rule: PUSH_NOTIFICATION_TYPES in
+// Within a same-kickoff batch (picks on games sharing game.date), wins
+// are applied first, then draws, then losses — so longest captures the
+// batch peak even when the final pick in the batch is a loss.
+//
+// longest is MONOTONIC: never shrinks on a recompute. A retroactive
+// result correction that trims the computed history can still leave the
+// previously-stamped longest in place, honoring the user's wording
+// "highest ever will be recorded".
+//
+// Implementation: full recompute from the user's scored pick history on
+// every scoring event. O(N) per affected user where N = lifetime scored
+// picks. Sub-millisecond at our scale. Recompute beats an incremental
+// state machine on simplicity: result corrections (X → Y, X → null) fall
+// out naturally with no reversal logic.
+//
+// Trigger: fire-and-forget POST-transaction from
+//   GameService.setResult
+//   GameService.bulkSetResult
+//   GameService.applyLiveUpdate
+// (the three result-scoring entry points). Pick creation no longer
+// affects the streak — the result does. PickService.createPick used to
+// hook here pre-rework; that hook was removed.
+//
+// Milestones at 5 / 10 / 15 / 20 / 30 / 50 fire a `streak-milestone`
+// push notification (dual-update rule: PUSH_NOTIFICATION_TYPES in
 // validation/schemas.js + NOTIFICATION_TYPES in PushSettingsPanel.jsx).
 // Deep-link `/?view=profile` per the Tier 18 Chunk 6a convention.
+//
+// Milestone dedup via users.lastMilestoneFired:
+//   Fire the largest M in STREAK_MILESTONES with M <= newCurrent AND
+//   M > prevMilestoneFired. Stamp lastMilestoneFired = M.
+//   When newCurrent drops below prevMilestoneFired (e.g. after a loss
+//   reset), drop lastMilestoneFired to max(M ≤ newCurrent) so future
+//   re-crossings re-fire.
 
-const { User } = require('../models');
+const { Op } = require('sequelize');
+const { User, Pick, Game } = require('../models');
 const NotificationService = require('./NotificationService');
 const logger = require('../lib/logger');
 
-const STREAK_MILESTONES = [7, 14, 30, 60, 100];
+const STREAK_MILESTONES = [5, 10, 15, 20, 30, 50];
 
-function pad2(n) {
-  return String(n).padStart(2, '0');
+// Result priority for same-kickoff sort: wins first so longest captures
+// the batch peak before a draw/loss resets current.
+const RESULT_PRIORITY = { win: 0, draw: 1, loss: 2 };
+
+// Classify a single scored pick. Inputs assumed non-null (caller filters
+// out pending picks). Returns one of 'win' | 'draw' | 'loss'.
+function classify(pick, game) {
+  if (game.result === 'draw') return 'draw';
+  if (pick.choice === game.result) return 'win';
+  return 'loss';
 }
 
-function todayDayKey(now = new Date()) {
-  // UTC YYYY-MM-DD. The boundary follows UTC midnight, not the user's
-  // local midnight, so there's one stable answer regardless of which
-  // replica saw the request. Streak resolution is calendar-day, not
-  // minute-precision, so a UTC-vs-local mismatch around midnight is
-  // acceptable; the freeze mechanism covers the rare edge case where
-  // a user's "today" pick lands on "yesterday UTC".
-  return `${now.getUTCFullYear()}-${pad2(now.getUTCMonth() + 1)}-${pad2(now.getUTCDate())}`;
-}
+// Pure function — given a list of scored picks (each carrying its
+// associated Game's date + result + id), return {current, longest}.
+//
+// Input shape: each entry is { choice, game: { id, date, result } }.
+// Sequelize associations produce nested rows shaped this way when loaded
+// via `include: [{ model: Game }]`.
+//
+// Sort order is the load-bearing invariant — see the file header.
+function computeStreakFromPicks(scoredPicks) {
+  const rows = scoredPicks
+    .filter((p) => p.game && p.game.result !== null && p.game.result !== undefined)
+    .map((p) => ({
+      kind: classify(p, p.game),
+      date: new Date(p.game.date).getTime(),
+      gameId: p.game.id,
+    }));
 
-function todayMonthKey(now = new Date()) {
-  return `${now.getUTCFullYear()}-${pad2(now.getUTCMonth() + 1)}`;
-}
+  rows.sort((a, b) => {
+    if (a.date !== b.date) return a.date - b.date;
+    const pa = RESULT_PRIORITY[a.kind];
+    const pb = RESULT_PRIORITY[b.kind];
+    if (pa !== pb) return pa - pb;
+    // Stable final tiebreaker so the same input always produces the same
+    // output regardless of array order coming in.
+    if (a.gameId < b.gameId) return -1;
+    if (a.gameId > b.gameId) return 1;
+    return 0;
+  });
 
-function dayKeyToUtcMs(key) {
-  const [y, m, d] = key.split('-').map(Number);
-  return Date.UTC(y, m - 1, d);
-}
-
-function daysBetween(fromKey, toKey) {
-  return Math.round((dayKeyToUtcMs(toKey) - dayKeyToUtcMs(fromKey)) / 86_400_000);
-}
-
-// Pure decision function — given the prior state and "today",
-// returns the next state + which milestone (if any) was just reached.
-// Exposed for unit testing.
-function computeNextState(prev, today, monthKey) {
-  const last = prev.lastStreakDayKey;
-  const current = prev.currentDailyStreak || 0;
-  const longest = prev.longestDailyStreak || 0;
-  const freezeMonth = prev.lastStreakFreezeMonth;
-
-  if (last === today) {
-    // Already counted today; no-op.
-    return {
-      changed: false,
-      next: { current, longest, lastDay: last, freezeMonth },
-      milestone: null,
-    };
-  }
-
-  let nextCurrent;
-  let nextFreezeMonth = freezeMonth;
-
-  if (!last) {
-    nextCurrent = 1;
-  } else {
-    const gap = daysBetween(last, today);
-    if (gap <= 0) {
-      // Anti-paradox guard — pick "in the past" should never happen, but if
-      // it does (clock skew, manual data fix), do nothing rather than corrupt
-      // the streak.
-      return {
-        changed: false,
-        next: { current, longest, lastDay: last, freezeMonth },
-        milestone: null,
-      };
+  let current = 0;
+  let longest = 0;
+  for (const row of rows) {
+    if (row.kind === 'win') {
+      current += 1;
+      if (current > longest) longest = current;
+    } else if (row.kind === 'loss') {
+      current = 0;
     }
-    if (gap === 1) {
-      nextCurrent = current + 1;
-    } else if (gap === 2 && freezeMonth !== monthKey) {
-      nextCurrent = current + 1;
-      nextFreezeMonth = monthKey;
-    } else {
-      nextCurrent = 1;
-    }
+    // draw → no-op
   }
-
-  const nextLongest = Math.max(longest, nextCurrent);
-  const milestone = STREAK_MILESTONES.includes(nextCurrent) ? nextCurrent : null;
-
-  return {
-    changed: true,
-    next: {
-      current: nextCurrent,
-      longest: nextLongest,
-      lastDay: today,
-      freezeMonth: nextFreezeMonth,
-    },
-    milestone,
-  };
+  return { current, longest };
 }
 
-async function applyPickForUser(userId, { now = new Date() } = {}) {
+// Given the previous lastMilestoneFired and the new current value,
+// decide which milestone (if any) to fire and what to stamp.
+//   - If a milestone M is newly crossed (M > prev AND M <= newCurrent),
+//     fire the LARGEST such M (one push per recompute, never a flurry).
+//   - If newCurrent dropped below prev (loss reset, retroactive
+//     correction), recompute the stamped value down to the largest
+//     milestone ≤ newCurrent — so future re-crossings re-fire.
+function resolveMilestone(newCurrent, prevMilestoneFired) {
+  if (newCurrent >= prevMilestoneFired) {
+    const eligible = STREAK_MILESTONES.filter((M) => M <= newCurrent && M > prevMilestoneFired);
+    if (eligible.length === 0) {
+      return { fire: null, nextStamp: prevMilestoneFired };
+    }
+    const fire = Math.max(...eligible);
+    return { fire, nextStamp: fire };
+  }
+  // newCurrent < prevMilestoneFired — drop the stamp.
+  const reachable = STREAK_MILESTONES.filter((M) => M <= newCurrent);
+  const nextStamp = reachable.length > 0 ? Math.max(...reachable) : 0;
+  return { fire: null, nextStamp };
+}
+
+// Recompute and persist the user's streak. Fires fire-and-forget from
+// the GameService result hooks. Never throws — a streak outage must
+// never break the result commit (Tier 5.3 invariant carried forward).
+async function applyForUser(userId) {
   const user = await User.findByPk(userId);
   if (!user) return null;
 
-  const today = todayDayKey(now);
-  const monthKey = todayMonthKey(now);
+  // Load all of the user's scored picks with their associated game's
+  // date + result + id. INNER JOIN via required:true so picks on
+  // unscored games drop out at the SQL layer.
+  const picks = await Pick.findAll({
+    where: { userId },
+    attributes: ['choice'],
+    include: [
+      {
+        model: Game,
+        required: true,
+        where: { result: { [Op.ne]: null } },
+        attributes: ['id', 'date', 'result'],
+      },
+    ],
+  });
 
-  const result = computeNextState(
-    {
-      currentDailyStreak: user.currentDailyStreak,
-      longestDailyStreak: user.longestDailyStreak,
-      lastStreakDayKey: user.lastStreakDayKey,
-      lastStreakFreezeMonth: user.lastStreakFreezeMonth,
+  const scoredPicks = picks.map((p) => ({
+    choice: p.choice,
+    game: {
+      id: p.Game.id,
+      date: p.Game.date,
+      result: p.Game.result,
     },
-    today,
-    monthKey,
-  );
+  }));
 
-  if (!result.changed) {
+  const { current, longest } = computeStreakFromPicks(scoredPicks);
+
+  const prevCurrent = user.currentWinStreak || 0;
+  const prevLongest = user.longestWinStreak || 0;
+  const prevMilestoneFired = user.lastMilestoneFired || 0;
+
+  // Monotonic longest — never decrease.
+  const nextLongest = Math.max(prevLongest, longest);
+
+  const { fire, nextStamp } = resolveMilestone(current, prevMilestoneFired);
+
+  const changed =
+    prevCurrent !== current || prevLongest !== nextLongest || prevMilestoneFired !== nextStamp;
+
+  if (!changed) {
     return {
-      current: result.next.current,
-      longest: result.next.longest,
+      current,
+      longest: nextLongest,
       milestoneReached: null,
     };
   }
 
-  user.currentDailyStreak = result.next.current;
-  user.longestDailyStreak = result.next.longest;
-  user.lastStreakDayKey = result.next.lastDay;
-  user.lastStreakFreezeMonth = result.next.freezeMonth;
+  user.currentWinStreak = current;
+  user.longestWinStreak = nextLongest;
+  user.lastMilestoneFired = nextStamp;
   await user.save({ hooks: false });
 
-  if (result.milestone) {
+  if (fire) {
     NotificationService.notify(
       userId,
       'streak-milestone',
-      `You're on a ${result.milestone}-day streak!`,
-      'Keep it going — pick a game today to extend it.',
+      `You're on a ${fire}-win streak!`,
+      'Keep picking — win again to extend it.',
       '/?view=profile',
     ).catch((err) => {
-      logger.warn(
-        { err: err.message, userId, milestone: result.milestone },
-        'streak-milestone notify failed',
-      );
+      logger.warn({ err: err.message, userId, milestone: fire }, 'streak-milestone notify failed');
     });
   }
 
   return {
-    current: result.next.current,
-    longest: result.next.longest,
-    milestoneReached: result.milestone,
+    current,
+    longest: nextLongest,
+    milestoneReached: fire,
   };
 }
 
 module.exports = {
-  applyPickForUser,
-  computeNextState,
-  todayDayKey,
-  todayMonthKey,
-  daysBetween,
+  applyForUser,
+  classify,
+  computeStreakFromPicks,
+  resolveMilestone,
   STREAK_MILESTONES,
 };

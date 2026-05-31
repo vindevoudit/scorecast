@@ -119,31 +119,32 @@ module.exports = (sequelize) => {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
-      // Tier 30 Phase 3 A1 — Pick-streak state. Maintained by
-      // services/StreakService.js, hooked into PickService.createPick
-      // post-transaction (fire-and-forget). See StreakService for the
-      // full state-machine spec.
-      currentDailyStreak: {
+      // Tier 30 Phase 3 A1 Revision (2026-05-31) — Win-streak state.
+      // Maintained by services/StreakService.js via fire-and-forget hooks
+      // from GameService.{setResult, bulkSetResult, applyLiveUpdate}
+      // POST-transaction. The streak is per-result (W increments, D no-op,
+      // L resets) and recomputed from full pick history on every scoring
+      // event — see StreakService for the full spec.
+      currentWinStreak: {
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0,
       },
-      longestDailyStreak: {
+      longestWinStreak: {
+        // Monotonic high-water mark. Never decreases on a recompute, even
+        // when result corrections trim the actual current run.
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0,
       },
-      lastStreakDayKey: {
-        // YYYY-MM-DD (UTC) — null for users who have never picked.
-        type: DataTypes.STRING(10),
-        allowNull: true,
-      },
-      lastStreakFreezeMonth: {
-        // YYYY-MM (UTC) — null until the monthly auto-freeze is first
-        // consumed. Compared against the current month at evaluation
-        // time; if they differ, a freeze is available.
-        type: DataTypes.STRING(7),
-        allowNull: true,
+      lastMilestoneFired: {
+        // Largest milestone in STREAK_MILESTONES the user has been pushed
+        // about. Used for dedup so a stable streak doesn't re-fire on
+        // every recompute. Drops back to the largest M ≤ currentWinStreak
+        // when the current value falls, so re-crossings re-fire.
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
       },
       // Tier 30 Phase 3 A2 — Referral fields.
       // referralCode is generated server-side at User.create time

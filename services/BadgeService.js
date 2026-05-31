@@ -169,7 +169,7 @@ async function computeProgressForUser(userId) {
     leagues: leagueIds.size,
     pickDays: pickDays.size,
     pickWeeks: pickWeeks.size,
-    longestStreak: user.longestDailyStreak || 0,
+    longestStreak: user.longestWinStreak || 0,
     comments: commentCount,
     friends: friendCount,
     groups: groupCount,
@@ -216,8 +216,10 @@ async function evaluateBadges(userId, context = {}) {
     await tryAward('roundsman', metrics.pickDays >= 10);
     await tryAward('loyalist', metrics.pickWeeks >= 8);
 
-    // Daily streak (Tier 30 Phase 3 A1)
-    await tryAward('streakmaster', metrics.longestStreak >= 30);
+    // Win streak — Streakmaster tier ladder (Tier 30 Phase 3 A1 Revision)
+    await tryAward('streakmaster-1', metrics.longestStreak >= 5);
+    await tryAward('streakmaster-2', metrics.longestStreak >= 10);
+    await tryAward('streakmaster-3', metrics.longestStreak >= 15);
 
     // Social
     await tryAward('conversationalist', metrics.comments >= 25);

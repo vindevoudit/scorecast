@@ -16,6 +16,7 @@ const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const PredictionService = require('./PredictionService');
 const UserScoreService = require('./UserScoreService');
+const StreakService = require('./StreakService');
 const cache = require('../lib/cache');
 
 // Two-layer noise gate threshold. DECIMAL(3,2) stores at 0.01 resolution;
@@ -115,6 +116,25 @@ async function getCrowdForGames(gameIds) {
 // to expire.
 function invalidateCrowd(gameId) {
   if (gameId) cache.invalidate(`crowd:${gameId}`);
+}
+
+// Tier 30 Phase 3 A1 Revision — fan out win-streak recomputes to every
+// user with a pick on this game. Fire-and-forget POST-transaction; a
+// streak outage must never break the result commit (Tier 5.3
+// invariant). Recompute is O(N) per user where N is the user's lifetime
+// scored picks — sub-millisecond at our scale, so the per-affected-user
+// loop is cheap even on a full PL matchday's worth of picks.
+function fanOutStreakUpdates(picksForGame) {
+  if (!picksForGame || picksForGame.length === 0) return;
+  const userIds = new Set();
+  for (const pick of picksForGame) {
+    if (pick && pick.userId) userIds.add(pick.userId);
+  }
+  for (const uid of userIds) {
+    StreakService.applyForUser(uid).catch((err) => {
+      logger.warn({ err: err.message, userId: uid }, 'fanOutStreakUpdates: applyForUser failed');
+    });
+  }
 }
 
 async function createGame(attrs) {
@@ -303,8 +323,11 @@ async function setResult(gameId, result) {
     return g;
   });
 
+  // Load picks once and reuse for notify/badge fan-out (only on result set)
+  // AND for streak recompute (fires on both set AND clear — clearing a
+  // previously-set result must un-do its streak contribution).
+  const picksForGame = await Pick.findAll({ where: { gameId } });
   if (result) {
-    const picksForGame = await Pick.findAll({ where: { gameId } });
     for (const pick of picksForGame) {
       const points = scorePick(pick, game);
       NotificationService.notify(
@@ -317,6 +340,7 @@ async function setResult(gameId, result) {
       BadgeService.evaluateBadges(pick.userId).catch(() => {});
     }
   }
+  fanOutStreakUpdates(picksForGame);
 
   LeaderboardService.invalidate('all');
   LeaderboardService.assertParity({}).catch(() => {});
@@ -377,8 +401,10 @@ async function bulkSetResult(ids, result) {
       for (const name of cascadeInput.affectedTeams) set.add(name);
       affectedByLeague.set(cascadeInput.leagueId, set);
     }
+    // Same pattern as setResult: load picks once, drive notify/badge
+    // (on result set) AND streak recompute (on both set and clear).
+    const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
     if (result) {
-      const picksForGame = await Pick.findAll({ where: { gameId: game.id } });
       for (const pick of picksForGame) {
         const points = scorePick(pick, game);
         NotificationService.notify(
@@ -391,6 +417,7 @@ async function bulkSetResult(ids, result) {
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }
     }
+    fanOutStreakUpdates(picksForGame);
     affected.push(game.id);
   }
   if (affected.length > 0) {
@@ -618,6 +645,10 @@ async function applyLiveUpdate(localGame, apiMatch) {
         ).catch(() => {});
         BadgeService.evaluateBadges(pick.userId).catch(() => {});
       }
+      // Tier 30 Phase 3 A1 Revision — recompute streak for every user
+      // whose pick on this game just scored. Same picksForGame batch
+      // we loaded for notify/badge.
+      fanOutStreakUpdates(picksForGame);
     } catch (err) {
       // Notifications are best-effort. Surface the error but don't crash
       // the polling tick — the result is already committed.

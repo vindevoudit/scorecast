@@ -347,7 +347,13 @@ function LeagueTicker() {
   // Negative top margin uses Tailwind's `!` prefix to win against the
   // parent `space-y-*` selector specificity.
   return (
-    <div className="relative !mt-10 overflow-hidden border-y border-default py-3 md:!mt-16">
+    // Tier 30 Phase 2 follow-up — ticker hidden entirely below md.
+    // User-confirmed: the marquee + masked fade reads as noise on a
+    // narrow viewport (only 2-3 leagues visible at a time) and the
+    // CSS animation was already silenced on mobile by the
+    // `@media (max-width: 767px)` rule in index.css, leaving a
+    // static stripe with no value. Cleaner to omit the element.
+    <div className="relative !mt-10 hidden overflow-hidden border-y border-default py-3 md:!mt-16 md:block">
       <div className="mask-fade-x">
         {/* `w-max` (width: max-content) sizes the flex container to its
             content; without it `translateX(-50%)` would translate by
@@ -405,7 +411,19 @@ function Stat({ target, suffix = '', prefix = '', infinity = false, label }) {
       whileHover={reduceMotion ? undefined : featureCardHover}
       className="group relative overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 text-center transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85"
     >
-      <p className="text-shadow-brand-glow font-display text-4xl text-accent-soft sm:text-5xl">
+      {/* Tier 30 Phase 2 follow-up — `infinity` swaps off `.font-display`
+          (Bebas Neue) onto the inherited Inter at font-black weight.
+          Bebas Neue's ∞ glyph is either absent or poorly drawn (the
+          mobile system-font fallback renders it as a different symbol
+          entirely on some Android builds). Inter has a proper ∞ at
+          weight 900 that renders consistently across browsers + OSes,
+          and the visual weight is heavy enough to match the
+          neighbouring Bebas Neue numerals at the same size. */}
+      <p
+        className={`text-shadow-brand-glow text-4xl text-accent-soft sm:text-5xl ${
+          infinity ? 'font-black' : 'font-display'
+        }`}
+      >
         {infinity ? '∞' : `${prefix}${display}${suffix}`}
       </p>
       <p className="mt-3 text-xs uppercase tracking-[0.2em] text-fg-muted">{label}</p>

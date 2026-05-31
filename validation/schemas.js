@@ -166,6 +166,10 @@ const PUSH_NOTIFICATION_TYPES = [
   'join-request',
   'join-request-approved',
   'join-request-declined',
+  // Tier 30 Phase 3 A1 — fires from StreakService.applyPickForUser when
+  // the user's currentDailyStreak hits 7 / 14 / 30 / 60 / 100. Mirror
+  // entry in PushSettingsPanel.NOTIFICATION_TYPES.
+  'streak-milestone',
 ];
 
 const PUSH_NOTIFICATION_TYPE_SET = new Set(PUSH_NOTIFICATION_TYPES);

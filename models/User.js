@@ -119,6 +119,32 @@ module.exports = (sequelize) => {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      // Tier 30 Phase 3 A1 — Pick-streak state. Maintained by
+      // services/StreakService.js, hooked into PickService.createPick
+      // post-transaction (fire-and-forget). See StreakService for the
+      // full state-machine spec.
+      currentDailyStreak: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
+      longestDailyStreak: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
+      lastStreakDayKey: {
+        // YYYY-MM-DD (UTC) — null for users who have never picked.
+        type: DataTypes.STRING(10),
+        allowNull: true,
+      },
+      lastStreakFreezeMonth: {
+        // YYYY-MM (UTC) — null until the monthly auto-freeze is first
+        // consumed. Compared against the current month at evaluation
+        // time; if they differ, a freeze is available.
+        type: DataTypes.STRING(7),
+        allowNull: true,
+      },
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,

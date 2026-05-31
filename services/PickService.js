@@ -15,6 +15,7 @@ const { getViewerFriendIdSet } = require('../lib/friends');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const UserScoreService = require('./UserScoreService');
+const StreakService = require('./StreakService');
 
 async function createPick({ userId, gameId, choice }) {
   const game = await Game.findByPk(gameId);
@@ -82,6 +83,11 @@ async function createPick({ userId, gameId, choice }) {
   }
 
   BadgeService.evaluateBadges(userId).catch(() => {});
+  // Tier 30 Phase 3 A1 — Pick-streak. Fires post-transaction so a streak
+  // outage can never break the pick. computeNextState is idempotent at
+  // day-key granularity, so two parallel picks on the same day resolve
+  // to a single increment.
+  StreakService.applyPickForUser(userId).catch(() => {});
   LeaderboardService.invalidate('all');
   LeaderboardService.assertParity({ userId }).catch(() => {});
 }

@@ -63,6 +63,14 @@ router.get('/me', authMiddleware, async (req, res) => {
     // true = deliver; only false opts out. PushSettingsPanel (Chunk 5)
     // renders one checkbox per known type seeded against this object.
     pushPreferences: user.pushPreferences || {},
+    // Tier 30 Phase 3 A1 — Pick-streak state. Frontend renders a flame
+    // chip next to the user identity in the top bar; brightness tiers at
+    // 7 / 14 / 30. `longest` powers the "Personal best" copy in the
+    // Profile view.
+    streak: {
+      current: user.currentDailyStreak || 0,
+      longest: user.longestDailyStreak || 0,
+    },
     joinedGroups,
     pendingInvites,
   });

@@ -12,50 +12,17 @@
       <stop offset="0" stop-color="#67e8f9"/>
       <stop offset="1" stop-color="#06b6d4"/>
     </linearGradient>
-    <linearGradient id="pitchline" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#67e8f9" stop-opacity="0"/>
-      <stop offset="0.5" stop-color="#67e8f9" stop-opacity="0.85"/>
-      <stop offset="1" stop-color="#67e8f9" stop-opacity="0"/>
-    </linearGradient>
   </defs>
   <rect width="512" height="512" fill="url(#bg)"/>
   <rect width="512" height="512" fill="url(#glow)"/>
 
-  <!-- Tier 20 Chunk 5 — athletic-motif "pitch line" accent. Subtle cyan
-       horizontal stripe at the B's crossbar y-coordinate (y=263), fading
-       from transparent at the edges to ~85% opacity in the middle. Reads
-       as a horizon / pitch-line at large sizes; invisible at favicon
-       sizes (16-32px) where 2px of stripe height vanishes into the
-       cyan bowl pinch. Sits BEHIND the B (rendered first) so the
-       letterform stays crisp. -->
-  <rect x="80" y="263" width="352" height="2" fill="url(#pitchline)"/>
-
-  <!-- Tier 20 Chunk 5 — B path centered on the 512 canvas. Original path
-       spanned x ∈ [152, 410] (midpoint 281, 25px right of canvas center
-       256). Shifted -25 in x so the B now spans x ∈ [127, 385] (midpoint
-       256, true geometric centering). All other coordinates preserved
-       exactly so the letterform is identical to the original — just
-       repositioned. -->
-  <path fill="url(#mark)" fill-rule="evenodd" d="
-    M 127 110
-    H 283
-    C 335 110, 371 144, 371 196
-    C 371 228, 353 252, 323 264
-    C 359 274, 385 302, 385 340
-    C 385 388, 347 416, 283 416
-    H 127
-    Z
-    M 195 162
-    V 240
-    H 267
-    C 293 240, 311 226, 311 202
-    C 311 178, 293 162, 267 162
-    Z
-    M 195 290
-    V 364
-    H 275
-    C 303 364, 323 350, 323 328
-    C 323 304, 303 290, 275 290
-    Z
-  "/>
+  <!-- Tier 31 — logo mark is now the Orbitron "B" glyph (outline extracted
+       from Orbitron-Bold.ttf via fontTools, UPM 1000, bbox 59..779 × 0..720).
+       The transform flips the font's Y-up coordinates into SVG Y-down and
+       scales the 720-unit glyph to ~360px centred on the 512 canvas
+       (translate(46.5 436) scale(0.5 -0.5) maps the glyph centre 419,360 to
+       256,256). Self-contained path so the live /logo.svg favicon renders
+       without the Orbitron webfont. The drawn-B + Bebas wordmark lockup is
+       retired (see marketing/lib/brand.mjs). -->
+  <path transform="translate(46.5 436) scale(0.5 -0.5)" fill="url(#mark)" d="M59 0V720H611Q649 720 680.5 701.0Q712 682 731.0 650.5Q750 619 750 581V440Q750 427 748.0 415.0Q746 403 741 392Q758 369 768.5 344.0Q779 319 779 294V139Q779 101 760.0 69.5Q741 38 709.0 19.0Q677 0 639 0ZM203 133H633Q638 133 642.0 136.5Q646 140 646 145V288Q646 293 642.0 296.5Q638 300 633 300H203Q198 300 194.5 296.5Q191 293 191 288V145Q191 140 194.5 136.5Q198 133 203 133ZM203 433H605Q610 433 613.0 436.5Q616 440 616 445V575Q616 580 613.0 583.5Q610 587 605 587H203Q198 587 194.5 583.5Q191 580 191 575V445Q191 440 194.5 436.5Q198 433 203 433Z"/>
 </svg>

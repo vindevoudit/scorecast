@@ -15,12 +15,20 @@
 //   apple-touch-icon-180x180.png
 
 import { Resvg } from '@resvg/resvg-js';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import pngToIco from 'png-to-ico';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Tier 31 — load the bundled brand TTFs so og-template.svg's Orbitron / Inter
+// <text> renders in the real faces (resvg loads no webfonts on its own).
+// logo.svg is path-based and needs no fonts, but passing them is harmless.
+const fontsDir = resolve(root, 'marketing/fonts');
+const fontFiles = (await readdir(fontsDir))
+  .filter((f) => f.endsWith('.ttf'))
+  .map((f) => resolve(fontsDir, f));
 const sourcePath = resolve(root, 'public/logo.svg');
 const svg = await readFile(sourcePath, 'utf8');
 // Tier 20 Chunk 6 — separate landscape SVG for the social-card OG image.
@@ -40,6 +48,7 @@ async function rasterize(svgString, size) {
   const resvg = new Resvg(svgString, {
     fitTo: { mode: 'width', value: size },
     background: 'rgba(0,0,0,0)',
+    font: { fontFiles, loadSystemFonts: false, defaultFontFamily: 'Inter' },
   });
   return resvg.render().asPng();
 }

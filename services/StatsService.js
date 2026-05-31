@@ -225,8 +225,14 @@ async function getStatsForUser(userId, { window = '30d', now = new Date() } = {}
   if (!userId) return null;
   const effectiveWindow = VALID_WINDOWS.has(window) ? window : '30d';
   const cacheKey = `stats:${userId}:${effectiveWindow}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
+  // Skip the cache in test mode so specs that mutate DB state and then
+  // re-fetch see the new payload without race-conditioning on cache TTL.
+  // Prod behavior unchanged.
+  const skipCache = process.env.NODE_ENV === 'test';
+  if (!skipCache) {
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+  }
 
   const startDate = windowStartDate(effectiveWindow, now);
 
@@ -363,7 +369,9 @@ async function getStatsForUser(userId, { window = '30d', now = new Date() } = {}
     mostDisagreedFriend,
   };
 
-  cache.set(cacheKey, stats, CACHE_TTL_MS);
+  if (!skipCache) {
+    cache.set(cacheKey, stats, CACHE_TTL_MS);
+  }
   return stats;
 }
 

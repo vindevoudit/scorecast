@@ -8,7 +8,7 @@
 //   { window, summary, pointsOverTime, winRateTrend, perLeague,
 //     pickTimeHeatmap, blindSpot, mostDisagreedFriend }
 
-import { useEffect, useMemo, useState } from 'react';
+import { Component, useEffect, useMemo, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -36,6 +36,33 @@ function shortDate(key) {
   if (!key) return '';
   const [, m, d] = key.split('-');
   return `${m}/${d}`;
+}
+
+// Defensive boundary: recharts has occasionally surfaced render-time errors
+// under React 18 strict mode or Vite dev's HMR. Without this, a chart crash
+// would unmount the whole dashboard. With it, the rest of the surface stays
+// usable and the user sees a one-line note instead of a blank tab.
+class ChartErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err) {
+    console.error('Stats chart crashed:', err);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <p className="rounded-3xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
+          One of the charts failed to render. Reload to try again.
+        </p>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function StatTile({ label, value, accent }) {
@@ -377,10 +404,12 @@ function StatsDashboard() {
             <StatTile label="Wins" value={summary.wins} accent />
             <StatTile label="Win rate" value={`${winRatePct}%`} />
           </div>
-          <PointsOverTimeChart data={stats.pointsOverTime} />
-          <WinRateTrendChart data={stats.winRateTrend} />
-          <PerLeagueChart data={stats.perLeague} />
-          <PickTimeHeatmap grid={stats.pickTimeHeatmap} />
+          <ChartErrorBoundary>
+            <PointsOverTimeChart data={stats.pointsOverTime} />
+            <WinRateTrendChart data={stats.winRateTrend} />
+            <PerLeagueChart data={stats.perLeague} />
+            <PickTimeHeatmap grid={stats.pickTimeHeatmap} />
+          </ChartErrorBoundary>
           <div className="grid gap-4 sm:grid-cols-2">
             <BlindSpotCard blindSpot={stats.blindSpot} />
             <MostDisagreedFriendCard friend={stats.mostDisagreedFriend} />

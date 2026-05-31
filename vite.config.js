@@ -74,6 +74,14 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    // Tier 30 Phase 3 C1 — recharts is dual CJS+ESM with no `exports` map,
+    // so Vite's dev-mode resolver can pick the CJS entry and ship broken
+    // ESM-interop'd bindings to the browser. Pre-bundling forces Vite to
+    // resolve through its esbuild pipeline once on startup, producing
+    // stable ESM in both `npm run dev` and `npm run build`.
+    include: ['recharts'],
+  },
   build: {
     sourcemap: 'hidden',
     rollupOptions: {

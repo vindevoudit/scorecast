@@ -75,6 +75,14 @@ const NOTIFICATION_TYPES = [
     label: 'Join request declined',
     description: 'When a group owner declines your request to join.',
   },
+  // Tier 30 Phase 3 A1 — fires when your daily pick streak hits 7, 14,
+  // 30, 60, or 100. Mirror entry in validation/schemas.js
+  // PUSH_NOTIFICATION_TYPES.
+  {
+    key: 'streak-milestone',
+    label: 'Streak milestones',
+    description: 'When your daily pick streak hits a milestone (7, 14, 30, 60, 100).',
+  },
 ];
 
 function PushSettingsPanel() {

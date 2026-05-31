@@ -2,6 +2,12 @@
 // Trigger keeps `aria-haspopup="menu"` (set by Radix automatically); items
 // render with `role="menuitem"` so the Playwright selectors that pick the
 // "Sign out" menuitem still resolve.
+//
+// Tier 30 Phase 3 A1 — Streak flame chip rendered between the avatar and
+// the username on the trigger. Visible on every viewport size (mobile
+// hides the username text but keeps the flame so the streak indicator
+// survives the small-screen layout). Brightness tiers at 7 / 14 / 30
+// per the Phase 3 plan; `shadow-led` lights the chip at 30+.
 
 import Avatar from './Avatar';
 import { useAuth } from '../hooks/useAuth';
@@ -14,6 +20,29 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/DropdownMenu';
+
+function streakChipClass(current) {
+  if (current >= 30) return 'bg-warning/35 text-warning shadow-led';
+  if (current >= 14) return 'bg-warning/25 text-warning';
+  if (current >= 7) return 'bg-warning/15 text-warning';
+  return 'bg-overlay text-fg-muted';
+}
+
+function StreakFlame({ current }) {
+  if (!current || current < 1) return null;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${streakChipClass(
+        current,
+      )}`}
+      aria-label={`${current}-day streak`}
+      title={`${current}-day pick streak`}
+    >
+      <span aria-hidden="true">🔥</span>
+      {current}
+    </span>
+  );
+}
 
 function CaretIcon() {
   return (
@@ -46,6 +75,7 @@ function UserMenu() {
           className="inline-flex items-center gap-2 rounded-3xl border border-default bg-elevated/80 px-3 py-2 text-sm font-semibold text-fg transition-colors duration-200 hover:border-strong hover:bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <Avatar username={user.username} displayName={user.displayName} size={28} />
+          <StreakFlame current={user.streak?.current} />
           <span className="hidden max-w-[10rem] truncate sm:inline">{user.username}</span>
           <CaretIcon />
         </button>
@@ -58,6 +88,12 @@ function UserMenu() {
           <span className="mt-0.5 block truncate text-sm font-semibold text-fg">
             {user.username}
           </span>
+          {user.streak?.current ? (
+            <span className="mt-1.5 block text-[11px] font-medium text-fg-muted">
+              <span aria-hidden="true">🔥</span> {user.streak.current}-day streak
+              {user.streak.longest > user.streak.current ? ` · best ${user.streak.longest}` : null}
+            </span>
+          ) : null}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => setView('profile')}>View profile</DropdownMenuItem>

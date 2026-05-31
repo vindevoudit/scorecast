@@ -205,7 +205,7 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
       {/* League ticker — broadcast-style scroll between hero and stats. The
           inner row is duplicated; the parent translates by -50% to land at
           the start of the duplicate, creating a seamless loop. */}
-      <LeagueTicker reduceMotion={reduceMotion} />
+      <LeagueTicker />
 
       <section className="mx-auto max-w-5xl px-4">
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-3xl border border-default bg-divider sm:grid-cols-3">
@@ -264,23 +264,25 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
   );
 }
 
-function LeagueTicker({ reduceMotion }) {
-  // Doubled list so translateX(-50%) lands at the start of the duplicate
-  // and the loop is visually seamless. Second copy is aria-hidden so AT
-  // doesn't announce duplicates.
+function LeagueTicker() {
+  // Pure-CSS marquee — the `animate-ticker-scroll` keyframe (defined in
+  // tailwind.config.js) translates the row from 0% to -50% linearly over
+  // 24s, infinitely. The row's content is doubled so that landing at
+  // -50% lines up exactly with the start of the duplicate, making the
+  // loop visually seamless. CSS animations run on the compositor (GPU)
+  // — strictly smoother than motion's JS-driven `animate={{x:[…]}}`
+  // path, which can hiccup under React render pressure or main-thread
+  // contention. `motion-safe:` gates the animation so prefers-reduced-
+  // motion users see a static ticker (the global @media rule in
+  // index.css would also collapse it to 0.01ms regardless).
+  // Negative top margin uses Tailwind's `!` prefix to win against the
+  // parent `space-y-*` margin-top (`space-y-X > :not([hidden]) ~
+  // :not([hidden])` has higher specificity than a single `mt-*` class,
+  // so plain `mt-*` would lose).
   return (
-    <div
-      aria-hidden={reduceMotion ? 'true' : undefined}
-      className="bg-arena-grid-bold relative overflow-hidden border-y border-default py-3"
-    >
+    <div className="bg-arena-grid-bold relative !mt-10 overflow-hidden border-y border-default py-3 md:!mt-16">
       <div className="mask-fade-x">
-        <m.div
-          className="flex whitespace-nowrap will-change-transform"
-          animate={reduceMotion ? { x: '0%' } : { x: ['0%', '-50%'] }}
-          transition={
-            reduceMotion ? { duration: 0 } : { duration: 32, repeat: Infinity, ease: 'linear' }
-          }
-        >
+        <div className="flex whitespace-nowrap motion-safe:animate-ticker-scroll">
           {TICKER_LEAGUES.map((name) => (
             <span
               key={`a-${name}`}
@@ -298,7 +300,7 @@ function LeagueTicker({ reduceMotion }) {
               {name}
             </span>
           ))}
-        </m.div>
+        </div>
       </div>
     </div>
   );

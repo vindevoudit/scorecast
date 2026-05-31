@@ -16,7 +16,7 @@ round-trip — you edit a `.mjs` file and re-run one command.
 
 | Generator                                                                           | Output                                                                                                                             | Serves                                                                |
 | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs) | `marketing/out/*.png` (29 files)                                                                                                   | Social campaign — **not** served by the site; you post these manually |
+| [`scripts/generate-marketing-assets.mjs`](../scripts/generate-marketing-assets.mjs) | `marketing/out/*.png` (33 files)                                                                                                   | Social campaign — **not** served by the site; you post these manually |
 | [`scripts/generate-pwa-assets.mjs`](../scripts/generate-pwa-assets.mjs)             | `public/favicon.ico`, `public/pwa-*.png`, `public/apple-touch-icon-*.png`, `public/maskable-*.png`, `public/og-image-1200x630.png` | **Live site** — favicon, installed-app icons, link-share card         |
 
 Both rasterize hand-authored SVG → PNG with [`@resvg/resvg-js`](https://github.com/yisibl/resvg-js)
@@ -240,19 +240,26 @@ actually get" without screenshotting a running app + seeded DB.
 - **Avatar colours** = `avatarColors()` re-implements the FNV-1a → HSL hash from
   [`src/components/Avatar.jsx`](../src/components/Avatar.jsx) exactly, so a fake user gets the
   same disc colour it would in-app.
-- **Layout** = `gameCard()` and `leaderboardCard()` recreate
-  [`src/components/GameCard.jsx`](../src/components/GameCard.jsx) +
-  [`LeaderboardCard.jsx`](../src/components/LeaderboardCard.jsx): status pill, score tiles
-  (Orbitron `.font-led`), payout grid, pick buttons, winner ring, rank medals, streak chips.
+- **Layout** = `gameCard()`, `leaderboardCard()` and `statsPage()` recreate
+  [`src/components/GameCard.jsx`](../src/components/GameCard.jsx),
+  [`LeaderboardCard.jsx`](../src/components/LeaderboardCard.jsx) +
+  [`ProfileView.jsx`](../src/components/ProfileView.jsx): status pill, score tiles
+  (Orbitron `.font-led`), points-allocation grid, pick buttons, winner ring, rank medals,
+  profile header + 5 stat tiles + recent activity.
 
 **Where the data lives** (in the generator): `GAMES` (3 standalone fixtures), `LIFECYCLE`
-(one fixture across all 3 states), and `LEADERBOARD` (fake users). Edit those to change the
-shown matches/users.
+(one fixture across all 3 states), `LEADERBOARD` (fake users), and `STATS_PROFILE` (the
+stats-page profile). Edit those to change the shown matches/users.
 
 - A `gameCard({x, y, w, state, data})` returns `{ svg, h }` — it self-measures height so the
   renderers can centre it. `state` ∈ `'upcoming' | 'live' | 'final'`. `data` carries
-  `home/away`, `payout`, `pickSide/pickTeam`, `homeScore/awayScore`, `minute`, `result`,
-  `points`.
+  `home/away`, `pts` (the points-allocation grid), `pickSide/pickTeam`,
+  `homeScore/awayScore`, `minute`, `result`, `points`.
+- `statsPage({x, y, w, data, activityCount})` mirrors the Profile → Summary tab.
+- `statsCharts({x, y, w, data, full})` recreates the StatsDashboard recharts panels
+  (dual-line points-over-time, stacked per-league bars, pick-time heatmap) — pure SVG, no
+  charting lib. `full: true` adds the bars + heatmap (story); `false` is the hero line chart
+  only (square). Sample series live in `STATS_CHARTS` in the generator.
 - Everything scales with `k = w/880`, so the same card renders crisply at any width.
 - A `you: true` row renders the accent-bordered "YOU" highlight.
 
@@ -262,7 +269,11 @@ shown matches/users.
 > is kept (unused) for if/when streaks ship in-app; re-enable by calling it in
 > `leaderboardCard()` and adding a `streak` field back to the `LEADERBOARD` data.
 
-> ⚠️ These mockups are **illustrative** — the payout/points numbers are hand-set in the data
+> ⚠️ Keep copy **points-framed, not money-framed** — no "payout", "cash", "pays", "paid". The
+> app deliberately uses "Points allocation locks in at kickoff." (not "Payout…"); the mockups
+> match. The internal data key is `pts`, not `payout`.
+
+> ⚠️ These mockups are **illustrative** — the points numbers are hand-set in the data
 > objects, not computed by the real `scorePick`. Keep them plausible: the lifecycle uses Man
 > City 1–2 Aston Villa (a ~26% away win → +74, i.e. `(1 − 0.26) × 100`); the standalone cards
 > use Arsenal vs Aston Villa (34% → +66). Card header formatting (uppercase date · status,

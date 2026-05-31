@@ -30,7 +30,7 @@ import {
   iconBadge,
   svgDoc,
 } from '../marketing/lib/brand.mjs';
-import { gameCard, leaderboardCard } from '../marketing/lib/product.mjs';
+import { gameCard, leaderboardCard, statsPage, statsCharts } from '../marketing/lib/product.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fontsDir = resolve(root, 'marketing/fonts');
@@ -62,7 +62,7 @@ const FEATURES = [
     icon: 'target',
     label: 'Scoring',
     headline: 'Pick smart, not safe',
-    sub: 'A 38% underdog upset pays +62 points — favourites pay less. Bantryx rewards the brave call.',
+    sub: 'A 38% underdog upset is worth +62 points — favourites far less. Bantryx rewards the brave call.',
   },
   {
     key: 'groups',
@@ -324,7 +324,7 @@ const GAMES = {
     away: 'Aston Villa',
     dateLabel: 'Sat 31 May',
     kickoff: '17:30',
-    payout: { home: 44, away: 66, drawH: 4, drawA: 6 },
+    pts: { home: 44, away: 66, drawH: 4, drawA: 6 },
     pickSide: null,
     pickTeam: null,
   },
@@ -360,7 +360,7 @@ const LIFECYCLE = {
     away: 'Aston Villa',
     dateLabel: 'May 24, 2026',
     kickoff: '15:00',
-    payout: { home: 34, away: 74, drawH: 2, drawA: 6 },
+    pts: { home: 34, away: 74, drawH: 2, drawA: 6 },
     pickSide: 'away',
     pickTeam: 'Aston Villa',
   },
@@ -390,6 +390,54 @@ const LIFECYCLE = {
 
 // NOTE: no `streak` field — the live leaderboard doesn't display win streaks,
 // so the mockup doesn't either (would misrepresent the product).
+// Fake profile for the stats-page mockup (mirrors ProfileView Summary tab).
+const STATS_PROFILE = {
+  name: 'TheGaffer',
+  username: 'thegaffer',
+  joined: 'Joined May 2026',
+  tiles: [
+    { label: ['Total', 'points'], value: '1,040' },
+    { label: ['Picks', 'made'], value: '28' },
+    { label: ['Picks', 'won'], value: '16' },
+    { label: ['Win', 'rate'], value: '57%' },
+    { label: ['Best', 'streak'], value: '4' },
+  ],
+  activity: [
+    { home: 'Man City', away: 'Aston Villa', pick: 'Aston Villa', status: 'Won +74', tone: 'success' },
+    { home: 'Arsenal', away: 'Chelsea', pick: 'Arsenal', status: 'Missed', tone: 'danger' },
+    { home: 'Liverpool', away: 'Tottenham', pick: 'Liverpool', status: 'Won +48', tone: 'success' },
+  ],
+};
+
+// Sample data for the stats-dashboard charts mockup (mirrors StatsDashboard).
+const STATS_CHARTS = {
+  summary: [
+    { label: 'Picks', value: '28' },
+    { label: 'Scored', value: '24' },
+    { label: 'Wins', value: '16', accent: true },
+    { label: 'Win rate', value: '57%' },
+  ],
+  pointsOverTime: {
+    daily: [42, 0, 58, 24, 0, 76, 33, 0, 61, 70, 12, 48, 0, 64, 28, 52],
+    cumulative: [42, 42, 100, 124, 124, 200, 233, 233, 294, 364, 376, 424, 424, 488, 516, 568],
+    xLabels: ['5/01', '5/04', '5/08', '5/12', '5/16'],
+  },
+  perLeague: [
+    { name: 'Prem', wins: 12, draws: 4, losses: 6 },
+    { name: 'UCL', wins: 5, draws: 2, losses: 3 },
+    { name: 'World Cup', wins: 6, draws: 2, losses: 2 },
+  ],
+  heatmap: Array.from({ length: 7 }, (_, d) =>
+    Array.from({ length: 24 }, (_, h) => {
+      const weekend = d === 0 || d === 6;
+      if (weekend && h >= 12 && h <= 18) return Math.min(5, 2 + ((h + d) % 4));
+      if (!weekend && h >= 18 && h <= 22) return Math.min(5, 1 + ((h + d) % 3));
+      if (h >= 11 && h <= 14 && (d + h) % 3 === 0) return 1;
+      return 0;
+    }),
+  ),
+};
+
 const LEADERBOARD = [
   { name: 'KingKenji', points: 1420 },
   { name: 'PiratePam', points: 1280 },
@@ -449,8 +497,8 @@ function renderGameLifecycle() {
   const body = `
   ${background(w, h)}
   ${topMark(cx, 250, 50)}
-  <text x="${cx}" y="${360}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="76" fill="${COLOR.white}" letter-spacing="0.5">From pick to payout</text>
-  <text x="${cx}" y="${418}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="30" letter-spacing="2" fill="${COLOR.cyanSoft}">Back the underdog. Watch it pay off.</text>
+  <text x="${cx}" y="${360}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="76" fill="${COLOR.white}" letter-spacing="0.5">From pick to points</text>
+  <text x="${cx}" y="${418}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="30" letter-spacing="2" fill="${COLOR.cyanSoft}">Back the underdog. Climb the table.</text>
   ${blocks}
   ${footer({ cx, y: h - 150, w: w * 0.64 })}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.12, glowR: 0.7 } });
@@ -482,6 +530,53 @@ function renderLeaderboard(format) {
   ${topMark(cx, story ? 235 : 110, story ? 50 : 46)}
   <text x="${cx}" y="${story ? 376 : 220}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="0.5">Climb the table</text>
   <text x="${cx}" y="${story ? 436 : 274}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Outpick your group. Rise up the table.</text>
+  ${card.svg}
+  ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
+}
+
+function renderStatsCharts(format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const cardW = story ? 940 : 920;
+  const cardX = (w - cardW) / 2;
+  const probe = statsCharts({ x: cardX, y: 0, w: cardW, data: STATS_CHARTS, full: story });
+  const top = story ? 470 : 318;
+  const bottom = story ? h - 160 : h - 100;
+  const cardY = story ? top : Math.max(top, top + (bottom - top - probe.h) / 2);
+  const card = statsCharts({ x: cardX, y: cardY, w: cardW, data: STATS_CHARTS, full: story });
+
+  const headSize = story ? 80 : 60;
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, story ? 230 : 108, story ? 50 : 46)}
+  <text x="${cx}" y="${story ? 372 : 216}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="0.5">See your trends</text>
+  <text x="${cx}" y="${story ? 428 : 268}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Points, win-rate, leagues — all charted for you.</text>
+  ${card.svg}
+  ${story ? footer({ cx, y: h - 140, w: w * 0.64 }) : `<text x="${cx}" y="${h - 52}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.14, glowR: 0.7 } });
+}
+
+function renderStats(format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const cardW = 880;
+  const cardX = (w - cardW) / 2;
+  const activityCount = story ? 3 : 2;
+  const probe = statsPage({ x: cardX, y: 0, w: cardW, data: STATS_PROFILE, activityCount });
+  const top = story ? 470 : 320;
+  const bottom = story ? h - 170 : h - 110;
+  const cardY = story ? top : Math.max(top, top + (bottom - top - probe.h) / 2);
+  const card = statsPage({ x: cardX, y: cardY, w: cardW, data: STATS_PROFILE, activityCount });
+
+  const headSize = story ? 80 : 60;
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, story ? 235 : 110, story ? 50 : 46)}
+  <text x="${cx}" y="${story ? 376 : 220}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="0.5">Track your stats</text>
+  <text x="${cx}" y="${story ? 432 : 272}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Every pick, point and streak in one place.</text>
   ${card.svg}
   ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
@@ -545,12 +640,16 @@ async function main() {
   await emit('flyer-a4', await renderFlyer(), SIZE.flyer[0]);
 
   // Product mockups — real GameCard states + leaderboard
-  await emit('product-gamecard-upcoming', renderProductCard({ state: 'upcoming', data: GAMES.upcoming, heading: 'Pick before kickoff', sub: 'The bigger the upset, the bigger the payout' }), SIZE.square[0]);
+  await emit('product-gamecard-upcoming', renderProductCard({ state: 'upcoming', data: GAMES.upcoming, heading: 'Pick before kickoff', sub: 'The bigger the upset, the more points' }), SIZE.square[0]);
   await emit('product-gamecard-live', renderProductCard({ state: 'live', data: GAMES.live, heading: 'Follow it live', sub: 'Scores + your points, updating in real time' }), SIZE.square[0]);
-  await emit('product-gamecard-final', renderProductCard({ state: 'final', data: GAMES.final, heading: 'Cash the upset', sub: 'A 34% underdog away win paid +66' }), SIZE.square[0]);
+  await emit('product-gamecard-final', renderProductCard({ state: 'final', data: GAMES.final, heading: 'Score the upset', sub: 'A 34% underdog away win earned +66 points' }), SIZE.square[0]);
   await emit('product-game-lifecycle', renderGameLifecycle(), SIZE.story[0]);
   await emit('product-leaderboard', renderLeaderboard('square'), SIZE.square[0]);
   await emit('product-leaderboard-story', renderLeaderboard('story'), SIZE.story[0]);
+  await emit('product-stats', renderStats('square'), SIZE.square[0]);
+  await emit('product-stats-story', renderStats('story'), SIZE.story[0]);
+  await emit('product-stats-charts', renderStatsCharts('square'), SIZE.square[0]);
+  await emit('product-stats-charts-story', renderStatsCharts('story'), SIZE.story[0]);
 
   console.log('\ndone — marketing kit in marketing/out/');
 }

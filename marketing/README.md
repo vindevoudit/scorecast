@@ -46,10 +46,14 @@ All squares are **1080×1080** (IG/FB feed, carousels), stories **1080×1920**
 | `flyer-a4.png`                           | 2480×3508  | Printable A4 poster (300 dpi) with scannable QR → bantryx.com |
 | `product-gamecard-upcoming.png`          | 1080×1080  | Real GameCard — upcoming game: odds + pick buttons            |
 | `product-gamecard-live.png`              | 1080×1080  | Real GameCard — live score + your points on the line          |
-| `product-gamecard-final.png`             | 1080×1080  | Real GameCard — final result, winning pick + payout           |
+| `product-gamecard-final.png`             | 1080×1080  | Real GameCard — final result, winning pick + points           |
 | `product-game-lifecycle.png`             | 1080×1920  | One fixture, all 3 states stacked (pick → live → result)      |
 | `product-leaderboard.png`                | 1080×1080  | Leaderboard snapshot — rank medals + points (5 rows)          |
 | `product-leaderboard-story.png`          | 1080×1920  | Leaderboard snapshot — full 8-row table                       |
+| `product-stats.png`                      | 1080×1080  | Stats page — profile header + 5 stat tiles + recent activity  |
+| `product-stats-story.png`                | 1080×1920  | Stats page — full profile with 3 recent-activity rows         |
+| `product-stats-charts.png`               | 1080×1080  | Stats dashboard — points-over-time line chart + summary tiles |
+| `product-stats-charts-story.png`         | 1080×1920  | Stats dashboard — line chart + per-league bars + heatmap      |
 
 > **Product mockups** are faithful re-creations of the live app UI (real dark-theme
 > tokens, real component layout) populated with past Premier League fixtures + fake users.
@@ -72,8 +76,8 @@ Keep the voice **playful, confident, no-gambling**. Always close with the link.
 
 **Feature — scoring**
 
-> Pick smart, not safe. On Bantryx a 38% underdog upset pays **+62 points** — favourites
-> pay less. The braver the call, the bigger the climb. → bantryx.com
+> Pick smart, not safe. On Bantryx a 38% underdog upset is worth **+62 points** — favourites
+> far less. The braver the call, the bigger the climb. → bantryx.com
 
 **Feature — groups**
 
@@ -98,12 +102,22 @@ Keep the voice **playful, confident, no-gambling**. Always close with the link.
 **Product — game lifecycle** (pair with `product-game-lifecycle` or the 3 `product-gamecard-*`)
 
 > This is the whole game: back Aston Villa at 34% → +66 points when they pull off the upset.
-> Pick before kickoff, watch it live, cash in at full-time. → bantryx.com
+> Pick before kickoff, watch it live, climb the table at full-time. → bantryx.com
 
 **Product — leaderboard** (pair with `product-leaderboard*`)
 
 > Climb your group's table on correct picks × probability — the riskier the call, the faster
 > you rise. → bantryx.com
+
+**Product — stats page** (pair with `product-stats*`)
+
+> Your whole season at a glance: total points, win rate, best streak, and every pick you've
+> made. Track it all on Bantryx. → bantryx.com
+
+**Product — stats charts** (pair with `product-stats-charts*`)
+
+> Real analytics, not just a number. Points over time, win-rate trends, per-league
+> breakdowns, and your pick-time heatmap. → bantryx.com
 
 **Stat teasers** (short, punchy — pair with the matching `stat-*` graphic)
 

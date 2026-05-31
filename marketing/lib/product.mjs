@@ -91,7 +91,7 @@ export function streakChip(x, cy, count, k = 1) {
 
 // ── GameCard mockup ──────────────────────────────────────────────────────
 // data = { home, away, dateLabel, kickoff, homeScore, awayScore, minute,
-//          payout:{home,away,drawH,drawA}, pickSide, pickTeam, result,
+//          pts:{home,away,drawH,drawA}, pickSide, pickTeam, result,
 //          points }
 // state ∈ 'upcoming' | 'live' | 'final'. Returns { svg, h }.
 export function gameCard({ x, y, w, state, data }) {
@@ -202,7 +202,7 @@ export function gameCard({ x, y, w, state, data }) {
 
   // ── state-specific footer ──
   if (state === 'upcoming') {
-    // payout grid
+    // points-allocation grid
     cy += 24 * k;
     const gridY = cy;
     const gridH = 92 * k;
@@ -210,14 +210,14 @@ export function gameCard({ x, y, w, state, data }) {
     const colW = (w - pad * 2 - colGap * 2) / 3;
     parts.push(rrect(x + pad, gridY, w - pad * 2, gridH, 16 * k, `fill="${UI.border}"`));
     const cells = [
-      { v: `+${data.payout.home}`, lab: false },
+      { v: `+${data.pts.home}`, lab: false },
       { v: 'WIN', lab: true },
-      { v: `+${data.payout.away}`, lab: false },
+      { v: `+${data.pts.away}`, lab: false },
     ];
     const row2 = [
-      { v: `+${data.payout.drawH}`, lab: false },
+      { v: `+${data.pts.drawH}`, lab: false },
       { v: 'DRAW', lab: true },
-      { v: `+${data.payout.drawA}`, lab: false },
+      { v: `+${data.pts.drawA}`, lab: false },
     ];
     const drawCells = (arr, ry, rh) => {
       arr.forEach((c, i) => {
@@ -237,7 +237,7 @@ export function gameCard({ x, y, w, state, data }) {
     };
     drawCells(cells, gridY + 1 * k, gridH / 2 - 1.5 * k);
     drawCells(row2, gridY + gridH / 2 + 0.5 * k, gridH / 2 - 1.5 * k);
-    parts.push(txt(cx, gridY + gridH + 30 * k, 'Payout locks in at kickoff.', { size: 15 * k, font: FONT.body, fill: UI.fgMuted, anchor: 'middle' }));
+    parts.push(txt(cx, gridY + gridH + 30 * k, 'Points allocation locks in at kickoff.', { size: 15 * k, font: FONT.body, fill: UI.fgMuted, anchor: 'middle' }));
     cy = gridY + gridH + 48 * k;
 
     // pick buttons
@@ -330,6 +330,252 @@ export function leaderboardCard({ x, y, w, title, description, rows }) {
     cy += rowH + rowGap;
   });
   cy += pad - rowGap;
+
+  const h = cy - y;
+  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  return { svg: shell + parts.join('\n'), h };
+}
+
+// ── Stats dashboard (charts) mockup ──────────────────────────────────────
+// Recreates the recharts panels from StatsDashboard.jsx: dual-line "Points
+// over time" (cyan daily + purple running total), stacked "Per-league" bars
+// (green/amber/red), and the cyan "Pick-time heatmap". `full` adds the bars +
+// heatmap (story); otherwise just the hero line chart (square).
+const CHART = { line1: '#22d3ee', line2: '#a855f7', win: '#22c55e', draw: '#fbbf24', loss: '#ef4444' };
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export function statsCharts({ x, y, w, data, full = false }) {
+  const k = w / 880;
+  const pad = 40 * k;
+  const r = 34 * k;
+  const parts = [];
+  let cy = y + pad;
+  const innerW = w - pad * 2;
+
+  // ── header + window toggle ──
+  parts.push(
+    txt(x + pad, cy + 30 * k, 'Your stats', { size: 38 * k, font: FONT.bodySemi, fill: UI.fg }),
+    txt(x + pad, cy + 60 * k, 'Trends, leagues, and what to watch for.', { size: 18 * k, font: FONT.body, fill: UI.fgMuted }),
+  );
+  const windows = ['30 days', '90 days', 'Season'];
+  let wx = x + w - pad;
+  for (let i = windows.length - 1; i >= 0; i--) {
+    const active = i === 0;
+    const tw = windows[i].length * 10 * k + 28 * k;
+    wx -= tw + (i < windows.length - 1 ? 8 * k : 0);
+    parts.push(
+      rrect(wx, cy + 6 * k, tw, 44 * k, 14 * k, active ? `fill="${UI.accent}"` : `fill="rgba(0,0,0,0.001)"`),
+      txt(wx + tw / 2, cy + 34 * k, windows[i], { size: 18 * k, font: FONT.bodySemi, fill: active ? UI.base : UI.fgMuted, anchor: 'middle' }),
+    );
+  }
+  cy += 92 * k;
+
+  // ── 4 summary tiles ──
+  const tGap = 12 * k;
+  const tW = (innerW - tGap * 3) / 4;
+  const tH = 104 * k;
+  data.summary.forEach((s, i) => {
+    const tx = x + pad + i * (tW + tGap);
+    parts.push(
+      rrect(tx, cy, tW, tH, 18 * k, `fill="rgba(15,23,42,0.7)"`),
+      txt(tx + 20 * k, cy + 34 * k, s.label.toUpperCase(), { size: 13 * k, font: FONT.bodySemi, fill: UI.fgMuted, ls: 2 * k }),
+      txt(tx + 20 * k, cy + 78 * k, s.value, { size: 38 * k, font: FONT.brand, weight: 700, fill: s.accent ? UI.accent : UI.fg }),
+    );
+  });
+  cy += tH + 22 * k;
+
+  // ── helper: bordered chart panel ──
+  const panel = (title, subtitle, ph, inner) => {
+    const py = cy;
+    parts.push(
+      rrect(x + pad, py, innerW, ph, 24 * k, `fill="rgba(11,19,33,0.6)" stroke="${UI.border}" stroke-width="1.5"`),
+      txt(x + pad + 26 * k, py + 36 * k, title.toUpperCase(), { size: 15 * k, font: FONT.bodySemi, fill: UI.fgMuted, ls: 3 * k }),
+      txt(x + pad + 26 * k, py + 62 * k, subtitle, { size: 16 * k, font: FONT.body, fill: UI.fgSubtle }),
+    );
+    parts.push(inner(x + pad, py, innerW, ph));
+    cy += ph + 20 * k;
+  };
+
+  // ── Points over time (dual line) ──
+  panel('Points over time', 'Daily + running total', 300 * k, (px, py, pw, ph) => {
+    const plotX = px + 70 * k;
+    const plotY = py + 92 * k;
+    const plotW = pw - 96 * k;
+    const plotH = ph - 132 * k;
+    const yMax = Math.max(...data.pointsOverTime.cumulative) * 1.1;
+    let g = '';
+    // grid + y labels
+    for (let i = 0; i <= 4; i++) {
+      const gy = plotY + (plotH * i) / 4;
+      const val = Math.round((yMax * (4 - i)) / 4);
+      g += `<line x1="${plotX}" y1="${gy}" x2="${plotX + plotW}" y2="${gy}" stroke="rgb(148,163,184)" stroke-opacity="0.18" stroke-dasharray="3 3" stroke-width="1"/>`;
+      g += txt(plotX - 12 * k, gy + 5 * k, String(val), { size: 12 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'end' });
+    }
+    // x labels
+    data.pointsOverTime.xLabels.forEach((lab, i, arr) => {
+      const lx = plotX + (plotW * i) / (arr.length - 1);
+      g += txt(lx, plotY + plotH + 26 * k, lab, { size: 12 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'middle' });
+    });
+    const poly = (vals, color) => {
+      const n = vals.length;
+      const pts = vals.map((v, i) => `${(plotX + (plotW * i) / (n - 1)).toFixed(1)},${(plotY + plotH - (v / yMax) * plotH).toFixed(1)}`).join(' ');
+      return `<polyline fill="none" stroke="${color}" stroke-width="${3 * k}" stroke-linejoin="round" stroke-linecap="round" points="${pts}"/>`;
+    };
+    g += poly(data.pointsOverTime.cumulative, CHART.line2);
+    g += poly(data.pointsOverTime.daily, CHART.line1);
+    // legend
+    g += legend(plotX + plotW - 280 * k, py + 40 * k, k, [
+      { color: CHART.line1, name: 'Daily points' },
+      { color: CHART.line2, name: 'Running total' },
+    ]);
+    return g;
+  });
+
+  if (full) {
+    // ── Per-league stacked bars ──
+    panel('Per-league breakdown', 'Wins / draws / losses', 300 * k, (px, py, pw, ph) => {
+      const plotX = px + 60 * k;
+      const plotY = py + 92 * k;
+      const plotW = pw - 86 * k;
+      const plotH = ph - 132 * k;
+      const totals = data.perLeague.map((l) => l.wins + l.draws + l.losses);
+      const yMax = Math.max(...totals) * 1.15;
+      let g = '';
+      for (let i = 0; i <= 4; i++) {
+        const gy = plotY + (plotH * i) / 4;
+        g += `<line x1="${plotX}" y1="${gy}" x2="${plotX + plotW}" y2="${gy}" stroke="rgb(148,163,184)" stroke-opacity="0.18" stroke-dasharray="3 3" stroke-width="1"/>`;
+        g += txt(plotX - 12 * k, gy + 5 * k, String(Math.round((yMax * (4 - i)) / 4)), { size: 12 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'end' });
+      }
+      const slot = plotW / data.perLeague.length;
+      const bw = slot * 0.5;
+      data.perLeague.forEach((l, i) => {
+        const bx = plotX + slot * i + (slot - bw) / 2;
+        let stackTop = plotY + plotH;
+        [['wins', CHART.win], ['draws', CHART.draw], ['losses', CHART.loss]].forEach(([key, color]) => {
+          const segH = (l[key] / yMax) * plotH;
+          stackTop -= segH;
+          g += rrect(bx, stackTop, bw, segH, 0, `fill="${color}"`);
+        });
+        g += txt(bx + bw / 2, plotY + plotH + 26 * k, l.name, { size: 13 * k, font: FONT.body, fill: UI.fgMuted, anchor: 'middle' });
+      });
+      g += legend(plotX + plotW - 300 * k, py + 40 * k, k, [
+        { color: CHART.win, name: 'Wins' },
+        { color: CHART.draw, name: 'Draws' },
+        { color: CHART.loss, name: 'Losses' },
+      ]);
+      return g;
+    });
+
+    // ── Pick-time heatmap ──
+    panel('Pick-time heatmap', 'Day-of-week × hour', 280 * k, (px, py, pw) => {
+      const gridX = px + 80 * k;
+      const gridY = py + 96 * k;
+      const cols = 24;
+      const cellW = (pw - 100 * k) / cols;
+      const cellH = 20 * k;
+      const gap = 3 * k;
+      let g = '';
+      for (let h = 0; h < cols; h += 3) {
+        g += txt(gridX + h * (cellW) + cellW / 2, gridY - 10 * k, String(h), { size: 11 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'middle' });
+      }
+      data.heatmap.forEach((row, d) => {
+        const ry = gridY + d * (cellH + gap);
+        g += txt(gridX - 14 * k, ry + cellH * 0.72, DOW[d], { size: 12 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'end' });
+        row.forEach((cell, h) => {
+          const intensity = cell / 5;
+          const fill = cell === 0 ? 'rgba(30,41,59,0.55)' : `rgba(34,211,238,${(0.18 + intensity * 0.7).toFixed(2)})`;
+          g += rrect(gridX + h * cellW, ry, cellW - gap, cellH, 3 * k, `fill="${fill}"`);
+        });
+      });
+      return g;
+    });
+  }
+
+  cy += pad - 20 * k;
+  const h = cy - y;
+  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  return { svg: shell + parts.join('\n'), h };
+}
+
+// Small inline chart legend: colour swatch + label, laid out left→right.
+function legend(x, y, k, items) {
+  let g = '';
+  let cursor = x;
+  for (const it of items) {
+    g += `<line x1="${cursor}" y1="${y}" x2="${cursor + 24 * k}" y2="${y}" stroke="${it.color}" stroke-width="${3 * k}" stroke-linecap="round"/>`;
+    g += txt(cursor + 32 * k, y + 5 * k, it.name, { size: 14 * k, font: FONT.body, fill: UI.fgMuted });
+    cursor += 32 * k + it.name.length * 8.5 * k + 24 * k;
+  }
+  return g;
+}
+
+// ── Stats / Profile page mockup ──────────────────────────────────────────
+// Mirrors ProfileView's Summary tab: avatar header + 5 stat tiles
+// (Total points / Picks made / Picks won / Win rate / Best streak, with the
+// `.font-led` Orbitron numerals) + a recent-activity list. Returns { svg, h }.
+const TONE = { success: UI.success, danger: UI.danger, warning: UI.warning, neutral: UI.fgMuted };
+
+export function statsPage({ x, y, w, data, activityCount = 3 }) {
+  const k = w / 880;
+  const pad = 44 * k;
+  const r = 34 * k;
+  const parts = [];
+  let cy = y + pad;
+
+  // ── header: avatar + identity ──
+  const avR = 40 * k;
+  const avCx = x + pad + avR;
+  const avCy = cy + avR;
+  parts.push(avatar(avCx, avCy, avR, data.name));
+  const tx = avCx + avR + 26 * k;
+  parts.push(
+    txt(tx, cy + 18 * k, 'PROFILE', { size: 16 * k, font: FONT.bodySemi, fill: 'rgba(34,211,238,0.8)', ls: 4 * k }),
+    txt(tx, cy + 58 * k, data.name, { size: 42 * k, font: FONT.bodySemi, fill: UI.fg }),
+    txt(tx, cy + 90 * k, `@${data.username}  ·  ${data.joined}`, { size: 19 * k, font: FONT.body, fill: UI.fgMuted }),
+  );
+  cy += avR * 2 + 30 * k;
+
+  // ── 5 stat tiles ──
+  const tileGap = 12 * k;
+  const tileW = (w - pad * 2 - tileGap * 4) / 5;
+  const tileH = 132 * k;
+  data.tiles.forEach((t, i) => {
+    const txx = x + pad + i * (tileW + tileGap);
+    parts.push(rrect(txx, cy, tileW, tileH, 18 * k, `fill="rgba(15,23,42,0.7)"`));
+    const cxx = txx + tileW / 2;
+    parts.push(
+      txt(cxx, cy + 34 * k, t.label[0].toUpperCase(), { size: 13 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'middle', ls: 2 * k }),
+      txt(cxx, cy + 54 * k, t.label[1].toUpperCase(), { size: 13 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'middle', ls: 2 * k }),
+      txt(cxx, cy + 104 * k, t.value, { size: 38 * k, font: FONT.brand, weight: 700, fill: UI.fg, anchor: 'middle' }),
+    );
+  });
+  cy += tileH + 30 * k;
+
+  // ── recent activity ──
+  const rows = data.activity.slice(0, activityCount);
+  if (rows.length) {
+    parts.push(txt(x + pad, cy, 'RECENT ACTIVITY', { size: 16 * k, font: FONT.bodySemi, fill: UI.fgMuted, ls: 3 * k }));
+    cy += 32 * k;
+    const rowH = 78 * k;
+    const rowGap = 12 * k;
+    rows.forEach((a) => {
+      parts.push(rrect(x + pad, cy, w - pad * 2, rowH, 20 * k, `fill="rgba(15,23,42,0.7)"`));
+      parts.push(
+        `${txt(x + pad + 26 * k, cy + 32 * k, a.home, { size: 22 * k, font: FONT.body, fill: UI.fg })}${txt(x + pad + 26 * k + a.home.length * 12.5 * k + 10 * k, cy + 32 * k, 'vs', { size: 18 * k, font: FONT.body, fill: UI.fgSubtle })}${txt(x + pad + 26 * k + a.home.length * 12.5 * k + 46 * k, cy + 32 * k, a.away, { size: 22 * k, font: FONT.body, fill: UI.fg })}`,
+        txt(x + pad + 26 * k, cy + 58 * k, `Picked ${a.pick}`, { size: 17 * k, font: FONT.body, fill: UI.fgSubtle }),
+      );
+      // status badge (right)
+      const tone = TONE[a.tone] || UI.fgMuted;
+      const bw = a.status.length * 11 * k + 28 * k;
+      parts.push(
+        rrect(x + w - pad - bw - 16 * k, cy + rowH / 2 - 18 * k, bw, 36 * k, 18 * k, `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`),
+        txt(x + w - pad - bw / 2 - 16 * k, cy + rowH / 2 + 6 * k, a.status.toUpperCase(), { size: 17 * k, font: FONT.bodySemi, fill: tone, anchor: 'middle' }),
+      );
+      cy += rowH + rowGap;
+    });
+    cy -= rowGap;
+  }
+  cy += pad;
 
   const h = cy - y;
   const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);

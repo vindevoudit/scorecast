@@ -14,7 +14,7 @@
 
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Dialog } from './ui';
-import { m } from '../lib/motion';
+import { m, useReducedMotion } from '../lib/motion';
 import { sidebarTabIndicator } from '../lib/motionVariants';
 
 const ICONS = {
@@ -95,6 +95,7 @@ function CloseIcon(props) {
 
 function NavItem({ tab, active, collapsed, onSelect }) {
   const Icon = ICONS[tab.id] || ICONS.profile;
+  const reduceMotion = useReducedMotion();
   // Tier 30 Phase 1 follow-up — kicker removed. Sidebar entries render
   // a single label per item. Playwright contracts switch from
   // `${kicker} ${label}` accessible name to just `label`.
@@ -104,9 +105,11 @@ function NavItem({ tab, active, collapsed, onSelect }) {
   // appears in exactly one NavItem at any time, motion auto-animates
   // the indicator's position from the previous tab to the new one
   // (springs via `sidebarTabIndicator`). prefers-reduced-motion users
-  // get an instant snap automatically — handled inside motion. The
-  // span sits absolute, so it never affects the button's accessible
-  // name or focus ring.
+  // (and mobile, post-Phase-2-follow-up) get a plain static span
+  // instead so there's no motion overhead. The span sits absolute,
+  // so it never affects the button's accessible name or focus ring.
+  const indicatorClass =
+    'shadow-led absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r bg-accent';
   return (
     <button
       role="tab"
@@ -119,12 +122,16 @@ function NavItem({ tab, active, collapsed, onSelect }) {
       } ${collapsed ? 'justify-center' : ''}`}
     >
       {active ? (
-        <m.span
-          layoutId="sidebar-active-indicator"
-          transition={sidebarTabIndicator}
-          aria-hidden="true"
-          className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r bg-accent shadow-led"
-        />
+        reduceMotion ? (
+          <span aria-hidden="true" className={indicatorClass} />
+        ) : (
+          <m.span
+            layoutId="sidebar-active-indicator"
+            transition={sidebarTabIndicator}
+            aria-hidden="true"
+            className={indicatorClass}
+          />
+        )
       ) : null}
       <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />
       <span

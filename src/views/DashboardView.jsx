@@ -18,6 +18,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
 import { useGames } from '../hooks/useGames';
+import { useIsDesktop } from '../lib/motion';
 
 const PicksHistory = lazyWithReload(() => import('../components/PicksHistory'));
 const ProfileView = lazyWithReload(() => import('../components/ProfileView'));
@@ -68,6 +69,10 @@ function DashboardView() {
   const { loading, view, setView, ownProfile, picks, handleJoinPublicGroup, navigateToDeepLink } =
     useData();
   const { games, byDay } = useGames();
+  // Tier 30 Phase 2 follow-up — Orbitron wordmark gated to desktop.
+  // User reported the font loads slowly on mobile so the chrome-bar
+  // BANTRYX reverts to inherited Inter below md.
+  const isDesktop = useIsDesktop();
 
   const tabs = useMemo(() => {
     if (!user) {
@@ -148,12 +153,14 @@ function DashboardView() {
           const brandClass =
             'text-shadow-brand-glow select-none rounded text-sm font-normal uppercase tracking-[0.35em] text-accent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
           // Tier 30 Phase 2 follow-up — wordmark uses the scoreboard font
-          // (Orbitron). Applied inline so the wide letter-spacing from
+          // (Orbitron) on desktop only. Mobile keeps inherited Inter so the
+          // Google Fonts download doesn't gate first paint of the chrome
+          // bar. Applied inline so the wide letter-spacing from
           // `tracking-[0.35em]` survives (`.font-led` utility would
           // collapse it to 0.02em, killing the marquee feel).
-          const brandFontStyle = {
-            fontFamily: "'Orbitron', 'JetBrains Mono', 'Courier New', monospace",
-          };
+          const brandFontStyle = isDesktop
+            ? { fontFamily: "'Orbitron', 'JetBrains Mono', 'Courier New', monospace" }
+            : undefined;
           const brand =
             user && !browseAsGuest ? (
               <button

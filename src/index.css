@@ -163,6 +163,23 @@ html.theme-switching * {
   }
 }
 
+/* Tier 30 Phase 2 follow-up — mobile is treated as no-motion. User
+ * reported lag on mobile and asked for Phase 2 animations to be
+ * desktop-only. The Tailwind keyframes added in Phase 2 (`ticker-scroll`
+ * for the Landing league marquee, `led-flicker` for the live-dot pulse)
+ * are silenced below md regardless of prefers-reduced-motion. Other
+ * motion (JS-driven via motion/react) is gated separately through the
+ * `useReducedMotion` wrapper in src/lib/motion.js, which now also
+ * returns true on mobile. */
+@media (max-width: 767px) {
+  .motion-safe\:animate-ticker-scroll,
+  .motion-safe\:animate-led-flicker,
+  .animate-ticker-scroll,
+  .animate-led-flicker {
+    animation: none !important;
+  }
+}
+
 html {
   scroll-behavior: smooth;
   /* Always reserve space for the vertical scrollbar so views with short
@@ -322,11 +339,22 @@ input {
    * digit the same advance so flipping scores never reflows the row. The
    * fallback chain stays mono so the layout doesn't break if Google Fonts
    * is unreachable (rare-but-not-impossible behind some corporate proxies). */
+  /* Tier 30 Phase 2 follow-up — `.font-led` is gated to desktop (md+).
+   * Mobile users reported the Orbitron download is slow over cellular
+   * and the FOUT (flash of fallback monospace) reads as visual lag.
+   * Below md the class still applies tabular-nums (CSS feature setting,
+   * no font load needed) so digits stay aligned in the inherited Inter,
+   * but the Orbitron typeface + custom letter-spacing only kick in at
+   * the desktop breakpoint where the perf penalty isn't an issue. */
   .font-led {
-    font-family: 'Orbitron', 'JetBrains Mono', 'Courier New', monospace;
     font-feature-settings: 'tnum' 1;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
+  }
+  @media (min-width: 768px) {
+    .font-led {
+      font-family: 'Orbitron', 'JetBrains Mono', 'Courier New', monospace;
+      letter-spacing: 0.02em;
+    }
   }
 
   /* Tier 30 Phase 2 — `.input-stadium` is the Auth/search-bar input shell.

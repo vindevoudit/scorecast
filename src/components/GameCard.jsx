@@ -8,7 +8,7 @@ import ConfirmModal from './ConfirmModal';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { Badge } from './ui';
-import { m, AnimatePresence } from '../lib/motion';
+import { m, AnimatePresence, useReducedMotion } from '../lib/motion';
 import { scoreboardFlip } from '../lib/motionVariants';
 
 function formatDate(dateText) {
@@ -137,12 +137,19 @@ function ScoreboardHeader({
 // the next digit rotates in — `AnimatePresence mode="popLayout"` makes
 // the swap visually continuous. `initial={false}` suppresses the
 // animation on first mount so a static card doesn't flash on render.
+// Tier 30 Phase 2 follow-up — on mobile (or prefers-reduced-motion) the
+// AnimatePresence wrapper is skipped entirely; the digit renders as a
+// plain span. Motion overhead is unnecessary at the small screen sizes
+// where the user reported lag.
 function ScoreTile({ score, highlight }) {
+  const reduceMotion = useReducedMotion();
   const colorClass = highlight ? 'text-accent' : 'text-fg';
+  const tileClass = `font-led inline-flex h-12 min-w-[2.75rem] items-center justify-center overflow-hidden rounded-lg bg-overlay/60 px-2 text-3xl tabular-nums shadow-led sm:h-14 sm:min-w-[3.25rem] sm:text-4xl ${colorClass}`;
+  if (reduceMotion) {
+    return <span className={tileClass}>{score}</span>;
+  }
   return (
-    <span
-      className={`font-led inline-flex h-12 min-w-[2.75rem] items-center justify-center overflow-hidden rounded-lg bg-overlay/60 px-2 text-3xl tabular-nums shadow-led sm:h-14 sm:min-w-[3.25rem] sm:text-4xl ${colorClass}`}
-    >
+    <span className={tileClass}>
       <AnimatePresence mode="popLayout" initial={false}>
         <m.span key={String(score)} {...scoreboardFlip} className="inline-block">
           {score}

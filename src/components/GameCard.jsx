@@ -12,8 +12,14 @@ import { m, AnimatePresence, useReducedMotion } from '../lib/motion';
 import { scoreboardFlip } from '../lib/motionVariants';
 
 function formatDate(dateText) {
+  // Date-only — the kickoff time is already shown prominently in the
+  // ScoreboardBody (the large `.font-led` `Kickoff` block), so repeating
+  // it in the header just produces noise like "May 31, 2026 at 6:00 PM".
+  // `dateStyle: 'medium'` renders the date cleanly across locales
+  // ("May 31, 2026" en-US, "31 May 2026" en-GB) without the locale's
+  // "at" / "," date-time joiner.
   const date = new Date(dateText);
-  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  return date.toLocaleDateString([], { dateStyle: 'medium' });
 }
 
 function formatKickoffTime(dateText) {

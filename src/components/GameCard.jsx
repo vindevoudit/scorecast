@@ -665,7 +665,7 @@ function GameCard({ game }) {
         <div className="mt-4 flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={() => handleShare('square')}
+            onClick={() => handleShare('story')}
             disabled={Boolean(sharing)}
             className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
             aria-label="Share this pick as an image"

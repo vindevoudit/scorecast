@@ -126,10 +126,25 @@ function SettingsView() {
   // already swallows errors and surfaces a toast, and user.profileVisibility
   // updates optimistically through the existing setUser path inside
   // DataContext.handleSaveProfile.
+  // "Appearance" + "Notifications" together push the 4-tab row past
+  // iPhone-SE-class viewports — abbreviate both on mobile (Theme / Alerts)
+  // and restore the full words at sm+.
+  const appearLabel = (
+    <>
+      <span className="sm:hidden">Theme</span>
+      <span className="hidden sm:inline">Appearance</span>
+    </>
+  );
+  const notifLabel = (
+    <>
+      <span className="sm:hidden">Alerts</span>
+      <span className="hidden sm:inline">Notifications</span>
+    </>
+  );
   const tabs = [
     { value: 'account', label: 'Account', content: <AccountSection /> },
-    { value: 'appearance', label: 'Appearance', content: <AppearanceSection /> },
-    { value: 'notifications', label: 'Notifications', content: <NotificationsSection /> },
+    { value: 'appearance', label: appearLabel, content: <AppearanceSection /> },
+    { value: 'notifications', label: notifLabel, content: <NotificationsSection /> },
     {
       value: 'privacy',
       label: 'Privacy',

@@ -148,8 +148,15 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
               aria-hidden="true"
               className="h-px w-10 bg-gradient-to-r from-transparent to-accent shadow-[0_0_8px_rgba(34,211,238,0.6)] sm:w-16"
             />
-            <p className="flex items-center justify-center gap-3 text-xs font-light tracking-[0.5em] text-accent sm:gap-4 sm:text-sm">
-              NO BETTING, JUST BANTRYX
+            <p
+              className="flex items-center justify-center gap-3 text-xs font-light tracking-[0.5em] text-accent sm:gap-4 sm:text-sm"
+              aria-label="No betting, just Bantryx"
+            >
+              <span>NO BETTING</span>
+              <span aria-hidden="true" className="text-accent/40">
+                ◆
+              </span>
+              <span>JUST BANTRYX</span>
             </p>
             <span
               aria-hidden="true"
@@ -288,7 +295,7 @@ function LeagueTicker() {
   // Negative top margin uses Tailwind's `!` prefix to win against the
   // parent `space-y-*` selector specificity.
   return (
-    <div className="bg-arena-grid-bold relative !mt-10 overflow-hidden border-y border-default py-3 md:!mt-16">
+    <div className="relative !mt-10 overflow-hidden border-y border-default py-3 md:!mt-16">
       <div className="mask-fade-x">
         {/* `w-max` (width: max-content) sizes the flex container to its
             content; without it `translateX(-50%)` would translate by

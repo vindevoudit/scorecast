@@ -101,7 +101,9 @@ module.exports = {
         },
       },
       animation: {
-        'ticker-scroll': 'ticker-scroll 24s linear infinite',
+        // Tier 30 Phase 2 follow-up — slowed 24s → 48s so the ticker reads
+        // as an ambient broadcast rather than rushing past the eye.
+        'ticker-scroll': 'ticker-scroll 48s linear infinite',
         'led-flicker': 'led-flicker 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite',
       },
     },

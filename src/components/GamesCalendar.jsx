@@ -19,6 +19,7 @@ import { useAutoAnimate } from '@formkit/auto-animate/react';
 import GameCard from './GameCard';
 import EmptyState from './EmptyState';
 import { dayKey } from '../hooks/useGames';
+import { m, useReducedMotion } from '../lib/motion';
 
 const WINDOW_DAYS = 7;
 const HALF_WINDOW = (WINDOW_DAYS - 1) / 2; // 3
@@ -99,14 +100,18 @@ function windowIndexForOffset(offsetDays) {
 
 function ArrowButton({ direction, onClick, label }) {
   const isPrev = direction === 'prev';
+  // Tier 30 Phase 2 — arrow icon nudges ±2 px on hover for micro-feedback
+  // (`whileHover` on the inner <m.svg>, so the surrounding button hit-area
+  // stays static). Reduced-motion skips the nudge.
+  const reduceMotion = useReducedMotion();
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="inline-flex shrink-0 items-center justify-center self-stretch rounded-2xl border border-default bg-overlay/40 px-2 text-fg-muted transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="group inline-flex shrink-0 items-center justify-center self-stretch rounded-2xl border border-default bg-overlay/40 px-2 text-fg-muted transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
-      <svg
+      <m.svg
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -115,9 +120,11 @@ function ArrowButton({ direction, onClick, label }) {
         strokeLinejoin="round"
         className="h-4 w-4"
         aria-hidden="true"
+        whileHover={reduceMotion ? undefined : { x: isPrev ? -2 : 2 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 22 }}
       >
         <path d={isPrev ? 'M15 18l-6-6 6-6' : 'M9 6l6 6-6 6'} />
-      </svg>
+      </m.svg>
     </button>
   );
 }
@@ -302,9 +309,15 @@ function GamesCalendar({ byDay }) {
                       Restoring the inline style for highest-specificity guarantee, but
                       using `rgb(var(--c-accent))` so the day number still tracks the active
                       theme (the original hardcoded `rgb(34, 211, 238)` would have looked
-                      wrong in light mode). */}
+                      wrong in light mode).
+                      Tier 30 Phase 2 — today's chip switches to `.font-led`
+                      (Orbitron tabular-nums) so the day number reads as a
+                      scoreboard digit; non-today chips stay on the default
+                      Inter face so the contrast itself anchors today. */}
                   <span
-                    className="text-sm font-semibold tabular-nums sm:text-base"
+                    className={`text-sm font-semibold tabular-nums sm:text-base ${
+                      isTodayChip ? 'font-led' : ''
+                    }`}
                     style={{ color: 'rgb(var(--c-accent))' }}
                   >
                     {dayNum}
@@ -313,7 +326,12 @@ function GamesCalendar({ byDay }) {
                     {meta.hasLive ? (
                       <span className="relative inline-flex h-1.5 w-1.5">
                         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-75" />
-                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-danger" />
+                        {/* Tier 30 Phase 2 — inner dot picks up the
+                            `led-flicker` keyframe so it reads as a live
+                            broadcast indicator rather than a plain
+                            circle. `motion-safe:` keeps reduced-motion
+                            users on a steady dot. */}
+                        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-danger motion-safe:animate-led-flicker" />
                       </span>
                     ) : null}
                     {meta.count > 0 ? (

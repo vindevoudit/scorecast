@@ -8,6 +8,8 @@ import ConfirmModal from './ConfirmModal';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { Badge } from './ui';
+import { m, AnimatePresence } from '../lib/motion';
+import { scoreboardFlip } from '../lib/motionVariants';
 
 function formatDate(dateText) {
   const date = new Date(dateText);
@@ -128,6 +130,28 @@ function ScoreboardHeader({
   );
 }
 
+// Tier 30 Phase 2 — scoreboard digit tile. Each side's score sits on a
+// `bg-overlay/60` rounded plate with the `.font-led` (Orbitron + tabular-
+// nums) treatment + a subtle `shadow-led` inner glow. When the score
+// changes the inner `<m.span key={score}>` rotates out on the X axis as
+// the next digit rotates in — `AnimatePresence mode="popLayout"` makes
+// the swap visually continuous. `initial={false}` suppresses the
+// animation on first mount so a static card doesn't flash on render.
+function ScoreTile({ score, highlight }) {
+  const colorClass = highlight ? 'text-accent' : 'text-fg';
+  return (
+    <span
+      className={`font-led inline-flex h-12 min-w-[2.75rem] items-center justify-center overflow-hidden rounded-lg bg-overlay/60 px-2 text-3xl tabular-nums shadow-led sm:h-14 sm:min-w-[3.25rem] sm:text-4xl ${colorClass}`}
+    >
+      <AnimatePresence mode="popLayout" initial={false}>
+        <m.span key={String(score)} {...scoreboardFlip} className="inline-block">
+          {score}
+        </m.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 function ScoreboardBody({ game, live, finished, isHalted }) {
   const showScores = hasScores(game) && (live || finished);
   const leadingSide =
@@ -177,30 +201,30 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
             {statusLabel(game)}
           </p>
         ) : showScores ? (
-          <p
-            className="text-4xl font-extrabold tabular-nums tracking-tight text-fg sm:text-5xl"
+          <div
+            className="flex items-center justify-center gap-2 sm:gap-3"
             aria-label={`Score ${game.homeScore} to ${game.awayScore}`}
           >
-            <span className={leadingSide === 'home' ? 'text-accent' : ''}>{game.homeScore}</span>
-            <span className="px-2 text-fg-subtle" aria-hidden="true">
+            <ScoreTile score={game.homeScore} highlight={leadingSide === 'home'} />
+            <span className="text-2xl text-fg-subtle sm:text-3xl" aria-hidden="true">
               -
             </span>
-            <span className={leadingSide === 'away' ? 'text-accent' : ''}>{game.awayScore}</span>
-          </p>
+            <ScoreTile score={game.awayScore} highlight={leadingSide === 'away'} />
+          </div>
         ) : live ? (
-          <p
-            className="text-4xl font-extrabold tabular-nums tracking-tight text-fg-muted sm:text-5xl"
+          <div
+            className="flex items-center justify-center gap-2 sm:gap-3"
             aria-label="Awaiting first score"
           >
-            <span>-</span>
-            <span className="px-2 text-fg-subtle" aria-hidden="true">
+            <ScoreTile score="–" />
+            <span className="text-2xl text-fg-subtle sm:text-3xl" aria-hidden="true">
               -
             </span>
-            <span>-</span>
-          </p>
+            <ScoreTile score="–" />
+          </div>
         ) : (
           <>
-            <p className="text-sm font-bold tabular-nums tracking-tight text-fg sm:text-3xl">
+            <p className="font-led text-sm tabular-nums tracking-tight text-fg sm:text-3xl">
               {formatKickoffTime(game.date)}
             </p>
             <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-fg-subtle sm:text-[10px] sm:tracking-[0.3em]">
@@ -234,26 +258,41 @@ function PayoutMatrix({ game }) {
   const homeDrawDisplay = homeDraw === null ? '+x' : `+${homeDraw}`;
   const awayDrawDisplay = awayDraw === null ? '+y' : `+${awayDraw}`;
 
+  // Tier 30 Phase 2 — scoreboard-grid restyle. The 6 payout cells sit on
+  // `bg-overlay/70` plates separated by 1 px `bg-divider` strips (achieved
+  // via `gap-px` against the parent's `bg-divider`). Each value uses the
+  // `.font-led` digit treatment so the grid reads as a stadium broadcast
+  // payout board. The dual draw payouts (+x for picking home, +y for
+  // picking away) are preserved — collapsing to a single Draw cell would
+  // hide the difference in expected value between sides.
+  const valueClass = 'font-led tabular-nums text-base text-fg sm:text-lg';
   const labelClass =
-    'px-2 text-center text-[11px] font-semibold uppercase tracking-[0.25em] text-fg-muted';
-  const valueClass = 'text-base font-semibold tabular-nums text-fg sm:text-lg';
+    'flex items-center justify-center px-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-fg-muted';
 
   return (
-    <div className="mt-5 rounded-2xl bg-overlay/70 p-3">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:gap-4">
-        <p className={valueClass}>+{homeWin}</p>
-        <p className={labelClass}>Win</p>
-        <p className={`${valueClass} text-right`}>+{awayWin}</p>
-        <p className={`${valueClass} mt-1`}>{homeDrawDisplay}</p>
-        <p className={`${labelClass} mt-1`}>Draw</p>
-        <p className={`${valueClass} mt-1 text-right`}>{awayDrawDisplay}</p>
+    <div className="mt-5 overflow-hidden rounded-2xl border border-default bg-divider">
+      <div className="grid grid-cols-[1fr_auto_1fr] gap-px">
+        <div className="bg-overlay/70 px-3 py-2.5 text-center">
+          <p className={valueClass}>+{homeWin}</p>
+        </div>
+        <div className={`bg-overlay/70 ${labelClass}`}>Win</div>
+        <div className="bg-overlay/70 px-3 py-2.5 text-center">
+          <p className={valueClass}>+{awayWin}</p>
+        </div>
+        <div className="bg-overlay/70 px-3 py-2.5 text-center">
+          <p className={valueClass}>{homeDrawDisplay}</p>
+        </div>
+        <div className={`bg-overlay/70 ${labelClass}`}>Draw</div>
+        <div className="bg-overlay/70 px-3 py-2.5 text-center">
+          <p className={valueClass}>{awayDrawDisplay}</p>
+        </div>
       </div>
       {/* Tier 19 Chunk 5 — the payout numbers above are the model's current
           read, NOT what the user has locked. Every pick on the same game
           re-snaps to the game's probabilities at kickoff, so the
           displayed payout will be what actually scores for whoever picks
           this side — regardless of when in the week they picked. */}
-      <p className="mt-2 text-center text-[10px] font-medium normal-case tracking-normal text-fg-muted">
+      <p className="bg-overlay/40 px-3 py-2 text-center text-[10px] font-medium normal-case tracking-normal text-fg-muted">
         Payout locks in at kickoff.
       </p>
     </div>
@@ -433,7 +472,7 @@ function GameCard({ game }) {
               <button
                 type="button"
                 onClick={handleUndoClick}
-                className="rounded-2xl px-3 py-2 text-xs text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="inline-flex min-h-[44px] items-center rounded-2xl px-4 text-sm font-medium text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               >
                 Undo pick
               </button>
@@ -456,7 +495,13 @@ function GameCard({ game }) {
 
       <FriendPicksPanel game={game} />
 
-      <CommentThread gameId={game.id} />
+      {/* Tier 30 Phase 2 — separate the running comment thread from the
+          card body with a quiet 1px rule. Keeps the comment list visually
+          distinct from the scoreboard chrome above it without adding a
+          full panel divider. */}
+      <div className="mt-5 border-t border-default/60 pt-5">
+        <CommentThread gameId={game.id} />
+      </div>
 
       <ConfirmModal
         open={confirmingUndo}

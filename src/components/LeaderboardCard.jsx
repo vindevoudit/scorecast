@@ -10,6 +10,21 @@ import { useMemo, useState } from 'react';
 import EmptyState from './EmptyState';
 import Avatar from './Avatar';
 
+// Tier 30 Phase 2 — rank-primary hierarchy. The rank now leads each row
+// as a 36×36 rounded-xl pill in `.font-display` (Bebas Neue) so the
+// numeral itself carries the visual weight; the username drops to
+// standard weight. Top-3 are colour-coded — #1 gold via `bg-warning/40`,
+// #2 silver via `bg-fg-subtle/30`, #3 bronze via `bg-warning/20`. Ranks
+// 4+ stay neutral on `bg-overlay`. Outside the top-3, the pill picks up
+// a subtle `shadow-led` glow that visually anchors the leading edge of
+// each row without competing with the rank itself.
+function rankPillClass(rank) {
+  if (rank === 1) return 'bg-warning/40 text-fg shadow-led';
+  if (rank === 2) return 'bg-fg-subtle/30 text-fg';
+  if (rank === 3) return 'bg-warning/20 text-fg';
+  return 'bg-overlay text-fg-muted';
+}
+
 export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
   const baseClass = `flex w-full items-center justify-between gap-3 rounded-3xl px-4 py-4 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
     isCurrentUser ? 'border border-accent/40 bg-accent/10' : 'bg-overlay/70 hover:bg-overlay'
@@ -19,11 +34,16 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
     <>
       <div className="flex min-w-0 items-center gap-3">
         {rank != null ? (
-          <span className="w-6 shrink-0 text-sm font-semibold tabular-nums text-fg-subtle">
-            {rank}.
+          <span
+            className={`font-display inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg tabular-nums ${rankPillClass(
+              rank,
+            )}`}
+            aria-label={`Rank ${rank}`}
+          >
+            {rank}
           </span>
         ) : null}
-        <Avatar username={entry.username} displayName={entry.displayName} size={28} />
+        <Avatar username={entry.username} displayName={entry.displayName} size={32} />
         <span
           className={`min-w-0 truncate text-sm ${isCurrentUser ? 'font-semibold text-fg' : 'text-fg'}`}
         >

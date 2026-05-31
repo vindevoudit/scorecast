@@ -277,9 +277,14 @@ function DashboardView() {
                   bar fills the space freed up by collapsing the action
                   buttons to icon-only squares. */}
               <div className="flex flex-col gap-3 md:hidden">
-                <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                  <div>{hamburger}</div>
-                  <div className="flex justify-center">{brand}</div>
+                {/* `grid-cols-[1fr_auto_1fr]` balances the side columns at
+                    equal flex weight regardless of the hamburger / UserMenu
+                    intrinsic widths, so the auto-sized BANTRYX center cell
+                    sits at exact viewport-midpoint. Previous `[auto_1fr_auto]`
+                    let the wider UserMenu push the centered text leftward. */}
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                  <div className="justify-self-start">{hamburger}</div>
+                  <div>{brand}</div>
                   <div className="justify-self-end">{user ? <UserMenu /> : homePill}</div>
                 </div>
                 <div className="flex items-center gap-3">

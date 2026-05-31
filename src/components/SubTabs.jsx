@@ -83,10 +83,11 @@ function SubTabs({ tabs, defaultValue, ariaLabel, className }) {
       <TabsPrimitive.List
         aria-label={ariaLabel}
         className={cn(
-          // Horizontal scroll on narrow viewports so 4+ tabs don't push
-          // the layout off-screen on iPhone SE-class devices. `mask-fade-x`
-          // would be nice here but introduces a Phase 2 token dependency.
-          'inline-flex w-full items-center gap-1 overflow-x-auto rounded-2xl border border-default bg-elevated/60 p-1 sm:w-auto',
+          // Mobile uses tighter gap + p-0.5 so 4-tab surfaces (Profile,
+          // Admin) fit on iPhone-SE-class viewports (375 px) without
+          // horizontal scroll. Reverts to the comfortable `gap-1 p-1` at
+          // sm+ where the row never overflows.
+          'inline-flex w-full items-center gap-0.5 overflow-x-auto rounded-2xl border border-default bg-elevated/60 p-0.5 sm:w-auto sm:gap-1 sm:p-1',
         )}
       >
         {tabs.map((t) => (
@@ -94,7 +95,10 @@ function SubTabs({ tabs, defaultValue, ariaLabel, className }) {
             key={t.value}
             value={t.value}
             className={cn(
-              'inline-flex shrink-0 items-center justify-center rounded-xl px-3 py-1.5 text-sm font-semibold text-fg-muted transition duration-200',
+              // Mobile-tight padding + text-xs so 4-tab surfaces (Profile,
+              // Admin) fit at 320-375 px without horizontal scroll. Reverts
+              // to the original `px-3 py-1.5 text-sm` at sm+.
+              'inline-flex shrink-0 items-center justify-center rounded-xl px-2 py-1 text-xs font-semibold text-fg-muted transition duration-200 sm:px-3 sm:py-1.5 sm:text-sm',
               'data-[state=active]:bg-accent data-[state=active]:text-accent-fg',
               'hover:text-fg',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',

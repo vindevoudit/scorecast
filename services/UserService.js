@@ -32,6 +32,7 @@ const { scorePick } = require('../lib/scoring');
 const { getUserByUsername } = require('../lib/users');
 const { getFriendshipBetween, friendStatusFrom } = require('../lib/friends');
 const { BADGE_CATALOG } = require('../badges/catalog');
+const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 
 // Returns true when `viewer` (may be null for anonymous) is allowed to see
@@ -177,6 +178,16 @@ async function getProfileByUsername({ username, viewer }) {
     }
   }
 
+  // Tier 30 Phase 3 A2 — badge progress is computed only when the viewer
+  // is the target (self-view). Showing other users' progress bars would
+  // leak the granular pick/win counts behind the public profile. Earned
+  // badges + catalog are always returned so spectators see the locked
+  // tiles without progress metadata.
+  let badgeProgress = null;
+  if (viewer?.id && viewer.id === target.id) {
+    badgeProgress = await BadgeService.computeProgressForUser(target.id);
+  }
+
   return {
     id: target.id,
     username: target.username,
@@ -192,6 +203,7 @@ async function getProfileByUsername({ username, viewer }) {
     winRate,
     badges: badges.map((b) => ({ slug: b.slug, awardedAt: b.awardedAt })),
     catalog: BADGE_CATALOG,
+    badgeProgress,
     recentPicks,
     friendship: friendship ? { id: friendship.id, status: friendship.status } : null,
     friendStatus,

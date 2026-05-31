@@ -23,6 +23,11 @@ const initialAuthData = {
   registerPassword: '',
   registerPasswordConfirm: '',
   registerEmail: '',
+  // Tier 30 Phase 3 A2 — Optional referral code typed by the registrant.
+  // Empty by default; AuthContext.handleRegister omits the field from
+  // the POST payload when blank so the schema's optional() refine doesn't
+  // see a value to validate against.
+  registerReferralCode: '',
   // Tier 18 Chunk 6 — RegisterForm checkbox; AuthContext.handleRegister
   // sends this + the bundled CURRENT_TERMS_VERSION on POST /api/register.
   acceptedTerms: false,
@@ -121,6 +126,17 @@ export function AuthProvider({ children }) {
       const next = params.toString();
       window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
     }
+    // Tier 30 Phase 3 A2 — pre-fill the RegisterForm referral input from
+    // a `?ref=CODE` query param (shareable invite link). Stamping
+    // authData.registerReferralCode also clears the URL so the code
+    // doesn't linger in the address bar after the first read.
+    const refCode = params.get('ref');
+    if (refCode) {
+      setAuthData((prev) => ({ ...prev, registerReferralCode: refCode.toUpperCase() }));
+      params.delete('ref');
+      const next = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${next ? `?${next}` : ''}`);
+    }
   }, [setStatus]);
 
   // Imperative session reset hook for useRequest / DataContext to call when
@@ -174,16 +190,19 @@ export function AuthProvider({ children }) {
         throw ageError;
       }
       try {
+        const payload = {
+          username: authData.registerUsername,
+          password: authData.registerPassword,
+          email: authData.registerEmail,
+          acceptedTerms: true,
+          acceptedTermsVersion: CURRENT_TERMS_VERSION,
+          confirmedAge: true,
+        };
+        const trimmedCode = authData.registerReferralCode?.trim();
+        if (trimmedCode) payload.referralCode = trimmedCode;
         const data = await apiFetch('/api/register', {
           method: 'POST',
-          body: JSON.stringify({
-            username: authData.registerUsername,
-            password: authData.registerPassword,
-            email: authData.registerEmail,
-            acceptedTerms: true,
-            acceptedTermsVersion: CURRENT_TERMS_VERSION,
-            confirmedAge: true,
-          }),
+          body: JSON.stringify(payload),
         });
         setUser(data.user);
         setAuthData(initialAuthData);
@@ -199,6 +218,7 @@ export function AuthProvider({ children }) {
       authData.registerPassword,
       authData.registerPasswordConfirm,
       authData.registerEmail,
+      authData.registerReferralCode,
       authData.acceptedTerms,
       authData.confirmedAge,
       showStatus,

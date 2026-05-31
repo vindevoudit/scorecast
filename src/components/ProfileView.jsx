@@ -98,7 +98,12 @@ function OverviewSection({ profile }) {
 }
 
 function BadgesSection({ profile }) {
-  return <BadgeWall catalog={profile.catalog} earned={profile.badges} />;
+  // Tier 30 Phase 3 A2 — badgeProgress is only populated on self-view.
+  // Passing it through unconditionally is safe: BadgeWall ignores it when
+  // null, so other users' profiles still render plain earned/locked.
+  return (
+    <BadgeWall catalog={profile.catalog} earned={profile.badges} progress={profile.badgeProgress} />
+  );
 }
 
 function ActivitySection({ profile }) {

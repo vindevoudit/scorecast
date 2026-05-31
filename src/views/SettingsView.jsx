@@ -15,6 +15,7 @@
 import SubTabs from '../components/SubTabs';
 import ChangeEmailPanel from '../components/ChangeEmailPanel';
 import ChangePasswordPanel from '../components/ChangePasswordPanel';
+import ReferralCodePanel from '../components/ReferralCodePanel';
 import ThemeToggle from '../components/ThemeToggle';
 import PushSettingsPanel from '../components/PushSettingsPanel';
 import { useAuth } from '../hooks/useAuth';
@@ -51,6 +52,7 @@ function AccountSection() {
         onResendVerification={handleResendVerification}
       />
       <ChangePasswordPanel onChangePassword={handleChangePassword} />
+      <ReferralCodePanel />
     </div>
   );
 }

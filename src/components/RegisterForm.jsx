@@ -78,6 +78,26 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
           }
           error={mismatch ? 'Passwords do not match' : undefined}
         />
+        {/* Tier 30 Phase 3 A2 — Optional referral code. Server-side
+            validation accepts 8 hex chars; we lift the character cap to
+            16 on the input so a copy-paste with stray whitespace gets
+            trimmed by the AuthContext handler rather than rejected here. */}
+        <Input
+          id="register-referral-code"
+          name="referralCode"
+          label="Referral code (optional)"
+          autoComplete="off"
+          maxLength={16}
+          placeholder="From a friend? Enter their code."
+          value={authData.registerReferralCode}
+          onChange={(event) =>
+            setAuthData((prev) => ({
+              ...prev,
+              registerReferralCode: event.target.value.toUpperCase(),
+            }))
+          }
+          error={errors.referralCode}
+        />
         <label className="flex items-start gap-3 text-sm text-fg-muted">
           <input
             id="register-confirm-age"

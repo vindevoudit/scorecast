@@ -282,7 +282,14 @@ function LeagueTicker() {
   return (
     <div className="bg-arena-grid-bold relative !mt-10 overflow-hidden border-y border-default py-3 md:!mt-16">
       <div className="mask-fade-x">
-        <div className="flex whitespace-nowrap motion-safe:animate-ticker-scroll">
+        {/* `w-max` (width: max-content) is critical — without it, the
+            flex container takes the parent's width and translateX(-50%)
+            translates by half the parent (≈ viewport) instead of half
+            the content. The wrap point would land mid-list, producing
+            the visible "empty stretch then jump" the user was seeing.
+            With max-content sizing, -50% is exactly the duplicate
+            boundary and the loop is seamless. */}
+        <div className="flex w-max whitespace-nowrap motion-safe:animate-ticker-scroll">
           {TICKER_LEAGUES.map((name) => (
             <span
               key={`a-${name}`}

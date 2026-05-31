@@ -264,49 +264,47 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
   );
 }
 
+// Number of times to repeat TICKER_LEAGUES in the marquee track. With
+// `translateX(-50%)` as the loop endpoint, the seamless-wrap constraint
+// is `viewport_width <= (REPEATS - 1) × copy_width` — at the loop point,
+// the FIRST half of the track has scrolled off-left and the SECOND half
+// must fully cover the viewport. With 7 leagues at ~150px each + 7×3rem
+// margins, one copy ≈ 1000-1100px. So 2 copies (the natural minimum
+// for the duplicate-row pattern) only covers viewports up to ~1100px;
+// anything wider sees the visible "end of content then empty stretch"
+// the user reported. 6 copies covers viewports up to ~5000px — comfortably
+// past 4K ultrawide. DOM cost is trivial (42 simple spans).
+const TICKER_REPEATS = 6;
+
 function LeagueTicker() {
   // Pure-CSS marquee — the `animate-ticker-scroll` keyframe (defined in
   // tailwind.config.js) translates the row from 0% to -50% linearly over
-  // 24s, infinitely. The row's content is doubled so that landing at
-  // -50% lines up exactly with the start of the duplicate, making the
-  // loop visually seamless. CSS animations run on the compositor (GPU)
-  // — strictly smoother than motion's JS-driven `animate={{x:[…]}}`
-  // path, which can hiccup under React render pressure or main-thread
-  // contention. `motion-safe:` gates the animation so prefers-reduced-
-  // motion users see a static ticker (the global @media rule in
-  // index.css would also collapse it to 0.01ms regardless).
+  // 24s, infinitely. Track is repeated TICKER_REPEATS times so landing at
+  // -50% lines up exactly halfway through the track (= identical content
+  // to position 0), making the loop visually seamless. CSS animations
+  // run on the compositor (GPU) — strictly smoother than motion's
+  // JS-driven `animate={{x:[…]}}` path. `motion-safe:` gates the
+  // animation against prefers-reduced-motion.
   // Negative top margin uses Tailwind's `!` prefix to win against the
-  // parent `space-y-*` margin-top (`space-y-X > :not([hidden]) ~
-  // :not([hidden])` has higher specificity than a single `mt-*` class,
-  // so plain `mt-*` would lose).
+  // parent `space-y-*` selector specificity.
   return (
     <div className="bg-arena-grid-bold relative !mt-10 overflow-hidden border-y border-default py-3 md:!mt-16">
       <div className="mask-fade-x">
-        {/* `w-max` (width: max-content) is critical — without it, the
-            flex container takes the parent's width and translateX(-50%)
-            translates by half the parent (≈ viewport) instead of half
-            the content. The wrap point would land mid-list, producing
-            the visible "empty stretch then jump" the user was seeing.
-            With max-content sizing, -50% is exactly the duplicate
-            boundary and the loop is seamless. */}
+        {/* `w-max` (width: max-content) sizes the flex container to its
+            content; without it `translateX(-50%)` would translate by
+            half the parent width instead of half the content width. */}
         <div className="flex w-max whitespace-nowrap motion-safe:animate-ticker-scroll">
-          {TICKER_LEAGUES.map((name) => (
-            <span
-              key={`a-${name}`}
-              className="font-display mr-12 text-sm tracking-[0.3em] text-fg-muted"
-            >
-              {name}
-            </span>
-          ))}
-          {TICKER_LEAGUES.map((name) => (
-            <span
-              key={`b-${name}`}
-              aria-hidden="true"
-              className="font-display mr-12 text-sm tracking-[0.3em] text-fg-muted"
-            >
-              {name}
-            </span>
-          ))}
+          {Array.from({ length: TICKER_REPEATS }).flatMap((_, copyIdx) =>
+            TICKER_LEAGUES.map((name) => (
+              <span
+                key={`${copyIdx}-${name}`}
+                aria-hidden={copyIdx > 0 ? 'true' : undefined}
+                className="font-display mr-12 text-sm tracking-[0.3em] text-fg-muted"
+              >
+                {name}
+              </span>
+            )),
+          )}
         </div>
       </div>
     </div>

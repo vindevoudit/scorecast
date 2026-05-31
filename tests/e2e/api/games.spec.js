@@ -7,7 +7,15 @@
 const { test, expect } = require('@playwright/test');
 
 const { USERS, GAMES } = require('../fixtures/data');
-const { apiAnon, apiLogin, clearGameResults, clearComments } = require('../helpers/api');
+const {
+  apiAnon,
+  apiLogin,
+  clearGameResults,
+  clearComments,
+  createPick,
+  clearPicksAndBadges,
+  setGameResult,
+} = require('../helpers/api');
 const {
   assertOk,
   assertUnauthorized,
@@ -52,6 +60,96 @@ test.describe('GET /api/games', () => {
     } finally {
       await anon.dispose();
     }
+  });
+
+  // Tier 30 Phase 3 A3 — voice-of-the-crowd indicator.
+  test.describe('crowd indicator gating', () => {
+    test.afterEach(async () => {
+      await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
+      await clearGameResults([GAMES.lions.id]);
+    });
+
+    test('upcoming game + viewer has not picked → no crowd field', async () => {
+      const authed = await apiLogin(USERS.alice);
+      try {
+        const games = await assertOk(authed, 'GET', '/api/games');
+        const lions = games.find((g) => g.id === GAMES.lions.id);
+        expect(lions).toBeTruthy();
+        expect(lions.crowd).toBeUndefined();
+      } finally {
+        await authed.dispose();
+      }
+    });
+
+    test('upcoming game + viewer has picked → crowd present + counts include picker', async () => {
+      const authed = await apiLogin(USERS.alice);
+      try {
+        await createPick(authed, GAMES.lions.id, 'home');
+        const games = await assertOk(authed, 'GET', '/api/games');
+        const lions = games.find((g) => g.id === GAMES.lions.id);
+        expect(lions.crowd).toEqual({ home: 1, away: 0, total: 1 });
+      } finally {
+        await authed.dispose();
+      }
+    });
+
+    test('crowd aggregates across users', async () => {
+      const alice = await apiLogin(USERS.alice);
+      const bob = await apiLogin(USERS.bob);
+      try {
+        await createPick(alice, GAMES.lions.id, 'home');
+        await createPick(bob, GAMES.lions.id, 'away');
+        const games = await assertOk(alice, 'GET', '/api/games');
+        const lions = games.find((g) => g.id === GAMES.lions.id);
+        expect(lions.crowd).toEqual({ home: 1, away: 1, total: 2 });
+      } finally {
+        await alice.dispose();
+        await bob.dispose();
+      }
+    });
+
+    test('anon viewer on upcoming game → no crowd field (anti-bias)', async () => {
+      // Seed a pick from an authed user so the crowd has data; the anon
+      // request should still NOT see the crowd field for the still-
+      // upcoming game.
+      const authed = await apiLogin(USERS.alice);
+      try {
+        await createPick(authed, GAMES.lions.id, 'home');
+      } finally {
+        await authed.dispose();
+      }
+      const anon = await apiAnon();
+      try {
+        const games = await assertOk(anon, 'GET', '/api/games');
+        const lions = games.find((g) => g.id === GAMES.lions.id);
+        expect(lions.crowd).toBeUndefined();
+      } finally {
+        await anon.dispose();
+      }
+    });
+
+    test('game past lock (finished) → crowd present for anon viewer', async () => {
+      const authed = await apiLogin(USERS.alice);
+      try {
+        await createPick(authed, GAMES.lions.id, 'home');
+      } finally {
+        await authed.dispose();
+      }
+      const admin = await apiLogin(USERS.admin);
+      try {
+        await setGameResult(admin, GAMES.lions.id, 'home');
+      } finally {
+        await admin.dispose();
+      }
+      const anon = await apiAnon();
+      try {
+        const games = await assertOk(anon, 'GET', '/api/games');
+        const lions = games.find((g) => g.id === GAMES.lions.id);
+        expect(lions.crowd).toEqual({ home: 1, away: 0, total: 1 });
+      } finally {
+        await anon.dispose();
+      }
+    });
   });
 });
 

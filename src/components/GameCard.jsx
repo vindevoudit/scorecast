@@ -266,6 +266,39 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
   );
 }
 
+// Tier 30 Phase 3 A3 — voice-of-the-crowd indicator. The `crowd` field
+// is server-gated: only present when the viewer has already picked OR
+// the game has locked (status !== 'scheduled'), so this component can
+// render unconditionally. Hidden when there are no picks yet.
+function CrowdMeter({ crowd }) {
+  if (!crowd || !crowd.total) return null;
+  const total = crowd.total;
+  const homePct = Math.round((crowd.home / total) * 100);
+  const awayPct = Math.round((crowd.away / total) * 100);
+  return (
+    <div className="mt-4">
+      <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-default bg-overlay/50 px-3 py-1 text-[11px] font-medium text-fg-muted">
+        <span aria-hidden="true">🗳️</span>
+        <span>
+          <span className="font-bold tabular-nums text-fg">{homePct}%</span> Home
+        </span>
+        <span className="text-fg-subtle" aria-hidden="true">
+          ·
+        </span>
+        <span>
+          <span className="font-bold tabular-nums text-fg">{awayPct}%</span> Away
+        </span>
+        <span className="text-fg-subtle" aria-hidden="true">
+          ·
+        </span>
+        <span className="tabular-nums">
+          {total.toLocaleString()} pick{total === 1 ? '' : 's'}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function PayoutMatrix({ game }) {
   const homeWin = expectedWinPoints('home', game);
   const awayWin = expectedWinPoints('away', game);
@@ -510,6 +543,8 @@ function GameCard({ game }) {
           oddsShiftedHint={oddsShiftedHint}
         />
       ) : null}
+
+      <CrowdMeter crowd={game.crowd} />
 
       <FriendPicksPanel game={game} />
 

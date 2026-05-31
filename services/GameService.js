@@ -16,6 +16,7 @@ const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const PredictionService = require('./PredictionService');
 const UserScoreService = require('./UserScoreService');
+const cache = require('../lib/cache');
 
 // Two-layer noise gate threshold. DECIMAL(3,2) stores at 0.01 resolution;
 // anything below 0.005 rounds to the same value (and so the same rounded
@@ -24,11 +25,96 @@ const UserScoreService = require('./UserScoreService');
 const PROBABILITY_DELTA_EPSILON = 0.01;
 const ODDS_SHIFT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-async function listGames({ leagueId, seasonId } = {}) {
+async function listGames({ leagueId, seasonId, viewerId } = {}) {
   const where = {};
   if (leagueId) where.leagueId = leagueId;
   if (seasonId) where.seasonId = seasonId;
-  return Game.findAll({ where, order: [['date', 'ASC']] });
+  const games = await Game.findAll({ where, order: [['date', 'ASC']] });
+
+  // Tier 30 Phase 3 A3 — voice-of-the-crowd. Per-game gate to preserve
+  // the "don't pre-bias the pick" contract: crowd is only attached
+  // when the game has already locked (status !== 'scheduled') OR the
+  // viewer has already picked this game. Anon viewers only see crowd
+  // for locked games. Below the gate, omitting the `crowd` field is
+  // semantically equivalent to "not eligible" — the frontend just
+  // doesn't render the chip.
+  let viewerPickedSet = new Set();
+  if (viewerId && games.length > 0) {
+    const picks = await Pick.findAll({
+      where: { userId: viewerId, gameId: { [Op.in]: games.map((g) => g.id) } },
+      attributes: ['gameId'],
+      raw: true,
+    });
+    viewerPickedSet = new Set(picks.map((p) => p.gameId));
+  }
+  const eligibleGameIds = games
+    .filter((g) => g.status !== 'scheduled' || viewerPickedSet.has(g.id))
+    .map((g) => g.id);
+  const crowdMap = await getCrowdForGames(eligibleGameIds);
+
+  return games.map((g) => {
+    const plain = g.toJSON();
+    if (eligibleGameIds.includes(g.id)) {
+      const crowd = crowdMap.get(g.id);
+      if (crowd && crowd.total > 0) plain.crowd = crowd;
+    }
+    return plain;
+  });
+}
+
+// Tier 30 Phase 3 A3 — Crowd aggregation per game with 60s in-memory
+// cache. Single bulk SQL for all uncached gameIds; per-game cache stamp
+// after the result lands. The {home, away, total} shape is what the
+// frontend GameCard renders into the "🗳️ 73% Home · 27% Away · N picks"
+// chip. Draw is intentionally NOT tracked yet — picks are winner-only
+// (CLAUDE.md invariant); when multi-kind picks ship we'll add a draw
+// counter here AND in the SQL group-by.
+async function getCrowdForGames(gameIds) {
+  const result = new Map();
+  if (!gameIds || gameIds.length === 0) return result;
+
+  const misses = [];
+  for (const gameId of gameIds) {
+    const cached = cache.get(`crowd:${gameId}`);
+    if (cached) result.set(gameId, cached);
+    else misses.push(gameId);
+  }
+
+  if (misses.length === 0) return result;
+
+  const rows = await Pick.findAll({
+    where: { gameId: { [Op.in]: misses } },
+    attributes: ['gameId', 'choice', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
+    group: ['gameId', 'choice'],
+    raw: true,
+  });
+
+  // Stamp empty buckets for every miss so games with zero picks still
+  // populate the cache (avoids re-querying them every minute).
+  const buildEmpty = () => ({ home: 0, away: 0, total: 0 });
+  const aggregated = new Map(misses.map((g) => [g, buildEmpty()]));
+  for (const row of rows) {
+    const entry = aggregated.get(row.gameId);
+    if (!entry) continue;
+    const count = parseInt(row.count, 10) || 0;
+    if (row.choice === 'home') entry.home = count;
+    else if (row.choice === 'away') entry.away = count;
+    entry.total += count;
+  }
+
+  for (const [gameId, entry] of aggregated.entries()) {
+    cache.set(`crowd:${gameId}`, entry, 60_000);
+    result.set(gameId, entry);
+  }
+  return result;
+}
+
+// Drop the cached crowd for a given game. Fired from PickService.create
+// + PickService.deletePick so the picker sees their own count tick up
+// (or back down) immediately instead of waiting up to 60s for the TTL
+// to expire.
+function invalidateCrowd(gameId) {
+  if (gameId) cache.invalidate(`crowd:${gameId}`);
 }
 
 async function createGame(attrs) {
@@ -573,4 +659,6 @@ module.exports = {
   bulkDelete,
   cascadeDelete,
   applyLiveUpdate,
+  getCrowdForGames,
+  invalidateCrowd,
 };

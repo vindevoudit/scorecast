@@ -29,6 +29,7 @@ router.get(
     const games = await GameService.listGames({
       leagueId: safeUuid(req.query.leagueId),
       seasonId: safeUuid(req.query.seasonId),
+      viewerId: req.user?.id || null,
     });
     res.json(games);
   }),

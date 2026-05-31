@@ -16,6 +16,7 @@ const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const UserScoreService = require('./UserScoreService');
 const StreakService = require('./StreakService');
+const GameService = require('./GameService');
 
 async function createPick({ userId, gameId, choice }) {
   const game = await Game.findByPk(gameId);
@@ -88,6 +89,10 @@ async function createPick({ userId, gameId, choice }) {
   // day-key granularity, so two parallel picks on the same day resolve
   // to a single increment.
   StreakService.applyPickForUser(userId).catch(() => {});
+  // Tier 30 Phase 3 A3 — drop the per-game crowd cache so the picker
+  // sees their own count tick up on the very next GameCard render
+  // instead of waiting up to 60s for the TTL.
+  GameService.invalidateCrowd(gameId);
   LeaderboardService.invalidate('all');
   LeaderboardService.assertParity({ userId }).catch(() => {});
 }
@@ -198,6 +203,9 @@ async function deletePick({ pickId, userId }) {
     }
     await pick.destroy({ transaction: t });
   });
+  // Tier 30 Phase 3 A3 — drop the crowd cache so the picker's own
+  // removal lands instantly in the chip.
+  GameService.invalidateCrowd(pick.gameId);
   LeaderboardService.invalidate('all');
   LeaderboardService.assertParity({ userId }).catch(() => {});
 }

@@ -16,11 +16,11 @@
 // Playwright sentinels preserved verbatim: `BANTRYX` h1, "Get started" /
 // "Sign in" / "browse as a guest" CTAs. Auth helpers depend on these.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from './ui';
 import Footer from './Footer';
 import FeatureIcon from './FeatureIcon';
-import { m, animate, useReducedMotion } from '../lib/motion';
+import { m, animate, useInView, useReducedMotion } from '../lib/motion';
 import {
   heroRevealTimeline,
   heroRevealItem,
@@ -214,15 +214,37 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
           the start of the duplicate, creating a seamless loop. */}
       <LeagueTicker />
 
-      <section className="mx-auto max-w-5xl px-4">
+      {/* Below-the-fold sections all share the same scroll-reveal pattern —
+          `<m.section variants={heroRevealTimeline} whileInView="visible">`
+          with the children participating in the cascade via
+          `variants={heroRevealItem}`. `viewport.once: true` makes the
+          reveal fire exactly once when the section first scrolls into
+          view; `amount: 0.2` requires 20% of the section to be visible
+          before triggering, so the cards animate as the user scrolls
+          to them rather than instantly on first paint. Reduced-motion
+          users get `initial="visible"` so everything lands at the final
+          state immediately. */}
+      <m.section
+        className="mx-auto max-w-5xl px-4"
+        variants={heroRevealTimeline}
+        initial={reduceMotion ? 'visible' : 'hidden'}
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+      >
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-3xl border border-default bg-divider sm:grid-cols-3">
           <Stat target={62} prefix="+" label="points for a 38% underdog upset" />
           <Stat infinity label="private groups you can build" />
           <Stat target={30} suffix="s" label="from sign-up to first pick" />
         </div>
-      </section>
+      </m.section>
 
-      <section className="mx-auto max-w-6xl px-4">
+      <m.section
+        className="mx-auto max-w-6xl px-4"
+        variants={heroRevealTimeline}
+        initial={reduceMotion ? 'visible' : 'hidden'}
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+      >
         <SectionHeader
           eyebrow="Why Bantryx"
           title="Built for people who don't just want to pick — they want to win."
@@ -234,19 +256,34 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
             <FeatureCard key={feature.title} {...feature} />
           ))}
         </div>
-      </section>
+      </m.section>
 
-      <section className="mx-auto max-w-5xl px-4">
+      <m.section
+        className="mx-auto max-w-5xl px-4"
+        variants={heroRevealTimeline}
+        initial={reduceMotion ? 'visible' : 'hidden'}
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+      >
         <SectionHeader eyebrow="How it works" title="Three steps. No catch. No paywall." />
         <ol className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
           {STEPS.map((step) => (
             <Step key={step.number} {...step} />
           ))}
         </ol>
-      </section>
+      </m.section>
 
-      <section className="mx-auto max-w-3xl px-4">
-        <div className="rounded-3xl border border-accent/30 bg-gradient-to-br from-accent/10 via-elevated/40 to-base/40 p-10 text-center shadow-glow md:p-14">
+      <m.section
+        className="mx-auto max-w-3xl px-4"
+        variants={heroRevealTimeline}
+        initial={reduceMotion ? 'visible' : 'hidden'}
+        whileInView="visible"
+        viewport={{ once: true, amount: 0.2 }}
+      >
+        <m.div
+          variants={heroRevealItem}
+          className="rounded-3xl border border-accent/30 bg-gradient-to-br from-accent/10 via-elevated/40 to-base/40 p-10 text-center shadow-glow md:p-14"
+        >
           <h2 className="text-3xl font-semibold text-fg sm:text-4xl">
             Ready to outpick your group chat?
           </h2>
@@ -264,8 +301,8 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
               Just browsing? Continue as a guest →
             </Button>
           ) : null}
-        </div>
-      </section>
+        </m.div>
+      </m.section>
       <Footer />
     </div>
   );
@@ -320,6 +357,13 @@ function LeagueTicker() {
 
 function Stat({ target, suffix = '', prefix = '', infinity = false, label }) {
   const reduceMotion = useReducedMotion();
+  // `useInView` defers the count-up until the stat actually scrolls into
+  // view. Previously the `animate()` call fired on mount, so the values
+  // were already at their target by the time the user scrolled past the
+  // hero — the count-up was effectively invisible. With `once: true` the
+  // hook stays "true" once seen, so we don't re-run on subsequent scrolls.
+  const ref = useRef(null);
+  const inView = useInView(ref, { once: true, amount: 0.4 });
   const [display, setDisplay] = useState(infinity || reduceMotion ? (target ?? 0) : 0);
 
   useEffect(() => {
@@ -328,28 +372,43 @@ function Stat({ target, suffix = '', prefix = '', infinity = false, label }) {
       setDisplay(target);
       return undefined;
     }
+    if (!inView) return undefined;
     const controls = animate(0, target, {
       ...statsCountUp,
       onUpdate: (v) => setDisplay(Math.round(v)),
     });
     return () => controls.stop();
-  }, [target, infinity, reduceMotion]);
+  }, [target, infinity, reduceMotion, inView]);
 
   return (
-    <div className="bg-elevated/85 p-8 text-center">
+    <m.div ref={ref} variants={heroRevealItem} className="bg-elevated/85 p-8 text-center">
       <p className="text-shadow-brand-glow font-display text-4xl text-accent-soft sm:text-5xl">
         {infinity ? '∞' : `${prefix}${display}${suffix}`}
       </p>
       <p className="mt-3 text-xs uppercase tracking-[0.2em] text-fg-muted">{label}</p>
-    </div>
+    </m.div>
   );
 }
 
+// SectionHeader's eyebrow + title participate in the parent `m.section`'s
+// stagger timeline when one is present. When rendered standalone (no
+// motion parent), motion treats the variants prop as a no-op and the
+// elements render in their static state (opacity 1) — safe either way.
 function SectionHeader({ eyebrow, title }) {
   return (
     <div className="mx-auto max-w-2xl text-center">
-      <p className="text-xs font-semibold uppercase tracking-[0.4em] text-accent/80">{eyebrow}</p>
-      <h2 className="mt-4 text-3xl font-semibold leading-tight text-fg sm:text-4xl">{title}</h2>
+      <m.p
+        variants={heroRevealItem}
+        className="text-xs font-semibold uppercase tracking-[0.4em] text-accent/80"
+      >
+        {eyebrow}
+      </m.p>
+      <m.h2
+        variants={heroRevealItem}
+        className="mt-4 text-3xl font-semibold leading-tight text-fg sm:text-4xl"
+      >
+        {title}
+      </m.h2>
     </div>
   );
 }
@@ -358,6 +417,7 @@ function FeatureCard({ icon, title, body }) {
   const reduceMotion = useReducedMotion();
   return (
     <m.div
+      variants={heroRevealItem}
       whileHover={reduceMotion ? undefined : featureCardHover}
       className="group relative flex flex-col overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85"
     >
@@ -376,14 +436,17 @@ function FeatureCard({ icon, title, body }) {
 
 function Step({ number, title, body }) {
   return (
-    <li className="rounded-3xl border border-default bg-elevated/50 p-8">
+    <m.li
+      variants={heroRevealItem}
+      className="rounded-3xl border border-default bg-elevated/50 p-8"
+    >
       {/* `.font-led` swaps the numeral to Orbitron + tabular-nums + the
           subtle led drop-shadow so the step number reads as a scoreboard
           digit instead of a generic display font. */}
       <p className="font-led text-shadow-led text-5xl text-accent/60">{number}</p>
       <h3 className="mt-4 text-xl font-semibold text-fg">{title}</h3>
       <p className="mt-3 text-sm text-fg">{body}</p>
-    </li>
+    </m.li>
   );
 }
 

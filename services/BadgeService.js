@@ -100,7 +100,6 @@ async function computeProgressForUser(userId) {
   let scoredPicks = 0;
   let upsetWins = 0;
   let favoritesWon = 0;
-  let coinFlipWins = 0;
   let consecutiveWins = 0;
   let consecutiveLosses = 0;
   let curWin = 0;
@@ -127,11 +126,6 @@ async function computeProgressForUser(userId) {
       wins += 1;
       if (!Number.isNaN(probability) && probability < 0.4) upsetWins += 1;
       if (!Number.isNaN(probability) && probability >= 0.6) favoritesWon += 1;
-      // Tier 30 Phase 3 A6 — picks on coin-flip games drive the Coin
-      // Flip Master badge. `game.coinFlipDayKey` is stamped by
-      // lib/jobs/selectCoinFlip.js when the game is selected as that
-      // day's most-uncertain match.
-      if (game.coinFlipDayKey) coinFlipWins += 1;
       curWin += 1;
       curLoss = 0;
       if (curWin > consecutiveWins) consecutiveWins = curWin;
@@ -170,7 +164,6 @@ async function computeProgressForUser(userId) {
     wins,
     upsetWins,
     favoritesWon,
-    coinFlipWins,
     consecutiveWins,
     consecutiveLosses,
     leagues: leagueIds.size,
@@ -227,10 +220,6 @@ async function evaluateBadges(userId, context = {}) {
     await tryAward('streakmaster-1', metrics.longestStreak >= 5);
     await tryAward('streakmaster-2', metrics.longestStreak >= 10);
     await tryAward('streakmaster-3', metrics.longestStreak >= 15);
-
-    // Pick of the Day — Coin Flip Master (Tier 30 Phase 3 A6).
-    // Five correct picks on games stamped by selectCoinFlip cron.
-    await tryAward('coin-flip-master', metrics.coinFlipWins >= 5);
 
     // Social
     await tryAward('conversationalist', metrics.comments >= 25);

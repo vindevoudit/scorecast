@@ -46,7 +46,6 @@ const reconcileInProgressGamesJob = require('./lib/jobs/reconcileInProgressGames
 const sendKickoffRemindersJob = require('./lib/jobs/sendKickoffReminders');
 const lockPickProbabilitiesJob = require('./lib/jobs/lockPickProbabilities');
 const sendWeeklyRecapJob = require('./lib/jobs/sendWeeklyRecap');
-const selectCoinFlipJob = require('./lib/jobs/selectCoinFlip');
 const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
 // Tier 18 Chunk 2 — 30 s live poll (was every minute). Sits comfortably in
 // the 20 req/min TIER_ONE budget (~2 req/min steady state for the global
@@ -70,11 +69,6 @@ const LOCK_PICK_PROBABILITIES_CRON = process.env.LOCK_PICK_PROBABILITIES_CRON ||
 // Cost-gated by a count() short-circuit so off-season Mondays are
 // near-free.
 const WEEKLY_RECAP_CRON = process.env.WEEKLY_RECAP_CRON || '0 2 * * 1';
-// Tier 30 Phase 3 A6 — daily "Pick of the Day" selection. Stamps
-// games.coinFlipDayKey on the most uncertain scheduled fixture in
-// active leagues. 00:30 UTC ensures the selection lands well before
-// any of today's matches kick off.
-const COIN_FLIP_CRON = process.env.COIN_FLIP_CRON || '30 0 * * *';
 scheduler.register('syncFixtures', FIXTURE_SYNC_CRON, syncFixturesJob.run);
 scheduler.register('syncLiveScores', LIVE_SCORE_SYNC_CRON, syncLiveScoresJob.run);
 scheduler.register(
@@ -89,7 +83,6 @@ scheduler.register(
   lockPickProbabilitiesJob.run,
 );
 scheduler.register('sendWeeklyRecap', WEEKLY_RECAP_CRON, sendWeeklyRecapJob.run);
-scheduler.register('selectCoinFlip', COIN_FLIP_CRON, selectCoinFlipJob.run);
 
 const PORT = process.env.PORT || 3000;
 

@@ -140,17 +140,6 @@ module.exports = (sequelize) => {
         type: DataTypes.DECIMAL(4, 2),
         allowNull: true,
       },
-      // Tier 30 Phase 3 A6 — Pick of the Day / Coin Flip Master badge.
-      // Stamped by lib/jobs/selectCoinFlip.js (daily 00:30 UTC) when
-      // the game is selected as that day's most-uncertain match
-      // among scheduled fixtures in active leagues. Format: YYYY-MM-DD
-      // (UTC). Never cleared — picks on past coin-flip games keep
-      // earning Coin Flip Master badge progress. Partial unique index
-      // enforces at most one coin-flip game per UTC day.
-      coinFlipDayKey: {
-        type: DataTypes.STRING(10),
-        allowNull: true,
-      },
     },
     {
       tableName: 'games',

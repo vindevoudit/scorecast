@@ -187,20 +187,6 @@ function ScoreboardHeader({
             <span>{statusLabel(game)}</span>
           </>
         )}
-        {/* Tier 30 Phase 3 A6 — Pick of the Day chip. Renders on every
-            view of a coin-flip game (upcoming, live, finished) so users
-            can audit which past games count toward their Coin Flip
-            Master badge progress. */}
-        {game.coinFlipDayKey ? (
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full bg-warning/20 px-3 py-1 text-warning"
-            aria-label="Pick of the day — coin flip"
-            title="Today's most uncertain match — picks here count toward Coin Flip Master."
-          >
-            <span aria-hidden="true">🪙</span>
-            Coin Flip
-          </span>
-        ) : null}
       </div>
       <div className="flex items-center">
         {finished && outcomeBadge}

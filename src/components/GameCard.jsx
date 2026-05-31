@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { useState } from 'react';
 import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scoring';
 import { displayTeamName } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
@@ -7,14 +7,114 @@ import FriendPicksPanel from './FriendPicksPanel';
 import ConfirmModal from './ConfirmModal';
 import { usePicks } from '../hooks/usePicks';
 import { useAuthGate } from '../hooks/useAuthGate';
+import { useNotifications } from '../hooks/useNotifications';
 import { Badge } from './ui';
 import { m, AnimatePresence, useReducedMotion } from '../lib/motion';
 import { scoreboardFlip } from '../lib/motionVariants';
 
-// Tier 30 Phase 3 A4 — lazy-loaded share modal. Keeps html-to-image
-// (~3KB gzip) out of the GameCard's eager bundle; the chunk only loads
-// when the user opens the share UI.
-const ShareSheet = lazy(() => import('./ShareSheet'));
+// Tier 30 Phase 3 A4 — direct share without a confirmation dialog.
+// captureAndShare dynamically imports html-to-image + react-dom/client +
+// ShareableCard so the dependency chunks only load on first share. The
+// imperative createRoot dance mounts the capture-source off-screen,
+// snapshots it, then unmounts — no modal, no extra render commit on
+// the host GameCard.
+async function captureAndShare({ game, choice, points, ratio }) {
+  const [{ createRoot }, ShareableCardModule, shareLib] = await Promise.all([
+    import('react-dom/client'),
+    import('./ShareableCard'),
+    import('../lib/share'),
+  ]);
+  const ShareableCard = ShareableCardModule.default;
+  const { captureNodeToPng, shareBlob } = shareLib;
+
+  const host = document.createElement('div');
+  host.style.cssText = 'position: fixed; top: 0; left: -20000px; pointer-events: none; opacity: 0;';
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = `width: 1080px; height: ${ratio === 'story' ? 1920 : 1080}px;`;
+  host.appendChild(wrapper);
+  document.body.appendChild(host);
+
+  const root = createRoot(wrapper);
+  try {
+    root.render(<ShareableCard game={game} choice={choice} points={points} ratio={ratio} />);
+    // Give React one commit + the browser one paint frame before snapshot
+    // so html-to-image sees the fully-resolved layout.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const blob = await captureNodeToPng(wrapper);
+    const pickedTeam = choice === 'home' ? game.homeTeam : game.awayTeam;
+    const text = choice
+      ? `I picked ${pickedTeam} for ${game.homeTeam} vs ${game.awayTeam} on Bantryx.`
+      : 'Bantryx — predict, compete, climb.';
+    return shareBlob(blob, {
+      filename: `bantryx-${game.id}-${ratio}.png`,
+      title: 'Bantryx pick',
+      text,
+      url: typeof window !== 'undefined' ? window.location.origin : 'https://bantryx.com',
+    });
+  } finally {
+    root.unmount();
+    host.remove();
+  }
+}
+
+// Inline SVG icons — Lucide-style strokes. Keep currentColor so the
+// icon picks up the surrounding text colour and theme tokens through
+// CSS like every other icon in the codebase.
+function ShareIcon({ className = 'h-4 w-4' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function InstagramIcon({ className = 'h-4 w-4' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+    </svg>
+  );
+}
+
+function UndoIcon({ className = 'h-4 w-4' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11" />
+    </svg>
+  );
+}
 
 function formatDate(dateText) {
   // Date-only — the kickoff time is already shown prominently in the
@@ -279,27 +379,37 @@ function CrowdMeter({ crowd }) {
   if (!crowd || !crowd.total) return null;
   const total = crowd.total;
   const homePct = Math.round((crowd.home / total) * 100);
-  const awayPct = Math.round((crowd.away / total) * 100);
+  // Force the bar to sum to exactly 100 even after rounding so the
+  // segments meet without a sliver of background showing through.
+  const awayPct = 100 - homePct;
   return (
-    <div className="mt-4">
-      <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full border border-default bg-overlay/50 px-3 py-1 text-[11px] font-medium text-fg-muted">
-        <span aria-hidden="true">🗳️</span>
-        <span>
-          <span className="font-bold tabular-nums text-fg">{homePct}%</span> Home
-        </span>
-        <span className="text-fg-subtle" aria-hidden="true">
-          ·
-        </span>
-        <span>
-          <span className="font-bold tabular-nums text-fg">{awayPct}%</span> Away
-        </span>
-        <span className="text-fg-subtle" aria-hidden="true">
-          ·
-        </span>
+    <div className="mt-4 rounded-2xl border border-default bg-overlay/40 px-3 py-2.5">
+      <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">
+        <span>Wisdom of the crowd</span>
         <span className="tabular-nums">
           {total.toLocaleString()} pick{total === 1 ? '' : 's'}
         </span>
-      </span>
+      </div>
+      <div className="mt-2 flex h-7 overflow-hidden rounded-full bg-overlay/60">
+        <div
+          className="flex items-center justify-start px-2 text-[11px] font-bold tabular-nums text-fg"
+          style={{ width: `${homePct}%`, background: 'rgb(var(--c-accent) / 0.45)' }}
+          aria-label={`Home ${homePct}%`}
+        >
+          {homePct >= 12 ? `${homePct}%` : null}
+        </div>
+        <div
+          className="ml-auto flex items-center justify-end px-2 text-[11px] font-bold tabular-nums text-fg"
+          style={{ width: `${awayPct}%`, background: 'rgb(var(--c-warning) / 0.35)' }}
+          aria-label={`Away ${awayPct}%`}
+        >
+          {awayPct >= 12 ? `${awayPct}%` : null}
+        </div>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-[10px] font-medium text-fg-muted">
+        <span>Home</span>
+        <span>Away</span>
+      </div>
     </div>
   );
 }
@@ -401,7 +511,10 @@ function LockedPickChip({
 function GameCard({ game }) {
   const { pickMap, submitPick, removePick } = usePicks();
   const { gate } = useAuthGate();
-  const [shareOpen, setShareOpen] = useState(false);
+  const { showStatus } = useNotifications();
+  // null when idle, 'square' or 'story' while a capture+share is in flight.
+  // Doubles as the disabled flag on both share buttons.
+  const [sharing, setSharing] = useState(null);
   const existingPick = pickMap.get(game.id) || null;
   const live = isLiveGame(game);
   const finished = isFinishedGame(game);
@@ -481,6 +594,27 @@ function GameCard({ game }) {
     }
   }
 
+  async function handleShare(ratio) {
+    if (sharing) return;
+    setSharing(ratio);
+    try {
+      const result = await captureAndShare({
+        game,
+        choice: existingChoice,
+        points: pointsIfWon,
+        ratio,
+      });
+      if (result.method === 'shared') showStatus('Shared');
+      else if (result.method === 'downloaded') showStatus('Image saved');
+      // cancelled → no toast (user chose to back out)
+    } catch (err) {
+      showStatus("Couldn't generate the image — try again");
+      console.error('share failed', err);
+    } finally {
+      setSharing(null);
+    }
+  }
+
   return (
     <div className={cardShellClass(live)}>
       <ScoreboardHeader
@@ -524,17 +658,6 @@ function GameCard({ game }) {
               Pick {displayTeamName(game.awayTeam)}
             </button>
           </div>
-          {existingPickId ? (
-            <div className="mt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={handleUndoClick}
-                className="inline-flex min-h-[44px] items-center rounded-2xl px-4 text-sm font-medium text-fg-muted transition-colors duration-200 hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              >
-                Undo pick
-              </button>
-            </div>
-          ) : null}
         </>
       ) : null}
 
@@ -550,38 +673,52 @@ function GameCard({ game }) {
         />
       ) : null}
 
-      <CrowdMeter crowd={game.crowd} />
-
-      {/* Tier 30 Phase 3 A4 — Share button. Visible whenever the viewer
-          has a pick on this game (gives them something to brag about,
-          regardless of whether the game is upcoming / live / finished).
-          Lazy-loaded modal — the html-to-image chunk only loads on
-          first click. */}
+      {/* Tier 30 Phase 3 A4 (revised) — action row. Share (Square,
+          default) + a small Instagram-glyph button that goes straight
+          to Story format live in the left cluster; Undo (only on
+          upcoming with a pick) sits in the right cluster so the icons
+          face their natural directions (share-up on left, undo-back on
+          right). No dialog — captureAndShare resolves to navigator.share
+          on mobile or a PNG download on desktop. */}
       {existingPickId ? (
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={() => setShareOpen(true)}
-            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            aria-label="Share this pick as an image"
-          >
-            <span aria-hidden="true">📤</span>
-            Share pick
-          </button>
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleShare('square')}
+              disabled={Boolean(sharing)}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-full border border-default bg-overlay/40 px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+              aria-label="Share this pick as an image"
+            >
+              <ShareIcon />
+              {sharing === 'square' ? 'Sharing…' : 'Share'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleShare('story')}
+              disabled={Boolean(sharing)}
+              className="inline-flex h-11 min-h-[44px] w-11 items-center justify-center rounded-full border border-default bg-overlay/40 text-fg-muted transition hover:border-accent/40 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+              aria-label="Share as Instagram Story"
+              title="Share as Story"
+            >
+              <InstagramIcon />
+            </button>
+          </div>
+          {upcoming ? (
+            <button
+              type="button"
+              onClick={handleUndoClick}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-full px-3.5 text-xs font-semibold uppercase tracking-[0.16em] text-fg-muted transition hover:bg-overlay/60 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label="Undo this pick"
+            >
+              Undo
+              <UndoIcon />
+            </button>
+          ) : null}
         </div>
       ) : null}
 
-      {shareOpen ? (
-        <Suspense fallback={null}>
-          <ShareSheet
-            open={shareOpen}
-            onOpenChange={setShareOpen}
-            game={game}
-            choice={existingChoice}
-            points={pointsIfWon}
-          />
-        </Suspense>
-      ) : null}
+      <CrowdMeter crowd={game.crowd} />
 
       <FriendPicksPanel game={game} />
 

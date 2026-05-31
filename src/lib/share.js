@@ -99,6 +99,14 @@ export function downloadBlob(blob, filename) {
 // back to download. Returns { method: 'shared'|'downloaded'|'cancelled' }.
 export async function shareImageFromNode(node, options = {}) {
   const blob = await captureNodeToPng(node, { pixelRatio: options.pixelRatio || 1 });
+  return shareBlob(blob, options);
+}
+
+// Variant of shareImageFromNode for callers that captured the PNG via
+// their own path (e.g. the imperative createRoot dance in GameCard's
+// direct-share flow). Same fall-through semantics: navigator.share on
+// mobile, download otherwise.
+export async function shareBlob(blob, options = {}) {
   if (!blob) return { method: 'cancelled' };
   const filename = options.filename || `bantryx-${Date.now()}.png`;
   const meta = {

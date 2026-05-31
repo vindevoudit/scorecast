@@ -231,7 +231,14 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
         whileInView="visible"
         viewport={{ once: true, amount: 0.2 }}
       >
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-3xl border border-default bg-divider sm:grid-cols-3">
+        {/* Stat cards are independent (gap-4) so each can lift on hover
+            without being clipped by a shared rounded frame. Previous
+            `gap-px overflow-hidden rounded-3xl border` "billboard" look
+            gave hairline dividers but prevented the per-card hover lift
+            from showing — the parent overflow-hidden clipped the top
+            translate. The independent cards layout now matches the
+            feature grid + steps grid hover behavior exactly. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Stat target={62} prefix="+" label="points for a 38% underdog upset" />
           <Stat infinity label="private groups you can build" />
           <Stat target={30} suffix="s" label="from sign-up to first pick" />
@@ -282,9 +289,17 @@ function Landing({ onSignIn, onSignUp, onBrowseAsGuest }) {
       >
         <m.div
           variants={heroRevealItem}
-          className="rounded-3xl border border-accent/30 bg-gradient-to-br from-accent/10 via-elevated/40 to-base/40 p-10 text-center shadow-glow md:p-14"
+          whileHover={reduceMotion ? undefined : featureCardHover}
+          className="group relative overflow-hidden rounded-3xl border border-accent/30 bg-gradient-to-br from-accent/10 via-elevated/40 to-base/40 p-10 text-center shadow-glow transition-colors duration-300 hover:border-accent/50 md:p-14"
         >
-          <h2 className="text-3xl font-semibold text-fg sm:text-4xl">
+          {/* Corner glow blob — matches the feature/step/stat treatment.
+              The existing `shadow-glow` halo on the card stays as the
+              ambient bloom; the blob brightens that corner on hover. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -bottom-16 -right-16 h-48 w-48 rounded-full bg-accent/5 blur-3xl transition duration-300 group-hover:bg-accent/20"
+          />
+          <h2 className="relative text-3xl font-semibold text-fg sm:text-4xl">
             Ready to outpick your group chat?
           </h2>
           <p className="mt-4 text-fg">Sign up, pick a side, and let the math do the rest.</p>
@@ -380,12 +395,24 @@ function Stat({ target, suffix = '', prefix = '', infinity = false, label }) {
     return () => controls.stop();
   }, [target, infinity, reduceMotion, inView]);
 
+  // Same hover signature as FeatureCard: motion lift via `featureCardHover`
+  // spring + border highlight + corner glow blob that brightens
+  // `bg-accent/5 → bg-accent/15` via group-hover.
   return (
-    <m.div ref={ref} variants={heroRevealItem} className="bg-elevated/85 p-8 text-center">
+    <m.div
+      ref={ref}
+      variants={heroRevealItem}
+      whileHover={reduceMotion ? undefined : featureCardHover}
+      className="group relative overflow-hidden rounded-3xl border border-default bg-elevated/60 p-8 text-center transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85"
+    >
       <p className="text-shadow-brand-glow font-display text-4xl text-accent-soft sm:text-5xl">
         {infinity ? '∞' : `${prefix}${display}${suffix}`}
       </p>
       <p className="mt-3 text-xs uppercase tracking-[0.2em] text-fg-muted">{label}</p>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-12 -right-12 h-32 w-32 rounded-full bg-accent/5 blur-2xl transition duration-300 group-hover:bg-accent/15"
+      />
     </m.div>
   );
 }
@@ -435,10 +462,12 @@ function FeatureCard({ icon, title, body }) {
 }
 
 function Step({ number, title, body }) {
+  const reduceMotion = useReducedMotion();
   return (
     <m.li
       variants={heroRevealItem}
-      className="rounded-3xl border border-default bg-elevated/50 p-8"
+      whileHover={reduceMotion ? undefined : featureCardHover}
+      className="group relative overflow-hidden rounded-3xl border border-default bg-elevated/50 p-8 transition-colors duration-300 hover:border-accent/30 hover:bg-elevated/85"
     >
       {/* `.font-led` swaps the numeral to Orbitron + tabular-nums + the
           subtle led drop-shadow so the step number reads as a scoreboard
@@ -446,6 +475,10 @@ function Step({ number, title, body }) {
       <p className="font-led text-shadow-led text-5xl text-accent/60">{number}</p>
       <h3 className="mt-4 text-xl font-semibold text-fg">{title}</h3>
       <p className="mt-3 text-sm text-fg">{body}</p>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-12 -right-12 h-32 w-32 rounded-full bg-accent/5 blur-2xl transition duration-300 group-hover:bg-accent/15"
+      />
     </m.li>
   );
 }

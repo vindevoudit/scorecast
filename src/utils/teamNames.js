@@ -48,3 +48,21 @@ export function displayTeamName(fullName) {
   if (!fullName) return fullName;
   return ALIASES[fullName] || fullName;
 }
+
+// Football-data.org returns placeholder team strings for knockout-stage
+// fixtures whose participants haven't advanced yet — literal "TBD" (the
+// fallback in lib/footballApi.js `homeTeam ?? 'TBD'`) plus the upstream
+// "Winner of QF1" / "Loser of SF2" / "Group A 1st" patterns that show up
+// during the 2026 World Cup sync. Match them so GameCard can hide the
+// payout matrix + disable pick buttons until real teams populate.
+const PLACEHOLDER_PATTERN = /^(tbd|winner|loser|group\s|placeholder)/i;
+
+export function isPlaceholderTeam(name) {
+  if (!name) return true;
+  return PLACEHOLDER_PATTERN.test(String(name).trim());
+}
+
+export function isPlaceholderGame(game) {
+  if (!game) return false;
+  return isPlaceholderTeam(game.homeTeam) || isPlaceholderTeam(game.awayTeam);
+}

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scoring';
-import { displayTeamName } from '../utils/teamNames';
+import { displayTeamName, isPlaceholderGame } from '../utils/teamNames';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
 import FriendPicksPanel from './FriendPicksPanel';
@@ -521,6 +521,14 @@ function GameCard({ game }) {
   const finished = isFinishedGame(game);
   const upcoming = isUpcomingGame(game);
   const isHalted = game.status === 'cancelled' || game.status === 'postponed';
+  // Placeholder games are knockout-stage fixtures whose participants haven't
+  // advanced yet — football-data.org returns "TBD" / "Winner of QF1" / etc.
+  // until the bracket resolves. Cascade leaves them at the sentinel
+  // (0.50, 0.00, 0.50) by design (CLAUDE.md "intl-model"). On the GameCard
+  // we hide the payout matrix + disable pick buttons until real teams + real
+  // probabilities populate, so the user isn't tempted to commit a pick
+  // against a meaningless 50/50 fixture.
+  const isPlaceholder = isPlaceholderGame(game);
   const countdown = useCountdown(game.date);
   const liveTime = useMatchMinute(game.date, live, {
     halfTimeReached: game.halfTimeReached,
@@ -631,9 +639,18 @@ function GameCard({ game }) {
       />
       <ScoreboardBody game={game} live={live} finished={finished} isHalted={isHalted} />
 
-      {upcoming ? <PayoutMatrix game={game} /> : null}
+      {upcoming && !isPlaceholder ? <PayoutMatrix game={game} /> : null}
 
-      {upcoming ? (
+      {upcoming && isPlaceholder ? (
+        <div
+          role="status"
+          className="mt-5 rounded-2xl border border-default bg-overlay/40 px-4 py-3 text-center text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted"
+        >
+          Picks open once both teams advance
+        </div>
+      ) : null}
+
+      {upcoming && !isPlaceholder ? (
         <>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <button

@@ -40,6 +40,26 @@ async function captureAndShare({ game, choice, points, ratio }) {
     // Give React one commit + the browser one paint frame before snapshot
     // so html-to-image sees the fully-resolved layout.
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // CRITICAL: wait for Orbitron to actually finish downloading before the
+    // raster. Browsers lazy-load web fonts when glyphs first hit the layout
+    // tree, and html-to-image will snapshot whatever the browser is painting
+    // at that instant — which is Courier New (the fallback in our font stack)
+    // until Orbitron lands. Two RAFs cover paint, not font load. Explicit
+    // `document.fonts.load` for every weight the ShareableCard uses kicks
+    // off + awaits the fetches; the trailing `document.fonts.ready` is a
+    // belt-and-suspenders settle that catches any weight we missed.
+    if (typeof document !== 'undefined' && document.fonts?.load) {
+      await Promise.all([
+        document.fonts.load("500 38px 'Orbitron'"),
+        document.fonts.load("600 28px 'Orbitron'"),
+        document.fonts.load("600 36px 'Orbitron'"),
+        document.fonts.load("700 56px 'Orbitron'"),
+        document.fonts.load("800 88px 'Orbitron'"),
+        document.fonts.load("800 160px 'Orbitron'"),
+        document.fonts.load("900 56px 'Orbitron'"),
+      ]).catch(() => {});
+      if (document.fonts.ready) await document.fonts.ready;
+    }
     const blob = await captureNodeToPng(wrapper);
     const pickedTeam = choice === 'home' ? game.homeTeam : game.awayTeam;
     const text = choice

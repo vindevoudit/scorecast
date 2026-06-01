@@ -25,13 +25,16 @@ import { LazyMotion, domAnimation } from './lib/motion';
 // the WOFF2 as a hashed asset, browser caches it aggressively. Imported
 // BEFORE ./index.css so the @font-face declarations land before any
 // utility using `font-led` is parsed.
+import '@fontsource/orbitron/latin-500.css';
 import '@fontsource/orbitron/latin-600.css';
 import '@fontsource/orbitron/latin-700.css';
 // Tier 30 Phase 3 A4 (share-card redesign) — the 9:16 ShareableCard uses
-// weight 800 for the BANTRYX wordmark, VS glyph, and chosen-team line.
-// Without this import the browser would faux-bold the 700 face inside the
-// rasterised PNG, which looks distinctly NOT Orbitron.
+// weight 800 for the chosen-team line and weight 900 for the BANTRYX
+// wordmark. Weight 500 covers the "I picked" kicker. Without these the
+// browser would faux-bold/light neighbouring weights inside the rasterised
+// PNG, which looks distinctly NOT Orbitron.
 import '@fontsource/orbitron/latin-800.css';
+import '@fontsource/orbitron/latin-900.css';
 import './index.css';
 
 // Apply theme SYNCHRONOUSLY before React mounts so we never flash the wrong

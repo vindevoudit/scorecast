@@ -333,7 +333,7 @@ ScoreCast/
 │   │   └── time.js                      # formatCountdown, useCountdown hook, timeAgo, matchMinute(kickoff, {halfTimeReached, phase}), useMatchMinute (live-minute estimate; Tier 4b Chunk 2)
 │   └── components/
 │       ├── ErrorBoundary.jsx            # Tier 5.4b: class component wrapping <App />; reports via reportClientError + Sentry captureException; raw message gated on import.meta.env.DEV
-│       ├── Sidebar.jsx                  # Left-column dashboard nav. Desktop: 240px ↔ 64px collapsible (persisted localStorage.sc_sidebar_collapsed). Mobile (< md:): off-canvas drawer triggered by top-bar hamburger. Items render <button role="tab"> for Playwright compatibility. Tier 30 Phase 1 — 7 entries authed (Matches → My Picks → Leaderboards → Friends → Groups → Profile → Admin), 3 entries anon (Matches / Groups / Leaderboards)
+│       ├── Sidebar.jsx                  # Left-column dashboard nav. Desktop: 240px ↔ 64px collapsible (persisted localStorage.sc_sidebar_collapsed). Mobile (< md:): off-canvas drawer triggered by top-bar hamburger. Items render <button role="tab"> for Playwright compatibility. Tier 30 Phase 1 — 7 entries authed (Matches → My Picks → Leaderboards → Friends → Groups → Profile → Admin), 3 entries anon (Matches / Groups / Leaderboards). Tier 30 Phase 3 polish (`0c3aed6`) — ICONS.groups = 5-node network graph (4 corner circles + 1 hub with diagonal spokes; reads as "interconnected community"); ICONS.friends = two overlapping busts (reads as "close 1:1 ties"). The two were inverted pre-fix.
 │       ├── UserMenu.jsx                 # Avatar + username in top utility bar; opens role="menu" dropdown with "View profile" + "Settings" + "Sign out" (last pipes through setConfirmingLogout). Tier 30 Phase 1 added Settings item
 │       ├── SubTabs.jsx                  # Tier 30 Phase 1: shared sub-tab primitive wrapping Radix Tabs + `?tab=<value>` URL sync. Reacts to `scorecast:url-changed` so in-app deep-link nav can pre-select a sub-tab. Used by Settings, Friends, Profile, My Picks, Leaderboards, Groups, Admin
 │       ├── EditProfileModal.jsx         # Tier 30 Phase 1: Radix Dialog hosting the displayName + bio form lifted out of ProfileView's inline edit. Locally-owned state resets on each open
@@ -366,7 +366,7 @@ ScoreCast/
 │       ├── ConfirmModal.jsx             # Backdrop + Esc-close, used by logout + admin deletes + bulk confirm. z-50 stacking; sidebar drawer Escape handler defers when modal is open (see CLAUDE.md "Modal stacking")
 │       ├── Avatar.jsx                   # Deterministic initial-on-color circle (FNV-1a hash of LOWERCASED username → HSL). displayName drives letter; username drives color (renames don't shuffle colors)
 │       ├── SearchBar.jsx                # Debounced (250ms) /api/search, type-grouped dropdown
-│       ├── ProfileView.jsx              # Tier 30 Phase 1 — Header (Avatar + displayName + username) + Edit profile button + SubTabs (Overview / Badges / Activity). The 5 panels (Email, Password, Theme, Push, Privacy) moved to SettingsView; inline edit form moved to EditProfileModal
+│       ├── ProfileView.jsx              # Tier 30 Phase 1 — Header (Avatar + displayName + username) + Edit profile button + SubTabs. Tier 30 Phase 3 polish (`7fcba2f`) — sub-tabs: **Summary** / Badges / Activity / Stats (Stats self-only per Phase 3 C1). The 5 panels (Email, Password, Theme, Push, Privacy) moved to SettingsView; inline edit form moved to EditProfileModal. Summary block grid: `sm:grid-cols-2 lg:grid-cols-5` adding a "Best streak" tile reading `user.longestWinStreak` (Phase 3 polish); numerals in `.font-led` Orbitron tabular-nums
 │       ├── ProfileDrawer.jsx            # Right-side drawer wrapping ProfileView; renders "This profile is unavailable" sheet when DataContext.profileError is set (Tier 8.6)
 │       ├── BadgeWall.jsx
 │       │   # FriendsList.jsx           # DELETED in Tier 30 Phase 1 — its UX split across FriendsView's sub-tabs
@@ -842,7 +842,7 @@ DataContext:          bootDone, loading, view, games, groups, picks, pendingInvi
 - `DataContext` watches `user` via `useEffect`. On user transitions:
   - **null → set (login)**: triggers `loadDashboard()` (authed parallel fetch of `/me`, `/games`, `/groups`, `/picks`, `/leaderboard`, `/friends`, `/groups/discover`).
   - **null + `browseAsGuest=true` on boot**: triggers `loadAnonDashboard()` (parallel fetch of just the public endpoints — games, leaderboard, discover, leagues).
-  - **set → null (logout / session-expired)**: wipes its own slots in a single effect.
+  - **set → null (logout / session-expired)**: wipes its own slots in a single effect — `groups`, `picks`, `friendsPicks`, `pendingInvites`, `selectedGroupId`, `view` (back to `'games'`), `friends`, `ownProfile`, AND (Tier 30 Phase 5 Chunk 5.1 P1-9, `50e48c5`) `gameFilters` + `leaderboardFilters` reset to `{leagueId: '', seasonId: ''}`. The filter resets close a cross-account leak on shared browsers — without them, user A's chosen league/season filter would persist into user B's views after sign-out → sign-in on the same browser. Public slots (games / leaderboard / discover) stay populated so the anon browse view picks up where the logout left off.
 - `useRequest` ([src/hooks/useRequest.js](src/hooks/useRequest.js)) is the fetch wrapper consumed by every component that talks to `/api/*`. On a 401, it calls `clearSession` from `AuthContext`, which trips the user → null effect in `DataContext`, which wipes data. No component has to know about teardown.
 
 **Boot decision tree** (in `DataProvider.useEffect` on mount):
@@ -1050,12 +1050,14 @@ There is **no client-side polling for game state** — live-score updates land v
                   ├── <Sidebar>                  // left column nav (collapsible desktop / off-canvas mobile)
                   │     Items filtered to Games/Groups/Rankings for anon viewers
                   ├── <main id="main">           // a11y landmark
-                  │   ├── top utility bar:
-                  │   │   ├── BANTRYX wordmark (decorative; aria-hidden)
-                  │   │   ├── <SearchBar>        // debounced /api/search, type-grouped dropdown
-                  │   │   ├── <ThemeToggle>      // Tier 11: light/dark
-                  │   │   ├── authed:  <NotificationBell> + <UserMenu>
-                  │   │   ├── anon:    [Sign in] [Sign up] [← Home] pills
+                  │   ├── top utility bar (Tier 30 Phase 3 polish — mobile 2-row reorg, `7fcba2f`/`851c61c`):
+                  │   │   ├── mobile row 1: grid grid-cols-[1fr_auto_1fr] — true viewport-center BANTRYX
+                  │   │   │     ├── justify-self-start: hamburger (opens Sidebar drawer)
+                  │   │   │     ├── center: BANTRYX wordmark (decorative; aria-hidden; clickable home when authed)
+                  │   │   │     └── justify-self-end: <UserMenu> (authed) OR sign-in pills (anon)
+                  │   │   ├── mobile row 2: <RefreshButton> | min-w-0 flex-1 <SearchBar> | <NotificationBell>
+                  │   │   │     NotificationBell collapses to icon-only on every viewport (popover handles list)
+                  │   │   ├── desktop: all controls in one row (search center, action cluster right with vertical divider)
                   │   │   └── (logout flow: UserMenu → "Sign out" → setConfirmingLogout → <ConfirmModal>)
                   │   │
                   │   ├── view === 'games':
@@ -1756,6 +1758,8 @@ Three primitives: **Group**, **GroupMember**, **GroupInvite**.
 
 **Invite storage choice**: invites are keyed by username (string), not userId. This means renaming a user (not currently possible) would orphan their invites. Acceptable trade-off for now.
 
+**Pending join-requests hydration** (Tier 30 Phase 5 Chunk 5.1 P1-4 — `50e48c5`): `GroupService.listJoinRequests({groupId, requesterId})` builds the response via a single batched `User.findAll({where: {id: {[Op.in]: requesterIds}}, attributes: ['id','username','displayName']})` + `Map`-based hydration. Pre-fix used `await getUserById(row.requesterId)` per row in a `for` loop — N sequential round-trips. Pattern reusable for any future N+1 hydration: select-distinct ids → bulk findAll with `Op.in` + minimal attributes → Map by id → loop the original rows.
+
 ### 8.4 Friendships Subsystem
 
 A friendship is **one row** representing an unordered pair `{requesterId, addresseeId}`. The `friendships_pair_unique` functional index ensures only one row can exist per pair regardless of direction.
@@ -1847,11 +1851,26 @@ Authorization (scope-independent, commentId-only at the API level):
 
 **Group-comment fan-out** (Tier 18 Chunk 5):
 
-`CommentService.fanOutGroupComment({comment, author, group})` runs as fire-and-forget after every successful `CommentService.create({groupId, ...})`. It loads every group member except the author, then `await Promise.all(NotificationService.notify(memberId, 'group-comment', title, body, link))` where:
+`CommentService.fanOutGroupComment({comment, author, group})` runs as fire-and-forget after every successful `CommentService.create({groupId, ...})`. It loads every group member except the author, then dispatches notifications through an **8-at-a-time worker-pool drainer** (Tier 30 Phase 5 Chunk 5.1 P1-5 — `50e48c5`):
+
+```js
+const FANOUT_CONCURRENCY = 8;
+let cursor = 0;
+const drainer = async () => {
+  while (cursor < recipients.length) {
+    const idx = cursor;
+    cursor += 1;
+    await NotificationService.notify(recipients[idx], 'group-comment', title, body, link);
+  }
+};
+await Promise.all(Array.from({ length: Math.min(FANOUT_CONCURRENCY, recipients.length) }, drainer));
+```
 
 - `title` = `<author username> commented in <group name>`
 - `body` = the comment body (truncated to 160 chars with `…` to keep push payloads small)
 - `link` = `/?view=groups&groupId=<id>` (consumed by `DataContext.consumeDeepLinks`)
+
+**Why the worker pool**: pre-fix code used `await Promise.all(recipients.map(notify))` which fired N parallel DB INSERTs into `notifications` + N Web Push sends regardless of N. At `MAX_GROUP_MEMBERS=2000` (Tier 22 M4), that burns the 20-slot Sequelize pool (Tier 25 A1) and thunders the Web Push transport. The 8-at-a-time pool preserves the fire-and-forget caller timing (the function still resolves only when every notification has been attempted) while bounding parallel `notify()` calls so other request handlers + cron jobs aren't pool-starved.
 
 Wrapped in try/catch so a notification outage can never break the comment create. Per-recipient failures are logged inside `NotificationService.notify` itself.
 
@@ -4344,12 +4363,15 @@ Five new boundary tests in [tests/e2e/api/games.spec.js](tests/e2e/api/games.spe
 **A4 — Share-as-image.** Pulls in `html-to-image@1.11.13` (~3 KB gzip) — routed into its own Vite chunk via `manualChunks`. The Share button on `GameCard` triggers `captureAndShare({game, choice, points, ratio})`, an imperative `createRoot` dance that:
 
 1. Dynamic-imports `react-dom/client`, `./ShareableCard`, `../lib/share`.
-2. Creates an off-screen `<div>` (position: fixed; left: -20000px; pointer-events: none; opacity: 0) sized to 1080×1080 (Square) or 1080×1920 (Story).
+2. Creates an off-screen `<div>` (position: fixed; left: -20000px; pointer-events: none; opacity: 0) sized to 1080×1080 (Square) or 1080×1920 (Story — the new default after the 2026-05-31 polish pass).
 3. `createRoot()` renders `<ShareableCard game={game} choice={choice} points={points} ratio={ratio} />` into the off-screen wrapper.
 4. Waits two `requestAnimationFrame` ticks so React commits + the browser paints before the snapshot.
-5. `html-to-image.toBlob()` captures the wrapper to a PNG blob.
-6. Routes through `shareBlob(blob, options)` → `navigator.share({files, title, text, url})` on mobile (when `canShareFiles()` returns true) OR a PNG download via temporary `<a download>` on desktop / share-cancel / unsupported.
-7. `root.unmount()` + `host.remove()` in a `finally` so a failed snapshot doesn't leak the off-screen DOM.
+5. **Awaits Orbitron font load** via `Promise.all(document.fonts.load("<weight> <size> 'Orbitron'"))` across every weight the card uses (500/600/700/800/900), followed by `document.fonts.ready` as a safety net (Tier 30 Phase 3 polish — `d039d9a`). **This step is load-bearing**: two `requestAnimationFrame` ticks cover layout/paint, NOT web-font download. Without the explicit `document.fonts.load` await, html-to-image rasterizes whatever the browser is currently painting — Courier New (the fallback in the inline `fontFamily` stack) until Orbitron's WOFF2 lands. Symptom of the bug: "the share card renders in Courier New, not Orbitron."
+6. `html-to-image.toBlob()` captures the wrapper to a PNG blob.
+7. Routes through `shareBlob(blob, options)` → `navigator.share({files, title, text, url})` on mobile (when `canShareFiles()` returns true) OR a PNG download via temporary `<a download>` on desktop / share-cancel / unsupported.
+8. `root.unmount()` + `host.remove()` in a `finally` so a failed snapshot doesn't leak the off-screen DOM.
+
+**Orbitron weight imports.** [src/main.jsx](src/main.jsx) imports `@fontsource/orbitron/latin-{500,600,700,800,900}.css` (5 weights). Each weight in the `document.fonts.load` list MUST have a corresponding import — otherwise the browser faux-renders off the nearest available weight and the captured PNG looks distinctly NOT Orbitron at that tier. Weight tiers used in the card: 500 (the thin "I picked" kicker), 600 (date line + tagline), 700 (team names), 800 (chosen-team line + score digits), 900 (BANTRYX wordmark).
 
 [src/components/ShareableCard.jsx](src/components/ShareableCard.jsx) is the design template. All styling is INLINE — the captured raster has no access to surrounding Tailwind / CSS-token context, so theme-independent hex values lock the brand look across Light + Dark themes. The component reads the game's home/away teams, scores, choice, points, and derives a four-state outcome (Pending / Won / Drew / Missed) with matching tone colours.
 

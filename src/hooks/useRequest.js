@@ -21,6 +21,30 @@ function friendlyMessage(raw) {
   return FRIENDLY_ERROR_CODES[raw] || raw;
 }
 
+// Single-flight refresh coordinator. Refresh tokens rotate (routes/auth.js
+// /auth/refresh revokes the inbound row under a SELECT ... FOR UPDATE lock),
+// so when the 15-min access JWT expires and several requests 401 in parallel
+// (view switches, Promise.all fan-outs), only ONE may rotate successfully —
+// the rest send the same now-revoked cookie and 401. Without coalescing, each
+// of those siblings would treat its failed refresh as session-expired and call
+// clearSession() → spurious logout. Sharing a single in-flight refresh promise
+// means every concurrent 401 awaits the same call and then retries with the
+// freshly-rotated cookie. A genuinely-expired token resolves `false` for all
+// waiters → clearSession() fires once, correctly. Module-level so it's shared
+// across every useRequest() consumer, not per-hook-instance.
+let inflightRefresh = null;
+function refreshSession() {
+  if (!inflightRefresh) {
+    inflightRefresh = fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+      .then((r) => r.status === 204)
+      .catch(() => false)
+      .finally(() => {
+        inflightRefresh = null;
+      });
+  }
+  return inflightRefresh;
+}
+
 export function useRequest() {
   const { user, clearSession } = useAuth();
   const userRef = useRef(user);
@@ -49,11 +73,8 @@ export function useRequest() {
       if (reqId) setLastRequestId(reqId);
 
       if (response.status === 401 && !path.startsWith('/api/auth/')) {
-        const refreshResp = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          credentials: 'include',
-        });
-        if (refreshResp.status === 204) {
+        const refreshed = await refreshSession();
+        if (refreshed) {
           response = await doFetch();
           const newReqId = response.headers.get('X-Request-Id');
           if (newReqId) {

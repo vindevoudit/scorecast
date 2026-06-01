@@ -64,11 +64,16 @@ test.describe('GET /api/games', () => {
     }
   });
 
-  // Tier 30 Phase 3 A3 — voice-of-the-crowd indicator.
+  // Tier 30 Phase 3 A3 — voice-of-the-crowd indicator. Crowd is hidden
+  // until the match has kicked off (status flipped OR wall-clock kickoff
+  // passed) — picking the game no longer reveals it pre-kickoff.
   test.describe('crowd indicator gating', () => {
     test.afterEach(async () => {
       await clearPicksAndBadges([USERS.alice.id, USERS.bob.id]);
       await clearGameResults([GAMES.lions.id]);
+      // Restore lions to an upcoming/scheduled state in case a test staged
+      // it past kickoff via updateGameFields.
+      await updateGameFields(GAMES.lions.id, { date: new Date(Date.now() + 24 * 60 * 60 * 1000) });
     });
 
     test('upcoming game + viewer has not picked → no crowd field', async () => {
@@ -83,24 +88,27 @@ test.describe('GET /api/games', () => {
       }
     });
 
-    test('upcoming game + viewer has picked → crowd present + counts include picker', async () => {
+    test('upcoming game + viewer has picked → STILL no crowd field (hidden until kickoff)', async () => {
       const authed = await apiLogin(USERS.alice);
       try {
         await createPick(authed, GAMES.lions.id, 'home');
         const games = await assertOk(authed, 'GET', '/api/games');
         const lions = games.find((g) => g.id === GAMES.lions.id);
-        expect(lions.crowd).toEqual({ home: 1, away: 0, total: 1 });
+        expect(lions.crowd).toBeUndefined();
       } finally {
         await authed.dispose();
       }
     });
 
-    test('crowd aggregates across users', async () => {
+    test('kicked-off (wall-clock past) scheduled game → crowd present + aggregates across users', async () => {
       const alice = await apiLogin(USERS.alice);
       const bob = await apiLogin(USERS.bob);
       try {
         await createPick(alice, GAMES.lions.id, 'home');
         await createPick(bob, GAMES.lions.id, 'away');
+        // Stage the game past its kickoff while still 'scheduled' — exercises
+        // the wall-clock branch of the gate (covers the cron-lag window).
+        await updateGameFields(GAMES.lions.id, { date: new Date(Date.now() - 60 * 60 * 1000) });
         const games = await assertOk(alice, 'GET', '/api/games');
         const lions = games.find((g) => g.id === GAMES.lions.id);
         expect(lions.crowd).toEqual({ home: 1, away: 1, total: 2 });

@@ -26,30 +26,24 @@ const cache = require('../lib/cache');
 const PROBABILITY_DELTA_EPSILON = 0.01;
 const ODDS_SHIFT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-async function listGames({ leagueId, seasonId, viewerId } = {}) {
+async function listGames({ leagueId, seasonId } = {}) {
   const where = {};
   if (leagueId) where.leagueId = leagueId;
   if (seasonId) where.seasonId = seasonId;
   const games = await Game.findAll({ where, order: [['date', 'ASC']] });
 
   // Tier 30 Phase 3 A3 — voice-of-the-crowd. Per-game gate to preserve
-  // the "don't pre-bias the pick" contract: crowd is only attached
-  // when the game has already locked (status !== 'scheduled') OR the
-  // viewer has already picked this game. Anon viewers only see crowd
-  // for locked games. Below the gate, omitting the `crowd` field is
-  // semantically equivalent to "not eligible" — the frontend just
-  // doesn't render the chip.
-  let viewerPickedSet = new Set();
-  if (viewerId && games.length > 0) {
-    const picks = await Pick.findAll({
-      where: { userId: viewerId, gameId: { [Op.in]: games.map((g) => g.id) } },
-      attributes: ['gameId'],
-      raw: true,
-    });
-    viewerPickedSet = new Set(picks.map((p) => p.gameId));
-  }
+  // the "don't pre-bias the pick" contract: crowd is only attached AFTER
+  // the match has actually started — either the status has flipped out of
+  // 'scheduled' (live-score/lock cron) OR the wall-clock kickoff has passed
+  // (covers the cron-lag window where a started game is still 'scheduled').
+  // It is NO LONGER shown to a viewer just because they picked the game —
+  // the user wants the crowd hidden until kickoff regardless of pick state.
+  // Below the gate, omitting the `crowd` field is semantically equivalent to
+  // "not eligible" — the frontend just doesn't render the chip.
+  const now = new Date();
   const eligibleGameIds = games
-    .filter((g) => g.status !== 'scheduled' || viewerPickedSet.has(g.id))
+    .filter((g) => g.status !== 'scheduled' || new Date(g.date) <= now)
     .map((g) => g.id);
   const crowdMap = await getCrowdForGames(eligibleGameIds);
 

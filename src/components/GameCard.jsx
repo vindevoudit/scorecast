@@ -711,13 +711,12 @@ function GameCard({ game }) {
 
       <FriendPicksPanel game={game} />
 
-      {/* Tier 30 Phase 2 — separate the running comment thread from the
-          card body with a quiet 1px rule. Keeps the comment list visually
-          distinct from the scoreboard chrome above it without adding a
-          full panel divider. */}
-      <div className="mt-5 border-t border-default/60 pt-5">
-        <CommentThread gameId={game.id} />
-      </div>
+      {/* CommentThread self-separates with its own `mt-4 border-t pt-4`
+          root, so an additional wrapper here would stack a redundant
+          divider directly below FriendPicksPanel's identical
+          `border-t pt-3` — that's where the dead-space gap used to come
+          from. Render bare. */}
+      <CommentThread gameId={game.id} />
 
       <ConfirmModal
         open={confirmingUndo}

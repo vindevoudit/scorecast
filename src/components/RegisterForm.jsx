@@ -24,12 +24,26 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
     setAgeChecked(next);
     setAuthData((prev) => ({ ...prev, confirmedAge: next }));
   };
+  // P1-14 — submitting guard. Registration writes a user row + sends a
+  // verify-email through Resend; double-firing creates duplicate-username
+  // 400s from the server (harmless but confusing UX) and bumps the rate
+  // limiter unnecessarily.
+  const [submitting, setSubmitting] = useState(false);
+  const handleSubmit = async (event) => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await onSubmit(event);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <Card variant="default" className="p-8 shadow-glow">
       <h2 className="text-2xl font-semibold text-fg">Create an account</h2>
       <p className="mt-2 text-fg-muted">Start your own pool and invite friends instantly.</p>
-      <form onSubmit={onSubmit} className="mt-8 space-y-5">
+      <form onSubmit={handleSubmit} className="mt-8 space-y-5">
         <Input
           id="register-username"
           name="username"
@@ -149,9 +163,9 @@ function RegisterForm({ authData, setAuthData, onSubmit, errors = {}, clearError
           variant="secondary"
           size="lg"
           className="w-full"
-          disabled={!termsChecked || !ageChecked}
+          disabled={!termsChecked || !ageChecked || submitting}
         >
-          Register
+          {submitting ? 'Registering…' : 'Register'}
         </Button>
       </form>
     </Card>

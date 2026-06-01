@@ -422,6 +422,12 @@ export function DataProvider({ children }) {
   // When the user flips back to null (logout / session-expired), clear only
   // the user-specific slots — public slots (games / leaderboard / discover)
   // stay populated so the anon browse view picks up where they left off.
+  //
+  // P1-9 — filter slots are user-perceived state too. Without resetting
+  // here, user A's chosen league/season filter would still scope user B's
+  // games + leaderboard + My Picks views after a shared-browser swap. Both
+  // are reset to the unfiltered ('') defaults so user B starts on a clean
+  // global view, matching what they'd see on a fresh boot.
   useEffect(() => {
     if (user) return;
     setGroups([]);
@@ -432,6 +438,8 @@ export function DataProvider({ children }) {
     setView('games');
     setFriends(emptyFriends);
     setOwnProfile(null);
+    setGameFiltersState({ leagueId: '', seasonId: '' });
+    setLeaderboardFiltersState({ leagueId: '', seasonId: '' });
   }, [user]);
 
   // Profile (own profile view) refetch when picks/games change.

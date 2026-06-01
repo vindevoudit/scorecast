@@ -29,6 +29,7 @@ const {
   GroupJoinRequest,
   Comment,
   CommentReaction,
+  User,
   sequelize,
 } = require('../models');
 const { Op } = require('sequelize');
@@ -520,10 +521,19 @@ async function listJoinRequests({ groupId, requesterId }) {
     where: { groupId, declinedAt: null },
     order: [['createdAt', 'ASC']],
   });
-  // Hydrate requester display info for the owner UI.
+  // P1-4 — bulk-hydrate requesters in one query instead of N sequential
+  // findByPk's. A pending-requests list of ~20 used to fire 20 round-trips
+  // serialised; now it's a single indexed-PK SELECT regardless of size.
+  if (rows.length === 0) return [];
+  const requesterIds = [...new Set(rows.map((r) => r.requesterId))];
+  const requesters = await User.findAll({
+    where: { id: { [Op.in]: requesterIds } },
+    attributes: ['id', 'username', 'displayName'],
+  });
+  const byId = new Map(requesters.map((u) => [u.id, u]));
   const out = [];
   for (const row of rows) {
-    const requester = await getUserById(row.requesterId).catch(() => null);
+    const requester = byId.get(row.requesterId);
     if (!requester) continue;
     out.push({
       id: row.id,

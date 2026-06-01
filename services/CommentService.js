@@ -75,6 +75,18 @@ async function list({ gameId, groupId }, viewerId, { limit = 50 } = {}) {
 // group name; body is the comment text (capped at 160 chars to keep
 // push payloads small). Link deep-links to the group view — picked up
 // by Chunk 6's notification-click consumer.
+//
+// P1-5 — bounded concurrency. Naive Promise.all(recipients.map(notify))
+// fired N parallel DB INSERTs + N web-push sends regardless of N. At
+// MAX_GROUP_MEMBERS=2000 (Tier 22 M4) that's a pool-starvation hazard
+// on the 20-slot Sequelize pool (Tier 25 A1) and a thundering herd on
+// the Web Push transport. The 8-at-a-time worker pool below preserves
+// the fire-and-forget timing the caller sees (the function still
+// resolves only when every notification has been attempted) while
+// bounding parallel notify() calls so other request handlers and cron
+// jobs aren't pool-starved.
+const FANOUT_CONCURRENCY = 8;
+
 async function fanOutGroupComment({ comment, author, group }) {
   try {
     const members = await GroupMember.findAll({ where: { groupId: group.id } });
@@ -83,11 +95,24 @@ async function fanOutGroupComment({ comment, author, group }) {
     const title = `${author.username} commented in ${formatGroupLabel(group)}`;
     const body = comment.body.length > 160 ? `${comment.body.slice(0, 157).trim()}…` : comment.body;
     const link = `/?view=groups&groupId=${group.id}`;
-    await Promise.all(
-      recipients.map((userId) =>
-        NotificationService.notify(userId, 'group-comment', title, body, link),
-      ),
+    // Worker-pool fan-out: spin up CONCURRENCY parallel "drainers" that
+    // each pull the next userId off a shared cursor until the list is
+    // empty. notify() never throws (NotificationService swallows per-
+    // recipient failures internally), so no try/catch needed inside the
+    // drainer loop.
+    let cursor = 0;
+    const drainer = async () => {
+      while (cursor < recipients.length) {
+        const idx = cursor;
+        cursor += 1;
+        await NotificationService.notify(recipients[idx], 'group-comment', title, body, link);
+      }
+    };
+    const workers = Array.from(
+      { length: Math.min(FANOUT_CONCURRENCY, recipients.length) },
+      drainer,
     );
+    await Promise.all(workers);
   } catch (_err) {
     // Notification fan-out is best-effort — swallow so the comment
     // create still resolves cleanly. NotificationService.notify already

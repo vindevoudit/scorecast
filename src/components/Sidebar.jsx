@@ -32,6 +32,21 @@ const ICONS = {
     </svg>
   ),
   groups: (props) => (
+    // Network / community: 4 outer nodes + 1 hub, hub-and-spoke
+    // connectors. Reads as "interconnected community" — distinct from
+    // the friends bust-pair below which represents 1:1 social ties.
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
+      <circle cx="5" cy="5" r="2" />
+      <circle cx="19" cy="5" r="2" />
+      <circle cx="5" cy="19" r="2" />
+      <circle cx="19" cy="19" r="2" />
+      <circle cx="12" cy="12" r="2.2" />
+      <path d="M6.5 6.5l4 4M17.5 6.5l-4 4M6.5 17.5l4-4M17.5 17.5l-4-4" strokeLinecap="round" />
+    </svg>
+  ),
+  friends: (props) => (
+    // Two overlapping busts — was the previous `groups` icon. Reads as
+    // "close 1:1 ties" vs the groups network graph above.
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
       <circle cx="9" cy="9" r="3.2" />
       <circle cx="17" cy="10" r="2.4" />

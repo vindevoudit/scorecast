@@ -65,9 +65,19 @@ export function DataProvider({ children }) {
   const [friendsPicks, setFriendsPicks] = useState([]);
   const [pendingInvites, setPendingInvites] = useState([]);
   const [leaderboard, setLeaderboard] = useState(emptyLeaderboard);
+  // Tier 33 — progressive expansion of the overall leaderboard. The server
+  // caps at 500 rows per request (validation/schemas.js leaderboardQuerySchema)
+  // and serves them sub-ms from the Tier 24 materialised tables. Starts at
+  // 50; "Show more" bumps in OVERALL_PAGE increments. Refreshes triggered by
+  // picks/results preserve the expanded depth via `overallLimit` so the user
+  // doesn't get snapped back after every mutation.
+  const [overallLimit, setOverallLimit] = useState(50);
+  const [leaderboardLoadingMore, setLeaderboardLoadingMore] = useState(false);
   const [groupOrderBy, setGroupOrderBy] = useState('points');
   const [groupOffset, setGroupOffset] = useState(0);
   const groupLimit = 20;
+  const OVERALL_PAGE = 50;
+  const OVERALL_LIMIT_MAX = 500;
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [friends, setFriends] = useState(emptyFriends);
   const [discoverGroups, setDiscoverGroups] = useState([]);
@@ -160,11 +170,15 @@ export function DataProvider({ children }) {
       // applyLeaderboardFilters so we don't race state-set vs. fetch). Falls
       // back to the current slot otherwise.
       const filters = overrides.leaderboardFilters ?? leaderboardFilters;
+      // Tier 33 — preserve the user's expanded depth across refreshes so a
+      // pick/result event doesn't snap them back to the first 50 rows.
+      const effectiveOverallLimit = overrides.overallLimit ?? overallLimit;
       const params = new URLSearchParams();
       if (effectiveGroupId) params.set('groupId', effectiveGroupId);
       if (orderBy) params.set('orderBy', orderBy);
       if (offset) params.set('offset', String(offset));
       params.set('limit', String(groupLimit));
+      params.set('overallLimit', String(effectiveOverallLimit));
       if (filters.leagueId) params.set('leagueId', filters.leagueId);
       if (filters.seasonId) params.set('seasonId', filters.seasonId);
       const query = params.toString() ? `?${params.toString()}` : '';
@@ -176,8 +190,34 @@ export function DataProvider({ children }) {
         groupMeta: data.groupMeta || null,
       });
     },
-    [request, selectedGroupId, groups, groupOrderBy, groupOffset, leaderboardFilters],
+    [request, selectedGroupId, groups, groupOrderBy, groupOffset, leaderboardFilters, overallLimit],
   );
+
+  // Tier 33 — expand the overall leaderboard by one page. Re-fetches from
+  // offset 0 with a larger limit (server is sub-ms on the materialised
+  // read, so the bandwidth-vs-complexity tradeoff favours a single refetch
+  // over append-merging client-side pages). Hard-capped at 500 by the
+  // server's leaderboardQuerySchema; further growth needs a follow-up tier
+  // (offset-based pagination across multiple requests).
+  const loadMoreLeaderboard = useCallback(async () => {
+    if (leaderboardLoadingMore) return;
+    const next = Math.min(overallLimit + OVERALL_PAGE, OVERALL_LIMIT_MAX);
+    if (next === overallLimit) return;
+    setLeaderboardLoadingMore(true);
+    try {
+      setOverallLimit(next);
+      await refreshLeaderboard('', { overallLimit: next });
+    } finally {
+      setLeaderboardLoadingMore(false);
+    }
+  }, [leaderboardLoadingMore, overallLimit, refreshLeaderboard]);
+
+  // Tier 33 — snap the overall leaderboard back to the default first page.
+  const collapseLeaderboard = useCallback(async () => {
+    if (overallLimit === OVERALL_PAGE) return;
+    setOverallLimit(OVERALL_PAGE);
+    await refreshLeaderboard('', { overallLimit: OVERALL_PAGE });
+  }, [overallLimit, refreshLeaderboard]);
 
   // Atomic state-set + refresh. Mirrors applyGameFilters' guarantee that a
   // stale fetch can't race the state update.
@@ -1073,6 +1113,12 @@ export function DataProvider({ children }) {
     refreshPicks,
     refreshFriendsPicks,
     refreshLeaderboard,
+
+    // Tier 33 — progressive expansion of the Overall leaderboard.
+    loadMoreLeaderboard,
+    collapseLeaderboard,
+    leaderboardLoadingMore,
+    overallLimit,
 
     // Tier 4b Chunk 3 — league/season picker
     gameFilters,

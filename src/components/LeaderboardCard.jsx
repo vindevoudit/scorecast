@@ -75,8 +75,15 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
 // rows (when expanded or when compact would already show everyone) or
 // an interleaved row/divider list that surfaces top-3 + self + friends
 // and collapses the rest into "… N more players" markers.
-function buildCompact({ entries, currentUserId, friendSet }) {
+//
+// Tier 33 — `total` is the server-reported true population size; defaults
+// to `entries.length` when the caller doesn't paginate (Friends sub-tab).
+// The trailing divider counts up to `total`, not just `entries.length`,
+// so a compact card on a 200-player leaderboard with only the first 50
+// loaded honestly says "… 197 more players" instead of "… 47 more".
+function buildCompact({ entries, currentUserId, friendSet, total }) {
   if (entries.length === 0) return { items: [], rowCount: 0 };
+  const truthTotal = typeof total === 'number' && total >= entries.length ? total : entries.length;
   const visible = new Set();
   for (let i = 0; i < Math.min(3, entries.length); i += 1) {
     visible.add(entries[i].userId);
@@ -89,7 +96,7 @@ function buildCompact({ entries, currentUserId, friendSet }) {
   let rowCount = 0;
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i];
-    const rank = i + 1;
+    const rank = entry.rank ?? i + 1;
     if (!visible.has(entry.userId)) continue;
     const gap = rank - lastRank - 1;
     if (gap > 0) {
@@ -99,7 +106,7 @@ function buildCompact({ entries, currentUserId, friendSet }) {
     rowCount += 1;
     lastRank = rank;
   }
-  const trailingGap = entries.length - lastRank;
+  const trailingGap = truthTotal - lastRank;
   if (trailingGap > 0) {
     items.push({ type: 'divider', count: trailingGap, key: 'gap-end' });
   }
@@ -126,6 +133,14 @@ function LeaderboardCard({
   onSelectUser,
   isFiltered = false,
   friendUserIds, // Iterable of user ids — passed by DashboardView from useFriends().
+  // Tier 33 — progressive expansion for the Overall sub-tab. When `onLoadMore`
+  // is provided AND `total > entries.length`, expanded view renders a
+  // "Show more" CTA that fetches the next 50 rows. Omitted by the Friends
+  // sub-tab (which is a client-side filter, not a paginated server fetch).
+  total,
+  onLoadMore,
+  onCollapse,
+  loadingMore = false,
 }) {
   const [expanded, setExpanded] = useState(false);
   const friendSet = useMemo(() => {
@@ -133,15 +148,19 @@ function LeaderboardCard({
     return friendUserIds instanceof Set ? friendUserIds : new Set(friendUserIds);
   }, [friendUserIds]);
 
+  const truthTotal = typeof total === 'number' ? total : entries.length;
+  const hasMoreToLoad = typeof total === 'number' && entries.length < total && !!onLoadMore;
+  const canCollapsePaging = typeof total === 'number' && entries.length > 50 && !!onCollapse;
+
   const compact = useMemo(
-    () => buildCompact({ entries, currentUserId, friendSet }),
-    [entries, currentUserId, friendSet],
+    () => buildCompact({ entries, currentUserId, friendSet, total: truthTotal }),
+    [entries, currentUserId, friendSet, truthTotal],
   );
 
   // When the compact projection would already render every row (e.g. small
   // leaderboard, or the viewer's whole friend group sits across all ranks)
   // there's nothing to expand into — skip the toggle entirely.
-  const canExpand = compact.rowCount < entries.length;
+  const canExpand = compact.rowCount < entries.length || hasMoreToLoad;
   const showExpanded = expanded || !canExpand;
 
   // When a filter is active and the resulting list is "everyone at 0 pts"
@@ -178,7 +197,7 @@ function LeaderboardCard({
             <LeaderboardRow
               key={entry.userId}
               entry={entry}
-              rank={index + 1}
+              rank={entry.rank ?? index + 1}
               isCurrentUser={entry.userId === currentUserId}
               onSelectUser={onSelectUser}
             />
@@ -199,16 +218,52 @@ function LeaderboardCard({
           )
         )}
       </div>
-      {canExpand ? (
+      {/* Tier 33 — CTAs:
+         - Compact state: "Show all N players" expands the in-memory rows.
+         - Expanded + has more on server: "Show more" fetches the next page;
+           paired with "Show fewer" to collapse back to the default first
+           page (visible whenever we've already loaded past the default 50).
+         - Expanded + no more available + nothing extra loaded: "Show fewer"
+           collapses the row list back to compact mode (no fetch). */}
+      {canExpand && !showExpanded ? (
         <div className="mt-4 flex justify-center">
           <button
             type="button"
-            onClick={() => setExpanded((prev) => !prev)}
-            aria-expanded={expanded}
+            onClick={() => setExpanded(true)}
+            aria-expanded={false}
             className="rounded-full border border-default bg-elevated/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            {expanded ? 'Show fewer' : `Show all ${entries.length} players`}
+            Show all {truthTotal} {truthTotal === 1 ? 'player' : 'players'}
           </button>
+        </div>
+      ) : null}
+      {showExpanded && (hasMoreToLoad || canCollapsePaging || compact.rowCount < entries.length) ? (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          {compact.rowCount < entries.length || canCollapsePaging ? (
+            <button
+              type="button"
+              onClick={async () => {
+                if (canCollapsePaging) {
+                  await onCollapse();
+                }
+                setExpanded(false);
+              }}
+              className="rounded-full border border-default bg-elevated/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              Show fewer
+            </button>
+          ) : null}
+          {hasMoreToLoad ? (
+            <button
+              type="button"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              aria-busy={loadingMore}
+              className="rounded-full border border-accent/40 bg-accent/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent transition duration-200 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+            >
+              {loadingMore ? 'Loading…' : `Show ${Math.min(50, truthTotal - entries.length)} more`}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

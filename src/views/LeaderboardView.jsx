@@ -80,6 +80,9 @@ function LeaderboardView() {
     handleChangeGroupOffset,
     handleGroupSelection,
     leaderboardFilters,
+    loadMoreLeaderboard,
+    collapseLeaderboard,
+    leaderboardLoadingMore,
   } = useData();
   const isFiltered = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
   const friendUserIds = (friends?.friends || []).map((f) => f.id);
@@ -96,6 +99,10 @@ function LeaderboardView() {
           onSelectUser={openProfile}
           isFiltered={isFiltered}
           friendUserIds={friendUserIds}
+          total={leaderboard.overallMeta?.total}
+          onLoadMore={loadMoreLeaderboard}
+          onCollapse={collapseLeaderboard}
+          loadingMore={leaderboardLoadingMore}
         />
       ),
     },

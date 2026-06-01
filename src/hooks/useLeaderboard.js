@@ -12,6 +12,10 @@ export function useLeaderboard() {
     handleChangeGroupOffset,
     handleGroupSelection,
     refreshLeaderboard,
+    loadMoreLeaderboard,
+    collapseLeaderboard,
+    leaderboardLoadingMore,
+    overallLimit,
   } = useData();
   return {
     leaderboard,
@@ -22,5 +26,9 @@ export function useLeaderboard() {
     handleChangeGroupOffset,
     handleGroupSelection,
     refreshLeaderboard,
+    loadMoreLeaderboard,
+    collapseLeaderboard,
+    leaderboardLoadingMore,
+    overallLimit,
   };
 }

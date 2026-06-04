@@ -11,7 +11,7 @@
 // still hit InlineGatePanel for create + invites; Discover is the only
 // part anon sees populated.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import EmptyState from '../components/EmptyState';
 import GroupCard from '../components/GroupCard';
@@ -19,26 +19,25 @@ import GroupNameDisplay from '../components/GroupNameDisplay';
 import InlineGatePanel from '../components/InlineGatePanel';
 import CreateGroupModal from '../components/CreateGroupModal';
 import SubTabs from '../components/SubTabs';
-import { Button, Input } from '../components/ui';
+import { Button } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
 
 function MyGroupsSection({ user, groups, currentUserId, handlers, onOpenCreate }) {
-  const [query, setQuery] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('all');
 
-  // Client-side filter over the already-loaded groups. Matches the group
-  // name, the bare discriminator, and the rendered "Name #ABCDEF" form so a
-  // user can search by either part of the label.
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return groups;
-    return groups.filter((g) => {
-      const name = (g.name || '').toLowerCase();
-      const disc = (g.discriminator || '').toLowerCase();
-      return name.includes(q) || disc.includes(q) || `${name} #${disc}`.includes(q);
-    });
-  }, [groups, query]);
+  // Reset to "all" if the selected group leaves the list (left / deleted) so
+  // the dropdown never strands the view on a group that's gone.
+  useEffect(() => {
+    if (selectedGroupId === 'all') return;
+    if (!groups.some((g) => g.id === selectedGroupId)) setSelectedGroupId('all');
+  }, [groups, selectedGroupId]);
+
+  const filtered = useMemo(
+    () => (selectedGroupId === 'all' ? groups : groups.filter((g) => g.id === selectedGroupId)),
+    [groups, selectedGroupId],
+  );
 
   if (!user) {
     return (
@@ -58,25 +57,30 @@ function MyGroupsSection({ user, groups, currentUserId, handlers, onOpenCreate }
           + New group
         </Button>
       </div>
-      {/* Filter is available whenever the user has any groups. */}
+      {/* Dropdown filter — available whenever the user has any groups. */}
       {groups.length > 0 ? (
-        <Input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter your groups…"
-          aria-label="Filter your groups by name"
-        />
+        <label className="flex w-full items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg sm:w-auto">
+          <span className="text-fg-muted">Group</span>
+          <span className="sr-only">Filter by group</span>
+          <select
+            value={selectedGroupId}
+            onChange={(event) => setSelectedGroupId(event.target.value)}
+            className="flex-1 rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:flex-none"
+          >
+            <option value="all">All groups</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+                {g.discriminator ? ` #${g.discriminator}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
       ) : null}
       {groups.length === 0 ? (
         <EmptyState
           title="No groups yet"
           description="Create your first group, or check Discover for a public group to join."
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          title="No groups match that search"
-          description="Try a different name, or clear the filter to see all your groups."
         />
       ) : (
         filtered.map((group) => (

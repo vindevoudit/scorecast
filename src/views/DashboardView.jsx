@@ -349,19 +349,7 @@ function DashboardView() {
               <div className="rounded-3xl border border-default bg-elevated/80 p-6 shadow-glow">
                 <h2 className="text-2xl font-semibold text-fg">Games</h2>
                 <p className="mt-2 text-fg-muted">
-                  Pick winners, earn more points for underdog upsets.
-                </p>
-                <p className="mt-2 text-xs text-fg-subtle">
-                  Picks are winner-only — there&apos;s no draw option. If a match ends level you
-                  still earn partial credit.{' '}
-                  <a
-                    href="/help#draws"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  >
-                    Why no draw? →
-                  </a>
+                  Pick winners, earn more points for underdog upsets, draws give partial credit.
                 </p>
                 <div className="mt-4">
                   <GameFiltersBar />

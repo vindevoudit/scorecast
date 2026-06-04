@@ -241,14 +241,14 @@ function FriendsPicksPanel({ friendsPicks, games, statusFilter, leaderboardFilte
 
   return (
     <div className="space-y-4">
-      <label className="inline-flex min-h-9 items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg">
+      <label className="flex min-h-9 w-full items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg sm:w-auto">
         <span className="text-fg-muted">Friend</span>
         <span className="sr-only">Filter by friend</span>
         <select
           value={friendFilter}
           onChange={(e) => setFriendFilter(e.target.value)}
           disabled={friendOptions.length === 0}
-          className="rounded-xl border border-default bg-elevated/90 px-3 py-1 text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+          className="flex-1 rounded-xl border border-default bg-elevated/90 px-3 py-1 text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 sm:flex-none"
         >
           <option value="all">All friends</option>
           {friendOptions.map((opt) => (
@@ -335,7 +335,7 @@ function PicksHistory({ picks, games }) {
       {/* Status + league/season filter rail. Applies to both Mine and
           Friends sub-tabs (status state is shared). Pills on md+, native
           <select> on phones so 5 pills don't overflow the rail. */}
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <div className="hidden flex-wrap gap-2 md:flex" role="tablist" aria-label="Filter picks">
           {FILTERS.map((f) => (
             <button
@@ -353,13 +353,13 @@ function PicksHistory({ picks, games }) {
             </button>
           ))}
         </div>
-        <label className="inline-flex min-h-9 items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg md:hidden">
+        <label className="flex min-h-9 w-full items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg sm:w-auto md:hidden">
           <span className="text-fg-muted">Status</span>
           <span className="sr-only">Filter picks</span>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-xl border border-default bg-elevated/90 px-3 py-1 text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="flex-1 rounded-xl border border-default bg-elevated/90 px-3 py-1 text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent sm:flex-none"
           >
             {FILTERS.map((f) => (
               <option key={f.id} value={f.id}>

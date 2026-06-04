@@ -12,6 +12,10 @@ import GroupNameDisplay from './GroupNameDisplay';
 import { Badge, Button, Input } from './ui';
 import { useData } from '../hooks/useData';
 
+// Cap the member grid — a group can have up to MAX_GROUP_MEMBERS=2000, which
+// would otherwise render a wall of tiles. Show the first N; expand on demand.
+const MEMBER_PREVIEW = 8;
+
 function VisibilityBadge({ visibility, hasPassword }) {
   // Three-tier visibility badge with tone + label per level.
   if (visibility === 'public') return <Badge tone="success">Public</Badge>;
@@ -36,6 +40,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [transferring, setTransferring] = useState(false);
   const [transferTarget, setTransferTarget] = useState('');
+  const [membersExpanded, setMembersExpanded] = useState(false);
 
   // Tier 19 Chunk 3 — owner-side pending requests. Loaded lazily on mount
   // for owners of private groups (the only case where the endpoint
@@ -93,6 +98,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
   };
 
   const transferCandidates = group.members.filter((m) => (m.userId || m) !== group.ownerId);
+  const visibleMembers = membersExpanded ? group.members : group.members.slice(0, MEMBER_PREVIEW);
 
   const handleConfirmLeave = () => {
     setConfirmingLeave(false);
@@ -133,7 +139,7 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
         <div className="rounded-3xl bg-overlay/70 p-4">
           <p className="text-sm uppercase tracking-[0.24em] text-fg-muted">Members</p>
           <div className="mt-3 grid gap-2 text-sm text-fg sm:grid-cols-2">
-            {group.members.map((member) => {
+            {visibleMembers.map((member) => {
               const userId =
                 (member && typeof member === 'object' ? member.userId : member) || member;
               const username =
@@ -180,6 +186,18 @@ function GroupCard({ group, currentUserId, onInvite, onLeave, onTransfer, onDele
               );
             })}
           </div>
+          {group.members.length > MEMBER_PREVIEW ? (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setMembersExpanded((prev) => !prev)}
+                aria-expanded={membersExpanded}
+                className="rounded-full border border-default bg-elevated/60 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted transition duration-200 hover:border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                {membersExpanded ? 'Show fewer' : `Show all ${group.members.length} members`}
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <InviteRow groupId={group.id} onInvite={onInvite} />

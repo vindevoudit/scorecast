@@ -107,16 +107,16 @@ function LeaderboardFiltersBar({ label = 'Stats scope' }) {
   if (leagues.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-overlay/60 px-4 py-3">
+    <div className="flex w-full flex-col gap-2 rounded-2xl bg-overlay/60 px-4 py-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
       <span className="text-xs font-semibold uppercase tracking-[0.18em] text-fg-muted">
         {label}
       </span>
-      <label className="flex items-center gap-2 text-sm text-fg">
+      <label className="flex w-full items-center gap-2 text-sm text-fg sm:w-auto">
         <span className="sr-only">League</span>
         <select
           value={leagueCode}
           onChange={handleLeagueChange}
-          className="rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+          className="w-full rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:w-auto"
         >
           <option value="">All leagues</option>
           {leagues.map((l) => (
@@ -127,12 +127,12 @@ function LeaderboardFiltersBar({ label = 'Stats scope' }) {
         </select>
       </label>
       {selectedLeague && selectedLeague.seasons.length > 0 ? (
-        <label className="flex items-center gap-2 text-sm text-fg">
+        <label className="flex w-full items-center gap-2 text-sm text-fg sm:w-auto">
           <span className="sr-only">Season</span>
           <select
             value={seasonYear}
             onChange={handleSeasonChange}
-            className="rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            className="w-full rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:w-auto"
           >
             <option value="">All seasons</option>
             {selectedLeague.seasons.map((s) => (

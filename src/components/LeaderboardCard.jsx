@@ -181,7 +181,11 @@ function LeaderboardCard({
       <p className="mt-2 text-fg-muted">
         {description || 'Top performers based on correct picks and probability scoring.'}
       </p>
-      <div className="mt-6 max-h-96 space-y-3 overflow-y-auto pr-2">
+      {/* The fixed-height scroll box is only needed for the expanded 50-row
+          list. In compact mode the list is short (top-3 + self + friends +
+          dividers), so capping it clipped the trailing "… N more players"
+          summary at the bottom edge — size to content instead. */}
+      <div className={`mt-6 space-y-3 ${showExpanded ? 'max-h-96 overflow-y-auto pr-2' : ''}`}>
         {showFilteredEmpty ? (
           <EmptyState
             title="No picks in this scope yet"

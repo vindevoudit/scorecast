@@ -11,7 +11,7 @@
 // still hit InlineGatePanel for create + invites; Discover is the only
 // part anon sees populated.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import EmptyState from '../components/EmptyState';
 import GroupCard from '../components/GroupCard';
@@ -19,12 +19,27 @@ import GroupNameDisplay from '../components/GroupNameDisplay';
 import InlineGatePanel from '../components/InlineGatePanel';
 import CreateGroupModal from '../components/CreateGroupModal';
 import SubTabs from '../components/SubTabs';
-import { Button } from '../components/ui';
+import { Button, Input } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
 import { useData } from '../hooks/useData';
 
 function MyGroupsSection({ user, groups, currentUserId, handlers, onOpenCreate }) {
+  const [query, setQuery] = useState('');
+
+  // Client-side filter over the already-loaded groups. Matches the group
+  // name, the bare discriminator, and the rendered "Name #ABCDEF" form so a
+  // user can search by either part of the label.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.filter((g) => {
+      const name = (g.name || '').toLowerCase();
+      const disc = (g.discriminator || '').toLowerCase();
+      return name.includes(q) || disc.includes(q) || `${name} #${disc}`.includes(q);
+    });
+  }, [groups, query]);
+
   if (!user) {
     return (
       <InlineGatePanel
@@ -43,13 +58,28 @@ function MyGroupsSection({ user, groups, currentUserId, handlers, onOpenCreate }
           + New group
         </Button>
       </div>
+      {/* Filter is available whenever the user has any groups. */}
+      {groups.length > 0 ? (
+        <Input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Filter your groups…"
+          aria-label="Filter your groups by name"
+        />
+      ) : null}
       {groups.length === 0 ? (
         <EmptyState
           title="No groups yet"
           description="Create your first group, or check Discover for a public group to join."
         />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No groups match that search"
+          description="Try a different name, or clear the filter to see all your groups."
+        />
       ) : (
-        groups.map((group) => (
+        filtered.map((group) => (
           <GroupCard
             key={group.id}
             group={group}

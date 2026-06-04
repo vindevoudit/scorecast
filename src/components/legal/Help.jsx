@@ -178,7 +178,9 @@ function Help() {
       </OL>
       <P>You cannot pick after kickoff. Picks lock when the match starts.</P>
 
-      <h3 className="text-lg font-semibold text-fg">A note on draws</h3>
+      <h3 id="draws" className="scroll-mt-24 text-lg font-semibold text-fg">
+        A note on draws
+      </h3>
       <P>
         You pick <strong>home or away</strong> — there&apos;s no &ldquo;pick the draw&rdquo; option.
         If the match ends in a draw, you still earn <strong>partial credit</strong> based on the

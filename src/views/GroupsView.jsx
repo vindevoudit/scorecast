@@ -65,7 +65,7 @@ function MyGroupsSection({ user, groups, currentUserId, handlers, onOpenCreate }
           <select
             value={selectedGroupId}
             onChange={(event) => setSelectedGroupId(event.target.value)}
-            className="flex-1 rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:flex-none"
+            className="min-w-0 flex-1 truncate rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent sm:flex-none"
           >
             <option value="all">All groups</option>
             {groups.map((g) => (

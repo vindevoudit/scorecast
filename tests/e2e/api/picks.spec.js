@@ -249,7 +249,10 @@ test.describe('GET /api/picks/friends', () => {
     }
   });
 
-  test('friend picked, game not scored → row with points=null', async () => {
+  // Anti-bias gate (2026-06): a friend's pick on an UPCOMING (not-yet-
+  // kicked-off) game must be hidden — seeing it early would bias the
+  // viewer. lions is seeded daysFromNow(1) + status 'scheduled'.
+  test('friend picked but game still upcoming → hidden (empty array)', async () => {
     await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
     const bob = await apiLogin(USERS.bob);
     try {
@@ -257,6 +260,29 @@ test.describe('GET /api/picks/friends', () => {
     } finally {
       await bob.dispose();
     }
+    const alice = await apiLogin(USERS.alice);
+    try {
+      // Bulk form: nothing returned while the game is pre-kickoff.
+      expect((await assertOk(alice, 'GET', '/api/picks/friends')).length).toBe(0);
+      // Per-game form is gated identically.
+      const scoped = await assertOk(alice, 'GET', `/api/picks/friends?gameId=${GAMES.lions.id}`);
+      expect(scoped.length).toBe(0);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('friend picked, game kicked off but unscored → row with points=null', async () => {
+    await createAcceptedFriendship(USERS.alice.id, USERS.bob.id);
+    const bob = await apiLogin(USERS.bob);
+    try {
+      await createPick(bob, GAMES.lions.id, 'home');
+    } finally {
+      await bob.dispose();
+    }
+    // Kick the game off (status out of 'scheduled') so it clears the
+    // anti-bias gate while staying unscored (result still null).
+    await updateGameFields(GAMES.lions.id, { status: 'in-progress' });
     const alice = await apiLogin(USERS.alice);
     try {
       const payload = await assertOk(alice, 'GET', '/api/picks/friends');
@@ -310,6 +336,8 @@ test.describe('GET /api/picks/friends', () => {
       await bob.dispose();
     }
     await setProfileVisibility(USERS.bob, 'private');
+    // Kick the game off so it clears the anti-bias gate; masking still applies.
+    await updateGameFields(GAMES.lions.id, { status: 'in-progress' });
     const alice = await apiLogin(USERS.alice);
     try {
       const payload = await assertOk(alice, 'GET', '/api/picks/friends');
@@ -332,6 +360,8 @@ test.describe('GET /api/picks/friends', () => {
       await bob.dispose();
     }
     await setProfileVisibility(USERS.bob, 'friends');
+    // Kick the game off so it clears the anti-bias gate.
+    await updateGameFields(GAMES.lions.id, { status: 'in-progress' });
     const alice = await apiLogin(USERS.alice);
     try {
       const payload = await assertOk(alice, 'GET', '/api/picks/friends');
@@ -352,6 +382,9 @@ test.describe('GET /api/picks/friends', () => {
     } finally {
       await bob.dispose();
     }
+    // Both games kicked off so they clear the anti-bias gate.
+    await updateGameFields(GAMES.lions.id, { status: 'in-progress' });
+    await updateGameFields(GAMES.eagles.id, { status: 'in-progress' });
     const alice = await apiLogin(USERS.alice);
     try {
       const all = await assertOk(alice, 'GET', '/api/picks/friends');

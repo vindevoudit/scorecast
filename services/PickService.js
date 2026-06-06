@@ -104,10 +104,18 @@ async function listForUser(userId) {
 // "Friends' Picks" aggregated tab. Frontend fetches once at dashboard
 // load and slices the array per game.
 //
-// Bounds: only picks on games kicking off within the last 30 days OR in
-// the future. Keeps the response O(friends × ~50 games) — at typical
-// 5-50 friends per viewer, payload stays under 200KB. Capped at 500
-// rows as a defensive ceiling for power users.
+// Bounds: only picks on games that have ALREADY KICKED OFF (see the
+// anti-bias gate below) within the last 30 days. Keeps the response
+// O(friends × ~50 games) — at typical 5-50 friends per viewer, payload
+// stays under 200KB. Capped at 500 rows as a defensive ceiling for power
+// users.
+//
+// Anti-bias (2026-06): a viewer must NOT see any OTHER user's pick before
+// kickoff — seeing the "smart money" early would bias their own pick. The
+// gameWhere kickoff gate below mirrors the voice-of-the-crowd gate in
+// GameService.listGames so both surfaces reveal in lock-step. Self never
+// appears here (friendIds excludes the viewer); the user's own pre-kickoff
+// picks stay visible to them via GET /api/picks (the "Mine" tab).
 //
 // Privacy: every row is filtered through LeaderboardService.applyMasking.
 // Friends with profileVisibility='private' show as the masked label;
@@ -123,7 +131,16 @@ async function listFriendsPicks(viewerId, { gameId } = {}) {
   const pickWhere = { userId: { [Op.in]: [...friendIds] } };
   if (gameId) pickWhere.gameId = gameId;
 
-  const gameWhere = {};
+  // Kickoff gate (anti-bias): a game has kicked off once its status has
+  // flipped out of 'scheduled' (live-score/lock cron) OR the wall-clock
+  // kickoff has passed (covers the cron-lag window where a started game is
+  // still 'scheduled'). Same predicate as GameService.listGames' crowd gate.
+  // Applies in BOTH the bulk and per-?gameId forms; ANDed with the 30-day
+  // horizon in the bulk form.
+  const now = new Date();
+  const gameWhere = {
+    [Op.or]: [{ status: { [Op.ne]: 'scheduled' } }, { date: { [Op.lte]: now } }],
+  };
   if (!gameId) {
     const horizon = new Date();
     horizon.setDate(horizon.getDate() - FRIENDS_PICKS_HORIZON_DAYS);

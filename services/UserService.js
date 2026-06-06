@@ -99,9 +99,19 @@ async function getProfileByUsername({ username, viewer }) {
   const recentGames =
     pickGameIds.length > 0 ? await Game.findAll({ where: { id: { [Op.in]: pickGameIds } } }) : [];
   const recentGameById = new Map(recentGames.map((g) => [g.id, g]));
+  // Anti-bias gate (mirrors GameService.listGames' crowd gate +
+  // PickService.listFriendsPicks): another user must NOT see this user's
+  // picks before kickoff — it would telegraph the pick and bias the viewer.
+  // Self-view (and only self) keeps upcoming picks visible. A game has
+  // kicked off once status != 'scheduled' OR the wall-clock kickoff passed.
+  const isSelf = Boolean(viewer?.id && viewer.id === target.id);
+  const profileNow = new Date();
   const recentPicks = recentPickRows
     .map((pick) => ({ pick, game: recentGameById.get(pick.gameId) }))
     .filter((row) => row.game)
+    .filter(
+      (row) => isSelf || row.game.status !== 'scheduled' || new Date(row.game.date) <= profileNow,
+    )
     .sort((a, b) => new Date(b.game.date) - new Date(a.game.date))
     .slice(0, 10)
     .map(({ pick, game }) => ({

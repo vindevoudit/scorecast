@@ -6,7 +6,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const { USERS } = require('../fixtures/data');
+const { USERS, GAMES } = require('../fixtures/data');
 const {
   apiAnon,
   apiLogin,
@@ -15,6 +15,10 @@ const {
   clearFriendships,
   createAcceptedFriendship,
   createPendingFriendship,
+  createPick,
+  clearGameResults,
+  clearPicksAndBadges,
+  updateGameFields,
 } = require('../helpers/api');
 const { assertOk, expectShape } = require('../helpers/apiAssertions');
 
@@ -268,6 +272,55 @@ test.describe('GET /api/users/:username/profile', () => {
     } finally {
       await anon.dispose();
     }
+  });
+
+  // Anti-bias gate (2026-06): recentPicks must hide the target's UPCOMING
+  // picks from every other viewer (telegraphing a pick before kickoff would
+  // bias them), but a user always sees their OWN upcoming picks.
+  test('recentPicks hides upcoming picks from other viewers, shows them to self', async () => {
+    await clearPicksAndBadges([USERS.alice.id]);
+    await clearGameResults([GAMES.lions.id]); // lions → scheduled + future, unscored
+    const alice = await apiLogin(USERS.alice);
+    try {
+      await createPick(alice, GAMES.lions.id, 'home');
+      // Self-view: alice sees her own upcoming pick.
+      const selfProfile = await assertOk(
+        alice,
+        'GET',
+        `/api/users/${USERS.alice.username}/profile`,
+      );
+      expect(selfProfile.recentPicks.some((p) => p.gameId === GAMES.lions.id)).toBe(true);
+    } finally {
+      await alice.dispose();
+    }
+    // Other viewer (anon): the upcoming pick is hidden.
+    const anon = await apiAnon();
+    try {
+      const otherProfile = await assertOk(
+        anon,
+        'GET',
+        `/api/users/${USERS.alice.username}/profile`,
+      );
+      expect(otherProfile.recentPicks.some((p) => p.gameId === GAMES.lions.id)).toBe(false);
+    } finally {
+      await anon.dispose();
+    }
+    // Once it kicks off, it's visible to everyone.
+    await updateGameFields(GAMES.lions.id, { status: 'in-progress' });
+    const anon2 = await apiAnon();
+    try {
+      const afterKickoff = await assertOk(
+        anon2,
+        'GET',
+        `/api/users/${USERS.alice.username}/profile`,
+      );
+      expect(afterKickoff.recentPicks.some((p) => p.gameId === GAMES.lions.id)).toBe(true);
+    } finally {
+      await anon2.dispose();
+    }
+    // Teardown: reset the game + clear the pick we created.
+    await updateGameFields(GAMES.lions.id, { status: 'scheduled' });
+    await clearPicksAndBadges([USERS.alice.id]);
   });
 
   test('winRate stays in [0, 1] for users with picks', async () => {

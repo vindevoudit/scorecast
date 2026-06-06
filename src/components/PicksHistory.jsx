@@ -259,6 +259,14 @@ function FriendsPicksPanel({ friendsPicks, games, statusFilter, leaderboardFilte
         </select>
       </label>
 
+      {/* Anti-bias caption: friends' picks on a match are hidden until it
+          kicks off (server-side gate in PickService.listFriendsPicks). The
+          persistent note explains why an empty/short list isn't the whole
+          story — upcoming matches are withheld, not absent. */}
+      <p className="text-xs text-fg-subtle">
+        {"Friends' picks unlock at kickoff — upcoming matches stay hidden until they start."}
+      </p>
+
       <div ref={listRef} className="space-y-3">
         {baseRows.length === 0 ? (
           <EmptyState

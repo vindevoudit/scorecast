@@ -30,7 +30,14 @@ import {
   iconBadge,
   svgDoc,
 } from '../marketing/lib/brand.mjs';
-import { gameCard, leaderboardCard, statsPage, statsCharts } from '../marketing/lib/product.mjs';
+import {
+  gameCard,
+  leaderboardCard,
+  statsPage,
+  statsCharts,
+  picksVsModelCard,
+} from '../marketing/lib/product.mjs';
+import { openDb, fetchUserCount, fetchUpcomingGames } from '../marketing/lib/livedata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fontsDir = resolve(root, 'marketing/fonts');
@@ -597,6 +604,97 @@ function renderStats(format) {
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
 }
 
+// ── Live-data assets — picks-vs-model + thank-you ────────────────────────
+// These two pull from production via marketing/lib/livedata.mjs (when
+// DATABASE_URL is set) and fall back to the samples below otherwise, so the
+// kit still renders offline. Unlike the 29 deterministic assets above, these
+// reflect whatever the DB held at generation time — re-run before a post.
+
+const SAMPLE_USER_COUNT = 240;
+const SAMPLE_UPCOMING = [
+  {
+    home: 'Arsenal',
+    away: 'Aston Villa',
+    dateLabel: 'Sat 31 May',
+    kickoff: '17:30',
+    leagueName: 'Premier League',
+    probs: { home: 0.58, draw: 0.24, away: 0.18 },
+    crowd: { home: 412, away: 188, total: 600 },
+  },
+  {
+    home: 'Brazil',
+    away: 'France',
+    dateLabel: 'Sun 1 Jun',
+    kickoff: '20:00',
+    leagueName: 'World Cup',
+    probs: { home: 0.41, draw: 0.27, away: 0.32 },
+    crowd: { home: 0, away: 0, total: 0 },
+  },
+];
+
+// Floor a user count to a clean, honest milestone for display. Big crowds
+// round to "+1000"/"500+"/"300+" so the number stays tidy and never
+// overstates; a small launch crowd (<50) shows its exact value (a "+"
+// would feel like puffery at that size).
+function roundDownToMilestone(n) {
+  if (n >= 1000) return `${Math.floor(n / 1000) * 1000}+`;
+  if (n >= 500) return '500+';
+  if (n >= 200) return `${Math.floor(n / 100) * 100}+`;
+  if (n >= 50) return `${Math.floor(n / 50) * 50}+`;
+  return String(n);
+}
+
+// Filename-safe slug for per-game asset names: "Aston Villa" → "aston-villa".
+function slugify(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// ── Thank-you / user-count (square / story) ──────────────────────────────
+function renderThankYou(format, userCount) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const big = roundDownToMilestone(userCount);
+  const bigCy = story ? h * 0.46 : h * 0.5;
+  const bigSize = story ? 460 : 320;
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, story ? 250 : 132, story ? 50 : 46)}
+  <text x="${cx}" y="${story ? 470 : 300}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${story ? 96 : 76}" fill="${COLOR.white}" letter-spacing="0.5">Thank you</text>
+  <text x="${cx}" y="${bigCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.display}" font-size="${bigSize}" fill="url(#mark)">${esc(big)}</text>
+  <text x="${cx}" y="${bigCy + bigSize * 0.34 + (story ? 70 : 84)}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 48 : 42}" letter-spacing="1" fill="${COLOR.textHi}">players and counting</text>
+  ${footer({ cx, y: h - (story ? 220 : 160), w: w * 0.64 })}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.42 } });
+}
+
+// ── Picks vs model for one upcoming game (square / story) ────────────────
+function renderPicksVsModel(game, format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const cardW = 880;
+  const cardX = (w - cardW) / 2;
+  const probe = picksVsModelCard({ x: cardX, y: 0, w: cardW, game });
+  const top = story ? 470 : 320;
+  const bottom = story ? h - 170 : h - 110;
+  const cardY = story ? top : Math.max(top, top + (bottom - top - probe.h) / 2);
+  const card = picksVsModelCard({ x: cardX, y: cardY, w: cardW, game });
+
+  const headSize = story ? 80 : 60;
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, story ? 235 : 110, story ? 50 : 46)}
+  <text x="${cx}" y="${story ? 376 : 220}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="0.5">Fans vs the model</text>
+  <text x="${cx}" y="${story ? 432 : 274}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Who the crowd backs — and what the model says.</text>
+  ${card.svg}
+  ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
+}
+
 // Build an SVG <rect> grid from a qrcode module bitmap (dark modules only;
 // the surrounding white card supplies the quiet zone + light background).
 function qrToSvg(qr, px) {
@@ -667,7 +765,44 @@ async function main() {
   await emit('product-stats-charts', renderStatsCharts('square'), SIZE.square[0]);
   await emit('product-stats-charts-story', renderStatsCharts('story'), SIZE.story[0]);
 
-  console.log('\ndone — marketing kit in marketing/out/');
+  // ── Live-data assets ──
+  // Pull real numbers from prod when DATABASE_URL is set; otherwise fall
+  // back to the baked-in samples so the kit still renders offline. Any DB
+  // failure degrades to the same fallback rather than aborting the run.
+  const db = openDb();
+  let userCount = SAMPLE_USER_COUNT;
+  let upcoming = SAMPLE_UPCOMING;
+  let live = false;
+  if (db) {
+    try {
+      userCount = await fetchUserCount(db);
+      upcoming = await fetchUpcomingGames(db);
+      live = true;
+      console.log(`\nlive data: ${userCount} users, ${upcoming.length} upcoming game(s)`);
+    } catch (err) {
+      console.warn(`\nlive-data fetch failed (${err.message}); using sample data`);
+      userCount = SAMPLE_USER_COUNT;
+      upcoming = SAMPLE_UPCOMING;
+    } finally {
+      await db.close();
+    }
+  } else {
+    console.log('\nDATABASE_URL not set — using sample data for live assets');
+  }
+
+  await emit('thankyou-square', renderThankYou('square', userCount), SIZE.square[0]);
+  await emit('thankyou-story', renderThankYou('story', userCount), SIZE.story[0]);
+
+  if (upcoming.length === 0) {
+    console.log('no eligible upcoming games — skipping picks-vs-model assets');
+  }
+  for (const game of upcoming) {
+    const slug = `${slugify(game.home)}-vs-${slugify(game.away)}`;
+    await emit(`picks-vs-model-${slug}-square`, renderPicksVsModel(game, 'square'), SIZE.square[0]);
+    await emit(`picks-vs-model-${slug}-story`, renderPicksVsModel(game, 'story'), SIZE.story[0]);
+  }
+
+  console.log(`\ndone — marketing kit in marketing/out/ (${live ? 'live' : 'sample'} data)`);
 }
 
 main().catch((err) => {

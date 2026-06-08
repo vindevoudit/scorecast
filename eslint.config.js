@@ -28,6 +28,8 @@ const rootEsmFileGlobs = [
   'vite.config.js',
   'playwright.config.js',
   'scripts/**/*.{js,mjs}',
+  // Marketing kit fragment libs are Node ESM consumed by scripts/.
+  'marketing/**/*.mjs',
 ];
 
 export default [

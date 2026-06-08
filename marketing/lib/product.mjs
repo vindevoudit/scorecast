@@ -581,3 +581,158 @@ export function statsPage({ x, y, w, data, activityCount = 3 }) {
   const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
   return { svg: shell + parts.join('\n'), h };
 }
+
+// ── Picks-vs-model card ──────────────────────────────────────────────────
+// Two charts for one fixture: "how fans are picking" (winner-only crowd
+// split, Home vs Away) above "what the model predicts" (3-way probabilities,
+// Home / Draw / Away). Driven by live data from marketing/lib/livedata.mjs.
+//
+// game = { home, away, dateLabel, kickoff, leagueName,
+//          probs:{home,draw,away}, crowd:{home,away,total} }
+// Returns { svg, h }.
+const PVM = { home: UI.accent, draw: UI.warning, away: '#a855f7' };
+
+export function picksVsModelCard({ x, y, w, game }) {
+  const k = w / 880;
+  const pad = 44 * k;
+  const r = 34 * k;
+  const innerW = w - pad * 2;
+  const cx = x + w / 2;
+  const parts = [];
+  let cy = y + pad;
+
+  // ── header: matchup + meta ──
+  parts.push(
+    txt(cx, cy + 30 * k, `${game.home}  vs  ${game.away}`, {
+      size: 38 * k,
+      font: FONT.bodySemi,
+      fill: UI.fg,
+      anchor: 'middle',
+    }),
+  );
+  const meta = [game.leagueName, game.dateLabel, game.kickoff].filter(Boolean).join('  ·  ');
+  parts.push(
+    txt(cx, cy + 64 * k, meta.toUpperCase(), {
+      size: 16 * k,
+      font: FONT.bodySemi,
+      fill: 'rgba(34,211,238,0.8)',
+      anchor: 'middle',
+      ls: 2 * k,
+    }),
+  );
+  cy += 100 * k;
+
+  // ── Panel A — crowd split (winner-only Home vs Away) ──
+  const { home: ch, total } = game.crowd;
+  parts.push(
+    txt(x + pad, cy + 18 * k, 'HOW FANS ARE PICKING', {
+      size: 15 * k,
+      font: FONT.bodySemi,
+      fill: UI.fgMuted,
+      ls: 3 * k,
+    }),
+  );
+  cy += 44 * k;
+  const barH = 56 * k;
+  if (total > 0) {
+    // Force the two segments to sum to exactly 100% (no rounding sliver).
+    const homePct = Math.round((ch / total) * 100);
+    const awayPct = 100 - homePct;
+    const homeW = (homePct / 100) * innerW;
+    parts.push(
+      // away segment (full track) then home segment on top — rounded ends.
+      rrect(x + pad, cy, innerW, barH, barH / 2, `fill="rgba(168,85,247,0.25)"`),
+      rrect(x + pad, cy, Math.max(homeW, barH), barH, barH / 2, `fill="rgba(34,211,238,0.85)"`),
+      // inline percentages
+      txt(x + pad + 22 * k, cy + barH / 2 + 8 * k, `${homePct}%`, {
+        size: 26 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: UI.base,
+      }),
+      txt(x + pad + innerW - 22 * k, cy + barH / 2 + 8 * k, `${awayPct}%`, {
+        size: 26 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: UI.fg,
+        anchor: 'end',
+      }),
+    );
+    cy += barH + 30 * k;
+    // labels under the bar
+    parts.push(
+      txt(x + pad, cy, `${game.home}`, { size: 19 * k, font: FONT.body, fill: UI.fgMuted }),
+      txt(x + pad + innerW, cy, `${game.away}`, {
+        size: 19 * k,
+        font: FONT.body,
+        fill: UI.fgMuted,
+        anchor: 'end',
+      }),
+      txt(cx, cy, `${total.toLocaleString()} pick${total === 1 ? '' : 's'}`, {
+        size: 19 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgSubtle,
+        anchor: 'middle',
+      }),
+    );
+    cy += 22 * k;
+  } else {
+    // empty state — no picks yet
+    parts.push(
+      rrect(x + pad, cy, innerW, barH, barH / 2, `fill="rgba(15,23,42,0.7)" stroke="${UI.border}" stroke-width="1.5"`),
+      txt(cx, cy + barH / 2 + 7 * k, 'No picks yet — be the first', {
+        size: 20 * k,
+        font: FONT.body,
+        fill: UI.fgMuted,
+        anchor: 'middle',
+      }),
+    );
+    cy += barH + 8 * k;
+  }
+  cy += 36 * k;
+
+  // ── Panel B — model probabilities (3-way) ──
+  parts.push(
+    txt(x + pad, cy + 18 * k, 'WHAT THE MODEL PREDICTS', {
+      size: 15 * k,
+      font: FONT.bodySemi,
+      fill: UI.fgMuted,
+      ls: 3 * k,
+    }),
+  );
+  cy += 50 * k;
+  const rows = [
+    { label: game.home, pct: Math.round(game.probs.home * 100), color: PVM.home },
+    { label: 'Draw', pct: Math.round(game.probs.draw * 100), color: PVM.draw },
+    { label: game.away, pct: Math.round(game.probs.away * 100), color: PVM.away },
+  ];
+  const labelW = 220 * k; // left gutter for the team/draw label
+  const trackX = x + pad + labelW;
+  const trackW = innerW - labelW - 80 * k; // leave room for the % at the right
+  const rowH = 40 * k;
+  const rowGap = 26 * k;
+  rows.forEach((row) => {
+    const ty = cy;
+    parts.push(
+      // label (truncate-safe: anchored start, sits in the gutter)
+      txt(x + pad, ty + rowH / 2 + 7 * k, row.label, { size: 22 * k, font: FONT.body, fill: UI.fg }),
+      // track + fill
+      rrect(trackX, ty, trackW, rowH, rowH / 2, `fill="rgba(15,23,42,0.8)"`),
+      rrect(trackX, ty, Math.max((row.pct / 100) * trackW, rowH), rowH, rowH / 2, `fill="${row.color}"`),
+      // % at the right edge
+      txt(x + pad + innerW, ty + rowH / 2 + 8 * k, `${row.pct}%`, {
+        size: 24 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: UI.fg,
+        anchor: 'end',
+      }),
+    );
+    cy += rowH + rowGap;
+  });
+  cy += pad - rowGap;
+
+  const h = cy - y;
+  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  return { svg: shell + parts.join('\n'), h };
+}

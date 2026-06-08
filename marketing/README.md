@@ -55,6 +55,11 @@ All squares are **1080×1080** (IG/FB feed, carousels), stories **1080×1920**
 | `product-stats-story.png`                | 1080×1920  | Stats page — full profile with 3 recent-activity rows                                 |
 | `product-stats-charts.png`               | 1080×1080  | Stats dashboard — points-over-time line chart + summary tiles                         |
 | `product-stats-charts-story.png`         | 1080×1920  | Stats dashboard — line chart + per-league bars + heatmap                              |
+| `thankyou-square.png` / `-story.png`     | sq + story | **Live** — "Thank you · {N}+ players and counting" (real user count, rounded down)    |
+| `picks-vs-model-<home>-vs-<away>-*.png`  | sq + story | **Live** — one per upcoming game: crowd pick split vs the model's probabilities       |
+
+> **Live-data assets** (`thankyou-*`, `picks-vs-model-*`) are the only ones pulled from
+> production rather than baked-in copy — see **[Live-data assets](#live-data-assets)** below.
 
 > **Product mockups** are faithful re-creations of the live app UI (real dark-theme
 > tokens, real component layout) populated with past Premier League fixtures + fake users.
@@ -160,9 +165,52 @@ group-chat screenshots).
 
 ---
 
+## Live-data assets
+
+`thankyou-*` and `picks-vs-model-*` are generated from **real production data** when a
+`DATABASE_URL` is present in the environment; otherwise the generator falls back to
+baked-in sample numbers so the full kit still renders offline (the rest of the kit is
+unaffected either way). Read-only — the generator never writes to the DB.
+
+```powershell
+# PowerShell (Windows)
+$env:DATABASE_URL = "<prod connection string with ?sslmode=require>"; npm run assets:marketing
+```
+
+```bash
+# bash
+DATABASE_URL="<prod connection string with ?sslmode=require>" npm run assets:marketing
+```
+
+What they pull:
+
+- **`thankyou-*`** — `SELECT COUNT(*) FROM users`, displayed rounded **down** to a clean
+  milestone (e.g. 247 → `200+`; under 50 shows the exact number).
+- **`picks-vs-model-<home>-vs-<away>-*`** — one card per **upcoming** (scheduled) game:
+  the crowd's pick split (Home vs Away — picks are winner-only) over the model's 3-way
+  probabilities (Home / Draw / Away). Placeholder fixtures (`TBD`, `Winner of …`) and
+  games still at the model's neutral sentinel are skipped. Games with zero picks render a
+  "No picks yet — be the first" state.
+
+> ⚠️ **Pre-kickoff crowd**: in the app the crowd split is hidden until kickoff (anti-bias).
+> These marketing cards read the DB directly, so they **do** reveal pre-kickoff sentiment —
+> that's intentional for promo use, but don't screenshot one back into a product context.
+
+> The DB is read once at the start, then closed. A missing/unreachable DB degrades to the
+> sample data rather than aborting the run — watch the console for `live data:` vs
+> `using sample data`.
+
+> **Housekeeping**: per-game files are named by team slug, so a new matchday slate adds new
+> files rather than overwriting last week's. Sweep stale ones with
+> `rm marketing/out/picks-vs-model-*` before a fresh `npm run assets:marketing` if you want
+> only the current slate.
+
+---
+
 ## Regenerating
 
-The script is deterministic — re-running produces identical PNGs. To change anything:
+The 29 core assets are deterministic — re-running produces identical PNGs (the two
+live-data asset types above reflect the DB at run time). To change anything:
 
 1. Edit copy in `scripts/generate-marketing-assets.mjs` (content arrays) or brand tokens
    in `marketing/lib/brand.mjs`.

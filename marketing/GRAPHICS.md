@@ -281,6 +281,45 @@ stats-page profile). Edit those to change the shown matches/users.
 
 ---
 
+## 8c. Live-data assets — [`marketing/lib/livedata.mjs`](lib/livedata.mjs)
+
+Two asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
+count) and `picks-vs-model-<home>-vs-<away>-*` (one per upcoming game — crowd pick split vs
+the model's probabilities). See the [README → Live-data assets](README.md#live-data-assets)
+for the operator workflow; this section is the maintainer view.
+
+**Data module** — `marketing/lib/livedata.mjs`, read-only raw SQL, mirrors
+[`scripts/query-teams.mjs`](../scripts/query-teams.mjs) for the connection + SSL opt-in:
+
+- `openDb()` → `new Sequelize(process.env.DATABASE_URL)` (SSL when the URL has
+  `sslmode=require`), or `null` when unset.
+- `fetchUserCount(db)` → `SELECT COUNT(*) FROM users`.
+- `fetchUpcomingGames(db)` → every `status='scheduled'` fixture with its model
+  probabilities + a single grouped crowd query (`picks` GROUP BY `gameId`, `choice`).
+  Filters out placeholder fixtures (`/^(tbd|winner|loser|group\s|placeholder)/i` — mirrors
+  [`src/utils/teamNames.js`](../src/utils/teamNames.js) `isPlaceholderGame`) and the model
+  sentinel `(0.50, 0.00, 0.50)`. Crowd is **winner-only** (Home/Away) because picks are.
+
+**Render fragment** — `picksVsModelCard({x, y, w, game})` in `product.mjs`, same idiom as
+the other product cards (reuses `rrect` / `txt` / `UI` tokens, self-measures height). Panel
+A = a 2-segment crowd bar (cyan Home / purple Away, forced to sum to 100; empty state when
+zero picks). Panel B = 3 horizontal probability bars (Home cyan / Draw amber / Away purple).
+
+**Generator wiring** — `renderThankYou(format, userCount)` (big milestone number via
+`roundDownToMilestone`) and `renderPicksVsModel(game, format)`. `main()` calls `openDb()`
+once in a `try/finally` (always `db.close()`), and falls back to `SAMPLE_USER_COUNT` /
+`SAMPLE_UPCOMING` on no-DB-or-failure so an offline run still emits example cards. The 29
+core assets are untouched by this path — they stay byte-identical.
+
+> ⚠️ **Pre-kickoff crowd divergence**: the app hides the crowd split until kickoff
+> (anti-bias). This generator reads the DB directly and intentionally shows pre-kickoff
+> sentiment for promo use — a deliberate, documented divergence from product behaviour.
+
+> ⚠️ **`.env` is NOT auto-loaded** — that file points at the dev DB. The operator sets
+> `DATABASE_URL` to the prod URL explicitly so the assets reflect real numbers.
+
+---
+
 ## 9. Live brand assets (favicon / PWA / OG)
 
 These feed the **deployed site**. Changing them updates the browser favicon, installed-app

@@ -689,7 +689,7 @@ function renderPicksVsModel(game, format) {
   ${background(w, h)}
   ${topMark(cx, story ? 235 : 110, story ? 50 : 46)}
   <text x="${cx}" y="${story ? 376 : 220}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${headSize}" fill="${COLOR.white}" letter-spacing="0.5">Fans vs the model</text>
-  <text x="${cx}" y="${story ? 432 : 274}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Who the crowd backs — and what the model says.</text>
+  <text x="${cx}" y="${story ? 432 : 274}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 28}" letter-spacing="1" fill="${COLOR.cyanSoft}">Who the crowd backs and what the model says.</text>
   ${card.svg}
   ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });

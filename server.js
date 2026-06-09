@@ -56,10 +56,12 @@ const LIVE_SCORE_SYNC_CRON = process.env.LIVE_SCORE_SYNC_CRON || '*/30 * * * * *
 // filter goes stale relative to the canonical ?ids= endpoint. See
 // lib/jobs/reconcileInProgressGames.js header.
 const IN_PROGRESS_RECONCILE_CRON = process.env.IN_PROGRESS_RECONCILE_CRON || '*/3 * * * *';
-// PWA Chunk 6 — kickoff reminders, every 15 min. Each fire pushes a
+// PWA Chunk 6 — kickoff reminders, every 5 min. Each fire pushes a
 // 'kickoff-reminder' to every user with a pick on a game kicking off in the
-// next 15-30 min. games.kickoffReminderSentAt dedups across ticks.
-const KICKOFF_REMINDER_CRON = process.env.KICKOFF_REMINDER_CRON || '*/15 * * * *';
+// next 15-20 min. games.kickoffReminderSentAt dedups across ticks. The 5-min
+// cadence keeps the [15, 20) lead band one tick wide so reminders fire 15-20
+// min before kickoff instead of the old 15-30 spread.
+const KICKOFF_REMINDER_CRON = process.env.KICKOFF_REMINDER_CRON || '*/5 * * * *';
 // Tier 19 Chunk 5 — every 1 min, locks pick probability snapshots on any
 // scheduled game whose kickoff has passed. Cost-gated by a count() short-
 // circuit, so off-season ticks are near-free.

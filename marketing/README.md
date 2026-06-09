@@ -172,15 +172,51 @@ group-chat screenshots).
 baked-in sample numbers so the full kit still renders offline (the rest of the kit is
 unaffected either way). Read-only — the generator never writes to the DB.
 
+### Generate with live data (full walkthrough — PowerShell / Windows)
+
 ```powershell
-# PowerShell (Windows)
-$env:DATABASE_URL = "<prod connection string with ?sslmode=require>"; npm run assets:marketing
+cd "C:\Users\vinde\OneDrive\Desktop\ScoreCast"
+
+# 1. Auth to Azure (skip if already logged in — opens a browser)
+az login
+
+# 2. Pull the prod DB URL from Key Vault into the env var
+#    (the stored value already includes ?sslmode=require)
+$env:DATABASE_URL = az keyvault secret show --vault-name scorecast-kv-p3aaelev7xp --name database-url --query value -o tsv
+
+# 3. Clear last run's per-game cards so you only get the current slate
+Remove-Item marketing/out/picks-vs-model-* -ErrorAction SilentlyContinue
+
+# 4. Generate the kit — watch for: "live data: <N> users, <M> upcoming game(s)"
+npm run assets:marketing
+
+# 5. Clear the prod URL from your shell when done
+Remove-Item Env:\DATABASE_URL
+
+# 6. Review the output
+explorer marketing\out
 ```
 
+bash equivalent for steps 2 + 4:
+
 ```bash
-# bash
-DATABASE_URL="<prod connection string with ?sslmode=require>" npm run assets:marketing
+export DATABASE_URL="$(az keyvault secret show --vault-name scorecast-kv-p3aaelev7xp --name database-url --query value -o tsv)"
+npm run assets:marketing
+unset DATABASE_URL
 ```
+
+**Offline test** (sample data, no DB — just to confirm the pipeline): `npm run assets:marketing`.
+You'll see `DATABASE_URL not set — using sample data for live assets`.
+
+> **If step 4 hangs / times out** the prod Postgres firewall isn't allowing your current
+> IP. Add a rule for it, re-run step 4, then optionally remove it:
+>
+> ```powershell
+> $ip = (Invoke-RestMethod https://api.ipify.org)
+> az postgres flexible-server firewall-rule create --resource-group scorecast-prod --name scorecast-pg-p3aaelev7xp52 --rule-name local-marketing --start-ip-address $ip --end-ip-address $ip
+> # ...generate, then:
+> az postgres flexible-server firewall-rule delete --resource-group scorecast-prod --name scorecast-pg-p3aaelev7xp52 --rule-name local-marketing --yes
+> ```
 
 What they pull:
 

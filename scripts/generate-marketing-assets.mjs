@@ -279,6 +279,30 @@ function renderHowto(format) {
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.3 } });
 }
 
+// ── "Share your pick — tag @bantryx.app" (square / story) ────────────────
+// Community-growth prompt: screenshot your pick → IG story → tag the brand
+// account. Static (no live data). Handle is the hero element, rendered as a
+// big cyan-gradient Bebas wordmark (same face as the stat big-numbers).
+function renderShareToStory(format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+
+  const L = {
+    square: { topY: 132, headY: 360, headSize: 76, headLh: 86, tagY: 612, tagSize: 40, handleCy: 748, handleSize: 60 },
+    story: { topY: 250, headY: 700, headSize: 100, headLh: 116, tagY: 1080, tagSize: 48, handleCy: 1296, handleSize: 64 },
+  }[format];
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, L.topY, story ? 50 : 46)}
+  ${textBlock({ x: cx, y: L.headY, anchor: 'middle', size: L.headSize, font: FONT.bodyBlack, fill: COLOR.white, lines: ['Share your pick', 'to your story'], lineHeight: L.headLh, letterSpacing: 0.5 })}
+  <text x="${cx}" y="${L.tagY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.tagSize}" letter-spacing="2" fill="${COLOR.cyanSoft}">and tag us</text>
+  <text x="${cx}" y="${L.handleCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.handleSize}" letter-spacing="${L.handleSize * 0.02}" fill="url(#mark)">${esc('@bantryx.app')}</text>
+  ${footer({ cx, y: h - (story ? 220 : 160), w: w * 0.64 })}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.3 } });
+}
+
 // ── Printable A4 flyer with QR ───────────────────────────────────────────
 async function renderFlyer() {
   const [w, h] = SIZE.flyer;
@@ -745,6 +769,9 @@ async function main() {
 
   await emit('howto-square', renderHowto('square'), SIZE.square[0]);
   await emit('howto-story', renderHowto('story'), SIZE.story[0]);
+
+  await emit('share-to-story-square', renderShareToStory('square'), SIZE.square[0]);
+  await emit('share-to-story-story', renderShareToStory('story'), SIZE.story[0]);
 
   for (const stat of STATS) {
     await emit(`stat-${stat.key}-square`, renderStat(stat, 'square'), SIZE.square[0]);

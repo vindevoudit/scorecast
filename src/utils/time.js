@@ -38,26 +38,26 @@ export function useCountdown(target) {
   return label;
 }
 
-// Elapsed match minute, computed from kickoff and refined with the
-// phase signals we *can* get from football-data.org free tier
-// (halftime-reached flag + duration phase). The free tier doesn't expose
-// `minute` directly, so this is still an estimate — but the signals
-// catch the cases where pure kickoff-elapsed math goes worst-wrong:
-//   - between minutes 46 and ~50 (we'd report 46-50 when the match is
-//     actually in halftime, or vice versa)
-//   - past minute 90 in cup matches (we'd keep counting into ET as 95',
-//     96' instead of labelling "ET")
+// Match phase label, NOT a minute counter. football-data.org's plan doesn't
+// expose `minute`, so the old kickoff-elapsed estimate drifted out of sync and
+// showed minutes that didn't match reality. Instead we display the coarse
+// phase, which leans on the signals we *can* trust:
+//   - `phase` ('extra-time' / 'penalty-shootout') from upstream score.duration
+//   - `halfTimeReached` flag (set when upstream writes the HT score)
+// Only the half-time break still consults the wall clock, and that uses a
+// deliberately loose 46-60 window so a few minutes of sync drift never
+// mislabels it.
 //
 // Returns { label, minute } where:
-//   - label is what to display ("67'", "HT", "ET", "PEN", "1'")
-//   - minute is the underlying integer (or null for non-numeric labels)
+//   - label is what to display ("First half", "Half time", "Second half",
+//     "Extra time", "Penalties") or null before kickoff
+//   - minute is kept for return-shape stability and is always null now
 export function matchMinute(kickoff, opts = {}, now = Date.now()) {
   const { halfTimeReached = false, phase = null } = opts;
 
-  // Non-numeric phases short-circuit — display the phase tag, not a
-  // potentially-misleading minute counter.
-  if (phase === 'penalty-shootout') return { label: 'PEN', minute: null };
-  if (phase === 'extra-time') return { label: 'ET', minute: null };
+  // Reliable upstream phase signals win first — they never drift.
+  if (phase === 'penalty-shootout') return { label: 'Penalties', minute: null };
+  if (phase === 'extra-time') return { label: 'Extra time', minute: null };
 
   const start = new Date(kickoff).getTime();
   const elapsedMs = now - start;
@@ -65,33 +65,19 @@ export function matchMinute(kickoff, opts = {}, now = Date.now()) {
 
   const rawElapsed = Math.floor(elapsedMs / MS_PER_MINUTE) + 1; // 1-indexed
 
-  // Halftime window: a real PL/BSA match clocks 45 + ~15 min HT + 45.
-  // We can't pinpoint HT exactly without an authoritative timer, but:
-  //   - if we know halftime was reached (upstream set halfTime score)
-  //     AND raw elapsed is still in 46..60: show "HT" — better than a
-  //     mid-50s minute that doesn't exist in a football match
-  //   - if halftime was NOT reached and raw elapsed > 45: cap display at
-  //     45 (the match is either still in 1st half or in HT — either way
-  //     "45'" is the safer claim)
+  // Half-time break: upstream confirmed the HT score AND the wall clock still
+  // sits inside the generous 46-60 break window. Coarse on purpose so a few
+  // minutes of sync drift never mislabels it. This is the only remaining
+  // time-based check.
   if (halfTimeReached && rawElapsed >= 46 && rawElapsed <= 60) {
-    return { label: 'HT', minute: null };
+    return { label: 'Half time', minute: null };
   }
-  if (!halfTimeReached && rawElapsed > 45) {
-    return { label: "45'", minute: 45 };
-  }
-
-  // Post-HT: shift the second half down by ~15 mins to compensate for
-  // the break the wall clock kept ticking through.
-  let displayed = rawElapsed;
-  if (halfTimeReached && rawElapsed > 60) {
-    displayed = Math.max(46, rawElapsed - 15);
-  }
-  // Cap at 90 in regular time. ET should have flipped phase by then —
-  // if it didn't, we're probably mid-stoppage so "90'+" is honest.
-  if (displayed > 90) {
-    return { label: "90'+", minute: 90 };
-  }
-  return { label: `${displayed}'`, minute: displayed };
+  // Past the break window once halftime was reached → second half. Before the
+  // flag arrives we stay on "First half" regardless of elapsed (if sync lags,
+  // briefly reading "First half" into the early second half is bounded by the
+  // sync cadence and far less wrong than a bogus minute).
+  if (halfTimeReached) return { label: 'Second half', minute: null };
+  return { label: 'First half', minute: null };
 }
 
 export function useMatchMinute(kickoff, isLive, opts = {}) {

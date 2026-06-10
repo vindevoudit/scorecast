@@ -117,6 +117,25 @@ function UndoIcon({ className = 'h-4 w-4' }) {
   );
 }
 
+function InfoIcon({ className = 'h-3.5 w-3.5' }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  );
+}
+
 function formatDate(dateText) {
   // Date-only — the kickoff time is already shown prominently in the
   // ScoreboardBody (the large `.font-led` `Kickoff` block), so repeating
@@ -676,6 +695,15 @@ function GameCard({ game }) {
               Pick {displayTeamName(game.awayTeam)}
             </button>
           </div>
+          {/* Why no draw button? Picks are winner-only (CLAUDE.md invariant);
+              a drawn match still awards partial credit to whichever side you
+              backed (the Draw row in PayoutMatrix). This caption answers the
+              recurring "why can't I pick a draw?" at the exact point of
+              confusion, without adding a tappable affordance to discover. */}
+          <p className="mt-2.5 flex items-center justify-center gap-1.5 text-center text-[11px] font-medium text-fg-muted">
+            <InfoIcon />
+            No draw pick — you back a winner. If it ends level, you still earn partial points.
+          </p>
         </>
       ) : null}
 

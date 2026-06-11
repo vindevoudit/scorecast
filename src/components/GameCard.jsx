@@ -701,8 +701,8 @@ function GameCard({ game }) {
               recurring "why can't I pick a draw?" at the exact point of
               confusion, without adding a tappable affordance to discover. */}
           <p className="mt-2.5 flex items-center justify-center gap-1.5 text-center text-[11px] font-medium text-fg-muted">
-            <InfoIcon />
-            No draw pick — you back a winner. If it ends level, you still earn partial points.
+            No draw picks. Back a winner to score points. If it ends level, you earn partial points
+            based on the table.
           </p>
         </>
       ) : null}

@@ -59,9 +59,10 @@ All squares are **1080×1080** (IG/FB feed, carousels), stories **1080×1920**
 | `thankyou-square.png` / `-story.png`       | sq + story | **Live** — "Thank you · {N}+ players and counting" (real user count, rounded down)    |
 | `picks-vs-model-<home>-vs-<away>-*.png`    | sq + story | **Live** — one per upcoming game: crowd pick split vs the model's probabilities       |
 | `kickoff-countdown-*.png`                  | sq + story | **Live** — "get your picks in" urgency card for the next fixture + a big countdown    |
+| `halftime-*.png`                           | sq + story | **Live** — halftime scoreboard for an in-progress match (big Orbitron score)          |
 
-> **Live-data assets** (`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`) are pulled from
-> production rather than baked-in copy — see **[Live-data assets](#live-data-assets)** below.
+> **Live-data assets** (`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`, `halftime-*`) are
+> pulled from production rather than baked-in copy — see **[Live-data assets](#live-data-assets)** below.
 
 > **Product mockups** are faithful re-creations of the live app UI (real dark-theme
 > tokens, real component layout) populated with past Premier League fixtures + fake users.
@@ -174,8 +175,8 @@ group-chat screenshots).
 
 ## Live-data assets
 
-`thankyou-*`, `picks-vs-model-*`, and `kickoff-countdown-*` are generated from **real
-production data** when a
+`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`, and `halftime-*` are generated from
+**real production data** when a
 `DATABASE_URL` is present in the environment; otherwise the generator falls back to
 baked-in sample numbers so the full kit still renders offline (the rest of the kit is
 unaffected either way). Read-only — the generator never writes to the DB.
@@ -239,6 +240,11 @@ What they pull:
   upcoming fixture (`ORDER BY date ASC` → first row), with a big Orbitron countdown
   ("KICKS OFF IN / 3 / HOURS") computed live from its kickoff time. Offline it falls back
   to the Mexico vs South Africa / 3-hour sample (`SAMPLE_COUNTDOWN`).
+- **`halftime-*`** — a halftime scoreboard for an **in-progress** match (`status =
+'in-progress'` with a score on the board, preferring a game that has reached the break),
+  with the score in big Orbitron. Run it during the interval — the "HALF TIME" label is
+  fixed, so the operator is responsible for the timing. Offline it falls back to the
+  Brazil 1-0 France sample (`SAMPLE_HALFTIME`).
 
 > ⚠️ **Pre-kickoff crowd**: in the app the crowd split is hidden until kickoff (anti-bias).
 > These marketing cards read the DB directly, so they **do** reveal pre-kickoff sentiment —

@@ -283,11 +283,12 @@ stats-page profile). Edit those to change the shown matches/users.
 
 ## 8c. Live-data assets — [`marketing/lib/livedata.mjs`](lib/livedata.mjs)
 
-Three asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
+Four asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
 count), `picks-vs-model-<home>-vs-<away>-*` (one per upcoming game — crowd pick split vs the
-model's probabilities), and `kickoff-countdown-*` (a "get your picks in" urgency card for the
-soonest fixture). See the [README → Live-data assets](README.md#live-data-assets) for the
-operator workflow; this section is the maintainer view.
+model's probabilities), `kickoff-countdown-*` (a "get your picks in" urgency card for the
+soonest fixture), and `halftime-*` (a scoreboard for an in-progress match). See the
+[README → Live-data assets](README.md#live-data-assets) for the operator workflow; this
+section is the maintainer view.
 
 **Data module** — `marketing/lib/livedata.mjs`, read-only raw SQL, mirrors
 [`scripts/query-teams.mjs`](../scripts/query-teams.mjs) for the connection + SSL opt-in:
@@ -300,19 +301,31 @@ operator workflow; this section is the maintainer view.
   Filters out placeholder fixtures (`/^(tbd|winner|loser|group\s|placeholder)/i` — mirrors
   [`src/utils/teamNames.js`](../src/utils/teamNames.js) `isPlaceholderGame`) and the model
   sentinel `(0.50, 0.00, 0.50)`. Crowd is **winner-only** (Home/Away) because picks are.
+- `fetchLiveGames(db)` → every `status='in-progress'` fixture that has a score, ordered
+  `halfTimeReached DESC, date ASC` so a game at the break sorts first. Same placeholder
+  filter. Feeds the halftime card.
 
 **Render fragment** — `picksVsModelCard({x, y, w, game})` in `product.mjs`, same idiom as
 the other product cards (reuses `rrect` / `txt` / `UI` tokens, self-measures height). Panel
 A = a 2-segment crowd bar (cyan Home / purple Away, forced to sum to 100; empty state when
 zero picks). Panel B = 3 horizontal probability bars (Home cyan / Draw amber / Away purple).
 
-`kickoff-countdown-*` uses `renderKickoffCountdown(game, format)`: the matchup in the Bebas
-display face, then a big Orbitron countdown numeral + unit from `countdownParts(kickoffAt)`
-(rounds to MIN / HOUR / DAY), sized to fit via `fitOrbitron` (reuses `wordmarkWidth`). It
-features `upcoming[0]` (soonest, since `fetchUpcomingGames` orders by date ASC) and falls
-back to `SAMPLE_COUNTDOWN` (Mexico vs South Africa, +3h) — `main()` picks the game via
-`upcoming.find((g) => g.kickoffAt instanceof Date)` so the sample-upcoming rows (no
-`kickoffAt`) never reach `countdownParts`.
+`kickoff-countdown-*` uses `renderKickoffCountdown(game, format)`: the matchup in Inter Black
+(matching the share heading), then a big Orbitron countdown numeral + unit from
+`countdownParts(kickoffAt)` (rounds to MIN / HOUR / DAY), sized to fit via `fitOrbitron`
+(reuses `wordmarkWidth`). The numeral's `numCy` is the midpoint between the "KICKS OFF IN"
+baseline and the unit's cap-top, so it's optically centred at any size. It features
+`upcoming[0]` (soonest) and falls back to `SAMPLE_COUNTDOWN` (Mexico vs South Africa, +3h) —
+`main()` picks the game via `upcoming.find((g) => g.kickoffAt instanceof Date)` so the
+sample-upcoming rows (no `kickoffAt`) never reach `countdownParts`.
+
+`halftime-*` uses `renderHalftime(game, format)`: matchup (Inter Black) + a red "HALF TIME"
+status + the score as **three Orbitron pieces** — home digit (`text-anchor=end`), a cyan
+dash, away digit (`text-anchor=start`), each `dominant-baseline=central` on a shared
+`scoreCy` and offset `±0.42em` from centre so the dash stays centred regardless of the
+digits. Features `liveGames[0]` (prefers a game at the break) and falls back to
+`SAMPLE_HALFTIME` (Brazil 1-0 France). The "HALF TIME" label is fixed — run it during the
+interval.
 
 **Generator wiring** — `renderThankYou(format, userCount)` (big milestone number via
 `roundDownToMilestone`) and `renderPicksVsModel(game, format)`. `main()` calls `openDb()`

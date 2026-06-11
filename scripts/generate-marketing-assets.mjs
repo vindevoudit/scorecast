@@ -37,7 +37,12 @@ import {
   statsCharts,
   picksVsModelCard,
 } from '../marketing/lib/product.mjs';
-import { openDb, fetchUserCount, fetchUpcomingGames } from '../marketing/lib/livedata.mjs';
+import {
+  openDb,
+  fetchUserCount,
+  fetchUpcomingGames,
+  fetchLiveGames,
+} from '../marketing/lib/livedata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fontsDir = resolve(root, 'marketing/fonts');
@@ -666,6 +671,16 @@ const SAMPLE_COUNTDOWN = {
   kickoffAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
 };
 
+// Offline fallback for the halftime score card. With a live DB it instead
+// features an in-progress fixture (preferring one that has reached half-time).
+const SAMPLE_HALFTIME = {
+  home: 'Brazil',
+  away: 'France',
+  homeScore: 1,
+  awayScore: 0,
+  leagueName: 'World Cup',
+};
+
 // Floor a user count to a clean, honest milestone for display. Big crowds
 // round to "+1000"/"500+"/"300+" so the number stays tidy and never
 // overstates; a small launch crowd (<50) shows its exact value (a "+"
@@ -798,6 +813,48 @@ function renderKickoffCountdown(game, format) {
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.34, glowR: 0.65 } });
 }
 
+// ── Halftime score (square / story) ──────────────────────────────────────
+// Live scoreboard card for a match at the break: matchup + a "HALF TIME"
+// status + the big Orbitron score ("1 - 0") + a second-half tease. The score
+// is drawn as three pieces (home digit / cyan dash / away digit) so each
+// numeral stays large and the dash sits centred regardless of the digits.
+function renderHalftime(game, format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+
+  const L = {
+    square: { markY: 120, markSize: 46, leagueY: 236, matchupY: 350, matchupMax: 64, htY: 470, htSize: 30, scoreCy: 686, scoreSize: 210, taglineY: 864, taglineSize: 32, urlY: 1026 },
+    story: { markY: 250, markSize: 50, leagueY: 398, matchupY: 524, matchupMax: 96, htY: 690, htSize: 36, scoreCy: 1004, scoreSize: 360, taglineY: 1320, taglineSize: 40, footerY: h - 210 },
+  }[format];
+
+  const matchup = `${game.home} vs ${game.away}`;
+  const matchupSize = Math.min(L.matchupMax, Math.floor((w * 0.86) / (matchup.length * 0.6)));
+  const league = (game.leagueName || 'Live').toUpperCase();
+  const hs = String(game.homeScore);
+  const as = String(game.awayScore);
+  // Each digit sits ~0.42em off centre; the dash holds the middle.
+  const off = L.scoreSize * 0.42;
+  const dashSize = L.scoreSize * 0.5;
+
+  const closing = story
+    ? footer({ cx, y: L.footerY, w: w * 0.64 })
+    : `<text x="${cx}" y="${L.urlY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`;
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, L.markY, L.markSize)}
+  <text x="${cx}" y="${L.leagueY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 32 : 26}" letter-spacing="${story ? 8 : 6}" fill="${COLOR.cyan}">${esc(league)}</text>
+  <text x="${cx}" y="${L.matchupY}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${matchupSize}" letter-spacing="0.5" fill="${COLOR.white}">${esc(matchup)}</text>
+  <text x="${cx}" y="${L.htY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.htSize}" letter-spacing="${story ? 12 : 8}" fill="#f87171">HALF TIME</text>
+  <text x="${cx - off}" y="${L.scoreCy}" text-anchor="end" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.scoreSize}" fill="${COLOR.white}">${esc(hs)}</text>
+  <text x="${cx}" y="${L.scoreCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${dashSize}" fill="${COLOR.cyanSoft}">-</text>
+  <text x="${cx + off}" y="${L.scoreCy}" text-anchor="start" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.scoreSize}" fill="${COLOR.white}">${esc(as)}</text>
+  <text x="${cx}" y="${L.taglineY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.taglineSize}" letter-spacing="1" fill="${COLOR.cyanSoft}">Second half coming up</text>
+  ${closing}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.34, glowR: 0.65 } });
+}
+
 // Build an SVG <rect> grid from a qrcode module bitmap (dark modules only;
 // the surrounding white card supplies the quiet zone + light background).
 function qrToSvg(qr, px) {
@@ -878,17 +935,22 @@ async function main() {
   const db = openDb();
   let userCount = SAMPLE_USER_COUNT;
   let upcoming = SAMPLE_UPCOMING;
+  let liveGames = [];
   let live = false;
   if (db) {
     try {
       userCount = await fetchUserCount(db);
       upcoming = await fetchUpcomingGames(db);
+      liveGames = await fetchLiveGames(db);
       live = true;
-      console.log(`\nlive data: ${userCount} users, ${upcoming.length} upcoming game(s)`);
+      console.log(
+        `\nlive data: ${userCount} users, ${upcoming.length} upcoming game(s), ${liveGames.length} in-progress`,
+      );
     } catch (err) {
       console.warn(`\nlive-data fetch failed (${err.message}); using sample data`);
       userCount = SAMPLE_USER_COUNT;
       upcoming = SAMPLE_UPCOMING;
+      liveGames = [];
     } finally {
       await db.close();
     }
@@ -906,6 +968,15 @@ async function main() {
   const countdownGame = upcoming.find((g) => g.kickoffAt instanceof Date) || SAMPLE_COUNTDOWN;
   await emit('kickoff-countdown-square', renderKickoffCountdown(countdownGame, 'square'), SIZE.square[0]);
   await emit('kickoff-countdown-story', renderKickoffCountdown(countdownGame, 'story'), SIZE.story[0]);
+
+  // Halftime score — the most relevant in-progress game (prefers one at the
+  // break); offline that's the Brazil 1-0 France sample.
+  const halftimeGame = liveGames[0] || SAMPLE_HALFTIME;
+  if (live && liveGames.length === 0) {
+    console.log('no in-progress games — halftime card uses the sample');
+  }
+  await emit('halftime-square', renderHalftime(halftimeGame, 'square'), SIZE.square[0]);
+  await emit('halftime-story', renderHalftime(halftimeGame, 'story'), SIZE.story[0]);
 
   if (upcoming.length === 0) {
     console.log('no eligible upcoming games — skipping picks-vs-model assets');

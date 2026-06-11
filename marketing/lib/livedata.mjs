@@ -138,3 +138,37 @@ export async function fetchUpcomingGames(db) {
     };
   });
 }
+
+// In-progress fixtures that already have a score on the board — the source for
+// the halftime score graphic. Ordered so a game that has reached half-time
+// (halfTimeReached) is preferred, then by kickoff. Placeholder fixtures are
+// filtered. Returns [] when nothing is live.
+//
+// Shape: [{ home, away, homeScore, awayScore, halfTimeReached, leagueName }]
+export async function fetchLiveGames(db) {
+  const [games] = await db.query(`
+    SELECT g."homeTeam"        AS home,
+           g."awayTeam"        AS away,
+           g."homeScore"       AS hs,
+           g."awayScore"       AS asc,
+           g."halfTimeReached" AS htr,
+           l.name              AS league
+    FROM games g
+    LEFT JOIN leagues l ON l.id = g."leagueId"
+    WHERE g.status = 'in-progress'
+      AND g."homeScore" IS NOT NULL
+      AND g."awayScore" IS NOT NULL
+    ORDER BY g."halfTimeReached" DESC, g.date ASC
+  `);
+
+  return games
+    .filter((g) => !isPlaceholder(g.home) && !isPlaceholder(g.away))
+    .map((g) => ({
+      home: g.home,
+      away: g.away,
+      homeScore: Number(g.hs),
+      awayScore: Number(g.asc),
+      halfTimeReached: Boolean(g.htr),
+      leagueName: g.league || '',
+    }));
+}

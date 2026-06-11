@@ -283,10 +283,11 @@ stats-page profile). Edit those to change the shown matches/users.
 
 ## 8c. Live-data assets — [`marketing/lib/livedata.mjs`](lib/livedata.mjs)
 
-Two asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
-count) and `picks-vs-model-<home>-vs-<away>-*` (one per upcoming game — crowd pick split vs
-the model's probabilities). See the [README → Live-data assets](README.md#live-data-assets)
-for the operator workflow; this section is the maintainer view.
+Three asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
+count), `picks-vs-model-<home>-vs-<away>-*` (one per upcoming game — crowd pick split vs the
+model's probabilities), and `kickoff-countdown-*` (a "get your picks in" urgency card for the
+soonest fixture). See the [README → Live-data assets](README.md#live-data-assets) for the
+operator workflow; this section is the maintainer view.
 
 **Data module** — `marketing/lib/livedata.mjs`, read-only raw SQL, mirrors
 [`scripts/query-teams.mjs`](../scripts/query-teams.mjs) for the connection + SSL opt-in:
@@ -304,6 +305,14 @@ for the operator workflow; this section is the maintainer view.
 the other product cards (reuses `rrect` / `txt` / `UI` tokens, self-measures height). Panel
 A = a 2-segment crowd bar (cyan Home / purple Away, forced to sum to 100; empty state when
 zero picks). Panel B = 3 horizontal probability bars (Home cyan / Draw amber / Away purple).
+
+`kickoff-countdown-*` uses `renderKickoffCountdown(game, format)`: the matchup in the Bebas
+display face, then a big Orbitron countdown numeral + unit from `countdownParts(kickoffAt)`
+(rounds to MIN / HOUR / DAY), sized to fit via `fitOrbitron` (reuses `wordmarkWidth`). It
+features `upcoming[0]` (soonest, since `fetchUpcomingGames` orders by date ASC) and falls
+back to `SAMPLE_COUNTDOWN` (Mexico vs South Africa, +3h) — `main()` picks the game via
+`upcoming.find((g) => g.kickoffAt instanceof Date)` so the sample-upcoming rows (no
+`kickoffAt`) never reach `countdownParts`.
 
 **Generator wiring** — `renderThankYou(format, userCount)` (big milestone number via
 `roundDownToMilestone`) and `renderPicksVsModel(game, format)`. `main()` calls `openDb()`

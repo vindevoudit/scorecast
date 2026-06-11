@@ -120,11 +120,16 @@ export async function fetchUpcomingGames(db) {
   }
 
   return eligible.map((g) => {
-    const { dateLabel, kickoff } = formatDateParts(new Date(g.date), g.tz);
+    const kickoffAt = new Date(g.date);
+    const { dateLabel, kickoff } = formatDateParts(kickoffAt, g.tz);
     return {
       id: g.id,
       home: g.home,
       away: g.away,
+      // Raw kickoff Date so renderers can compute a live "kicks off in N"
+      // countdown at generation time (dateLabel/kickoff are the preformatted
+      // display strings).
+      kickoffAt,
       dateLabel,
       kickoff,
       leagueName: g.league || '',

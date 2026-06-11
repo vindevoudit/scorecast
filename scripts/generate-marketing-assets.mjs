@@ -656,6 +656,16 @@ const SAMPLE_UPCOMING = [
   },
 ];
 
+// Offline fallback for the "get your picks in" countdown card: Mexico vs
+// South Africa, kicking off in 3 hours. With a live DB the card instead
+// features the soonest upcoming fixture (upcoming[0]) and its real countdown.
+const SAMPLE_COUNTDOWN = {
+  home: 'Mexico',
+  away: 'South Africa',
+  leagueName: 'World Cup',
+  kickoffAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+};
+
 // Floor a user count to a clean, honest milestone for display. Big crowds
 // round to "+1000"/"500+"/"300+" so the number stays tidy and never
 // overstates; a small launch crowd (<50) shows its exact value (a "+"
@@ -674,6 +684,29 @@ function slugify(name) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+// Humanize a kickoff time into a big scoreboard value + unit, e.g.
+// { value: '3', unit: 'HOURS' } / { value: '45', unit: 'MINUTES' } /
+// { value: '2', unit: 'DAYS' }. Rounds to the nearest unit; <=0 reads NOW.
+function countdownParts(kickoffAt, now = new Date()) {
+  const diff = kickoffAt.getTime() - now.getTime();
+  if (diff <= 0) return { value: 'NOW', unit: 'KICKING OFF' };
+  const mins = Math.round(diff / 60000);
+  if (mins < 60) return { value: String(mins), unit: mins === 1 ? 'MINUTE' : 'MINUTES' };
+  const hours = Math.round(diff / 3600000);
+  if (hours < 24) return { value: String(hours), unit: hours === 1 ? 'HOUR' : 'HOURS' };
+  const days = Math.round(diff / 86400000);
+  return { value: String(days), unit: days === 1 ? 'DAY' : 'DAYS' };
+}
+
+// Largest Orbitron size that fits `text` within `targetW`, clamped to maxSize.
+// Reuses brand.mjs wordmarkWidth (Orbitron advance model) so the big countdown
+// numeral and the matchup never overflow the canvas.
+function fitOrbitron(text, targetW, maxSize) {
+  let size = maxSize;
+  while (size > 12 && wordmarkWidth(size, text) > targetW) size -= 2;
+  return size;
 }
 
 // ── Thank-you / user-count (square / story) ──────────────────────────────
@@ -717,6 +750,46 @@ function renderPicksVsModel(game, format) {
   ${card.svg}
   ${story ? footer({ cx, y: h - 150, w: w * 0.64 }) : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
+}
+
+// ── Kickoff countdown — "get your picks in" (square / story) ──────────────
+// Urgency card for the next fixture: matchup + a big Orbitron countdown
+// numeral ("KICKS OFF IN / 3 / HOURS") + a "Get your picks in" CTA. Orbitron
+// carries the wordmark + the scoreboard countdown; the matchup uses the Bebas
+// display face (Orbitron is too wide for long national-team names). The
+// countdown is computed live from game.kickoffAt at generation time.
+function renderKickoffCountdown(game, format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+
+  const L = {
+    square: { markY: 120, markSize: 46, leagueY: 236, matchupY: 348, matchupMax: 72, kickerY: 470, numCy: 620, numMax: 248, unitY: 760, unitSize: 54, ctaY: 814, ctaSize: 34, urlY: 1026 },
+    story: { markY: 250, markSize: 50, leagueY: 398, matchupY: 524, matchupMax: 104, kickerY: 706, numCy: 982, numMax: 430, unitY: 1214, unitSize: 80, ctaY: 1334, ctaSize: 42, footerY: h - 210 },
+  }[format];
+
+  const matchup = `${game.home} vs ${game.away}`;
+  // Conservative Bebas advance (~0.40em) so long names never overflow.
+  const matchupSize = Math.min(L.matchupMax, Math.floor((w * 0.86) / (matchup.length * 0.4)));
+  const { value, unit } = countdownParts(game.kickoffAt);
+  const numSize = fitOrbitron(value, w * 0.78, L.numMax);
+  const league = (game.leagueName || 'Matchday').toUpperCase();
+
+  const closing = story
+    ? footer({ cx, y: L.footerY, w: w * 0.64 })
+    : `<text x="${cx}" y="${L.urlY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`;
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, L.markY, L.markSize)}
+  <text x="${cx}" y="${L.leagueY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 32 : 26}" letter-spacing="${story ? 8 : 6}" fill="${COLOR.cyan}">${esc(league)}</text>
+  <text x="${cx}" y="${L.matchupY}" text-anchor="middle" font-family="${FONT.display}" font-size="${matchupSize}" letter-spacing="1" fill="${COLOR.white}">${esc(matchup)}</text>
+  <text x="${cx}" y="${L.kickerY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 36 : 30}" letter-spacing="${story ? 10 : 7}" fill="${COLOR.cyanSoft}">KICKS OFF IN</text>
+  <text x="${cx}" y="${L.numCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${numSize}" letter-spacing="${numSize * 0.04}" fill="url(#mark)">${esc(value)}</text>
+  <text x="${cx}" y="${L.unitY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.unitSize}" letter-spacing="${story ? 14 : 10}" fill="${COLOR.cyanSoft}">${esc(unit)}</text>
+  ${ctaPill({ cx, y: L.ctaY, label: 'Get your picks in', size: L.ctaSize })}
+  ${closing}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.34, glowR: 0.65 } });
 }
 
 // Build an SVG <rect> grid from a qrcode module bitmap (dark modules only;
@@ -819,6 +892,14 @@ async function main() {
 
   await emit('thankyou-square', renderThankYou('square', userCount), SIZE.square[0]);
   await emit('thankyou-story', renderThankYou('story', userCount), SIZE.story[0]);
+
+  // "Get your picks in" countdown — features the soonest live fixture (which
+  // carries a kickoffAt Date); offline that's the Mexico vs South Africa
+  // sample. `.find` guards against the sample-upcoming fallback rows, which
+  // have no kickoffAt.
+  const countdownGame = upcoming.find((g) => g.kickoffAt instanceof Date) || SAMPLE_COUNTDOWN;
+  await emit('kickoff-countdown-square', renderKickoffCountdown(countdownGame, 'square'), SIZE.square[0]);
+  await emit('kickoff-countdown-story', renderKickoffCountdown(countdownGame, 'story'), SIZE.story[0]);
 
   if (upcoming.length === 0) {
     console.log('no eligible upcoming games — skipping picks-vs-model assets');

@@ -775,8 +775,8 @@ function renderKickoffCountdown(game, format) {
   const numCy = (L.kickerY + (L.unitY - 0.72 * L.unitSize)) / 2;
 
   const matchup = `${game.home} vs ${game.away}`;
-  // Conservative Bebas advance (~0.40em) so long names never overflow.
-  const matchupSize = Math.min(L.matchupMax, Math.floor((w * 0.86) / (matchup.length * 0.4)));
+  // Inter Black advance (~0.6em) so long national-team names never overflow.
+  const matchupSize = Math.min(L.matchupMax, Math.floor((w * 0.86) / (matchup.length * 0.6)));
   const { value, unit } = countdownParts(game.kickoffAt);
   const numSize = fitOrbitron(value, w * 0.78, L.numMax);
   const league = (game.leagueName || 'Matchday').toUpperCase();
@@ -789,7 +789,7 @@ function renderKickoffCountdown(game, format) {
   ${background(w, h)}
   ${topMark(cx, L.markY, L.markSize)}
   <text x="${cx}" y="${L.leagueY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 32 : 26}" letter-spacing="${story ? 8 : 6}" fill="${COLOR.cyan}">${esc(league)}</text>
-  <text x="${cx}" y="${L.matchupY}" text-anchor="middle" font-family="${FONT.display}" font-size="${matchupSize}" letter-spacing="1" fill="${COLOR.white}">${esc(matchup)}</text>
+  <text x="${cx}" y="${L.matchupY}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${matchupSize}" letter-spacing="0.5" fill="${COLOR.white}">${esc(matchup)}</text>
   <text x="${cx}" y="${L.kickerY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 36 : 30}" letter-spacing="${story ? 10 : 7}" fill="${COLOR.cyanSoft}">KICKS OFF IN</text>
   <text x="${cx}" y="${numCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${numSize}" letter-spacing="${numSize * 0.04}" fill="url(#mark)">${esc(value)}</text>
   <text x="${cx}" y="${L.unitY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.unitSize}" letter-spacing="${story ? 14 : 10}" fill="${COLOR.cyanSoft}">${esc(unit)}</text>

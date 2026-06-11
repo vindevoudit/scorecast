@@ -75,13 +75,17 @@ test.describe('T29-1 — Group discriminator rendering', () => {
       .getByRole('tab', { name: /Groups/i })
       .first()
       .click();
-    // Wait for the GroupCard heading to mount with the name + discriminator.
-    // GroupNameDisplay renders `<name> #<discriminator>` in a `<span>` so
-    // the rendered text contains both as a single accessible string.
-    await expect(page.getByText(groupName, { exact: false }).first()).toBeVisible({
+    // Assert on the GroupCard heading (role=heading), not a bare getByText:
+    // the "Filter by group" combobox on the My Groups tab renders the same
+    // group as an <option>, and a plain getByText(...).first() matches that
+    // hidden option first → toBeVisible fails. GroupNameDisplay renders
+    // `<name> #<discriminator>` as a single accessible string in the heading.
+    await expect(page.getByRole('heading', { name: groupName, exact: false }).first()).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByText(`#${discriminator}`).first()).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: `#${discriminator}`, exact: false }).first(),
+    ).toBeVisible();
   });
 });
 

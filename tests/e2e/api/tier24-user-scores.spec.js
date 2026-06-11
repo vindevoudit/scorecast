@@ -58,6 +58,31 @@ async function readPick(userId, gameId) {
   return row ? row.get({ plain: true }) : null;
 }
 
+// The cascade-delete test deletes alice to prove the FK cascade, then must
+// re-create her so downstream specs can still log in. users.referralCode is
+// NOT NULL with no model default (Tier 30 referral migration generates it in
+// the register route), so a direct User.create must supply it — derived the
+// same way seed.js does so the restored row matches the seeded one. Guarded by
+// findByPk and called from `finally` so alice is ALWAYS restored, even if an
+// assertion throws after the delete (otherwise every later apiLogin(alice)
+// 401s and red-washes the whole suite).
+async function restoreAliceIfMissing() {
+  const { User } = getModels();
+  if (await User.findByPk(USERS.alice.id)) return;
+  const bcrypt = require('bcryptjs');
+  await User.create({
+    id: USERS.alice.id,
+    username: USERS.alice.username,
+    email: USERS.alice.email,
+    password: await bcrypt.hash(USERS.alice.password, 8),
+    role: USERS.alice.role,
+    onboardingCompletedAt: new Date(),
+    termsAcceptedAt: new Date(),
+    termsAcceptedVersion: 2,
+    referralCode: USERS.alice.id.replace(/-/g, '').slice(-8).toUpperCase(),
+  });
+}
+
 // Reset every Tier 24-relevant table to a known-clean state. Called
 // from each test's beforeEach so order between blocks doesn't matter.
 async function resetAll() {
@@ -473,30 +498,18 @@ test.describe('Tier 24 — Cascade', () => {
       expect(rowBefore).not.toBeNull();
 
       // Delete alice via admin; FK CASCADE should drop her user_scores.
-      // We register her again right after so other tests still find her.
-      // Use the admin user-delete endpoint.
+      // She's re-created in the finally block below (not here) so other tests
+      // still find her regardless of whether the assertions in this try pass.
       const res = await admin.delete(`/api/admin/users/${USERS.alice.id}`);
       if (!res.ok()) throw new Error(`delete user: ${res.status()} ${await res.text()}`);
       const rowAfter = await readUserScore(USERS.alice.id);
       expect(rowAfter).toBeNull();
       const overallAfter = await readUserScoreOverall(USERS.alice.id);
       expect(overallAfter).toBeNull();
-      // Re-create alice for other tests
-      const { User } = getModels();
-      const bcrypt = require('bcryptjs');
-      await User.create({
-        id: USERS.alice.id,
-        username: USERS.alice.username,
-        email: USERS.alice.email,
-        password: await bcrypt.hash(USERS.alice.password, 8),
-        role: USERS.alice.role,
-        onboardingCompletedAt: new Date(),
-        termsAcceptedAt: new Date(),
-        termsAcceptedVersion: 2,
-      });
     } finally {
       await alice.dispose();
       await admin.dispose();
+      await restoreAliceIfMissing();
     }
   });
 

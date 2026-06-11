@@ -22,6 +22,7 @@
 
 const { test, expect } = require('@playwright/test');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { loginViaUI } = require('./helpers/auth');
 const { openAdminTab, openAdminSubTab } = require('./helpers/admin');
 const { apiLogin } = require('./helpers/api');
@@ -46,6 +47,10 @@ async function createBareUser({ username, password, email, role = 'user' }) {
     emailVerifiedAt: new Date(),
     role,
     loginAttempts: 0,
+    // Tier 30 referral migration made users.referralCode NOT NULL with no
+    // model default (it's generated in the register route, not a hook). A
+    // direct User.create must supply it — 8 uppercase hex chars, prod shape.
+    referralCode: crypto.randomBytes(4).toString('hex').toUpperCase(),
   });
 }
 

@@ -4,16 +4,33 @@ const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
 const { selectGameDate } = require('./helpers/games');
 const { closestCard } = require('./helpers/selectors');
-const { clearGameResults, clearPicksAndBadges } = require('./helpers/api');
+const { clearPicksAndBadges } = require('./helpers/api');
 const { USERS, GAMES } = require('./fixtures/data');
 
-// Phase 0 verification — under suite load, a prior spec sometimes leaves
-// the Eagles game with a `result` set (and alice with a scored pick on
-// it). The CommentThread surface renders the same regardless, but the
-// "Pick X to win" button vanishes once the game has a result, so the
-// test's initial visibility wait fails. Reset both before the test runs.
+// Lazy model access (mirrors the getModels pattern in helpers/api.js +
+// admin-panel.spec.js): require env first so DATABASE_URL is set before the
+// Sequelize singleton connects, then reuse the shared instance.
+let _models = null;
+function getModels() {
+  if (_models) return _models;
+  require('./fixtures/env');
+  process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+  process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent';
+  _models = require('../../models');
+  return _models;
+}
+
+// Phase 0 verification — under full-suite load a prior spec can leave the
+// Eagles fixture in a state that hides the "Pick X to win" button: a result
+// set, its date moved off the visible calendar window, or even a delete. The
+// old reset only cleared the result, which wasn't enough (the game would be
+// missing from its expected day entirely). upsert it back to the canonical
+// fixture state — right date, scheduled, no result — so this spec is
+// self-sufficient regardless of what ran before it; then clear alice's picks
+// so the card shows the pick button rather than an existing pick.
 test.beforeAll(async () => {
-  await clearGameResults([GAMES.eagles.id]);
+  const { Game } = getModels();
+  await Game.upsert({ ...GAMES.eagles, status: 'scheduled', result: null });
   await clearPicksAndBadges([USERS.alice.id]);
 });
 

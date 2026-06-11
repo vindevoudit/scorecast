@@ -15,7 +15,7 @@
 
 const { test, expect, request: pwRequest } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
-const { resetUserLockout, insertPasswordResetToken } = require('./helpers/api');
+const { resetUserLockout, insertPasswordResetToken, setUserPassword } = require('./helpers/api');
 const { USERS } = require('./fixtures/data');
 const { BASE_URL } = require('./fixtures/env');
 
@@ -78,47 +78,46 @@ test('password reset: resetToken URL → new password flow logs the user in and 
   // mirror the server's hash-and-store pattern from routes/auth.js).
   const rawToken = await insertPasswordResetToken(USERS.alice.username);
 
-  // Drive lockout via direct API calls so the loginAttempts column is non-zero
-  // when we submit the reset — that lets us assert the reset clears it.
-  const apiCtx = await pwRequest.newContext({ baseURL: BASE_URL });
-  for (let i = 0; i < 5; i += 1) {
-    const res = await apiCtx.post('/api/login', {
-      data: { username: USERS.alice.username, password: 'still-wrong' },
+  try {
+    // Drive lockout via direct API calls so the loginAttempts column is non-zero
+    // when we submit the reset — that lets us assert the reset clears it.
+    const apiCtx = await pwRequest.newContext({ baseURL: BASE_URL });
+    for (let i = 0; i < 5; i += 1) {
+      const res = await apiCtx.post('/api/login', {
+        data: { username: USERS.alice.username, password: 'still-wrong' },
+      });
+      expect(res.status()).toBe(401);
+    }
+    await apiCtx.dispose();
+
+    // Open the reset form via the URL param the AuthContext consumes on mount.
+    const newPassword = 'NewAlicePassword456!';
+    await page.goto(`/?resetToken=${rawToken}`);
+    await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible({
+      timeout: 10_000,
     });
-    expect(res.status()).toBe(401);
+    await page.locator('#reset-password').fill(newPassword);
+    await page.getByRole('button', { name: 'Set new password', exact: true }).click();
+
+    // Successful reset takes us back to the auth screen.
+    await expect(page.locator('#login-username')).toBeVisible({ timeout: 10_000 });
+
+    // Alice can sign in with the new password — proves both (a) reset succeeded,
+    // and (b) loginAttempts/lockedUntil were cleared even though alice was at 5
+    // failed attempts a moment ago (Tier 6.4 + 6.8 cascade invariant).
+    const verifyContext = await browser.newContext();
+    const verifyPage = await verifyContext.newPage();
+    await loginViaUI(verifyPage, { username: USERS.alice.username, password: newPassword });
+    await verifyContext.close();
+  } finally {
+    // Restore alice's seeded password + clear lockout no matter where the test
+    // failed. This spec mutates a SHARED seeded user; a mid-test failure that
+    // left her password changed would 401 every downstream apiLogin(alice) and
+    // red-wash the rest of the suite. Direct DB write (setUserPassword runs the
+    // beforeUpdate bcrypt hook) so cleanup can't itself fail on a flaky UI.
+    await setUserPassword(USERS.alice.id, USERS.alice.password);
+    await resetUserLockout(USERS.alice.username);
   }
-  await apiCtx.dispose();
-
-  // Open the reset form via the URL param the AuthContext consumes on mount.
-  const newPassword = 'NewAlicePassword456!';
-  await page.goto(`/?resetToken=${rawToken}`);
-  await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible({
-    timeout: 10_000,
-  });
-  await page.locator('#reset-password').fill(newPassword);
-  await page.getByRole('button', { name: 'Set new password', exact: true }).click();
-
-  // Successful reset takes us back to the auth screen.
-  await expect(page.locator('#login-username')).toBeVisible({ timeout: 10_000 });
-
-  // Alice can sign in with the new password — proves both (a) reset succeeded,
-  // and (b) loginAttempts/lockedUntil were cleared even though alice was at 5
-  // failed attempts a moment ago (Tier 6.4 + 6.8 cascade invariant).
-  const verifyContext = await browser.newContext();
-  const verifyPage = await verifyContext.newPage();
-  await loginViaUI(verifyPage, { username: USERS.alice.username, password: newPassword });
-  await verifyContext.close();
-
-  // Restore the seeded password so later specs that hard-code USERS.alice
-  // still work. Reuses the same reset flow, this time with a clean session.
-  const restoreToken = await insertPasswordResetToken(USERS.alice.username);
-  const restoreContext = await browser.newContext();
-  const restorePage = await restoreContext.newPage();
-  await restorePage.goto(`/?resetToken=${restoreToken}`);
-  await restorePage.locator('#reset-password').fill(USERS.alice.password);
-  await restorePage.getByRole('button', { name: 'Set new password', exact: true }).click();
-  await expect(restorePage.locator('#login-username')).toBeVisible({ timeout: 10_000 });
-  await restoreContext.close();
 });
 
 test('csrf: POST /api/picks without X-CSRF-Token is rejected with 403', async () => {

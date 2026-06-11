@@ -259,12 +259,13 @@ test('undo confirm modal appears when locked payout exceeds current', async ({ p
 
   await loginViaUI(page, USERS.alice);
   // GamesCalendar defaults to today; Lions sits at today+1, so snap the
-  // chip to its date before hunting for the "Undo pick" button (the
+  // chip to its date before hunting for the "Undo this pick" button (the
   // button lives inside the Lions GameCard).
   await selectGameDate(page, GAMES.lions);
 
-  // Only one pick → exactly one "Undo pick" button on the page.
-  await page.getByRole('button', { name: 'Undo pick' }).click();
+  // Only one pick → exactly one undo button on the page. Its accessible name
+  // is the aria-label "Undo this pick" (visible text is just "Undo").
+  await page.getByRole('button', { name: 'Undo this pick' }).click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible({ timeout: 5_000 });
@@ -296,10 +297,10 @@ test('undo skips modal when locked payout does not exceed current', async ({ pag
 
   await loginViaUI(page, USERS.alice);
   // GamesCalendar defaults to today; Lions sits at today+1, so snap the
-  // chip to its date before hunting for the "Undo pick" button.
+  // chip to its date before hunting for the "Undo this pick" button.
   await selectGameDate(page, GAMES.lions);
 
-  await page.getByRole('button', { name: 'Undo pick' }).click();
+  await page.getByRole('button', { name: 'Undo this pick' }).click();
 
   // Pick is removed; the "Your pick:" line for lions disappears within the
   // standard refresh window. The dialog never opens.

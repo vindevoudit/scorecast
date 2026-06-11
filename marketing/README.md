@@ -60,9 +60,11 @@ All squares are **1080×1080** (IG/FB feed, carousels), stories **1080×1920**
 | `picks-vs-model-<home>-vs-<away>-*.png`    | sq + story | **Live** — one per upcoming game: crowd pick split vs the model's probabilities       |
 | `kickoff-countdown-*.png`                  | sq + story | **Live** — "get your picks in" urgency card for the next fixture + a big countdown    |
 | `halftime-*.png`                           | sq + story | **Live** — halftime scoreboard for an in-progress match (big Orbitron score)          |
+| `fulltime-*.png`                           | sq + story | **Live** — full-time result: final score + points a correct pick earned               |
 
-> **Live-data assets** (`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`, `halftime-*`) are
-> pulled from production rather than baked-in copy — see **[Live-data assets](#live-data-assets)** below.
+> **Live-data assets** (`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`, `halftime-*`,
+> `fulltime-*`) are pulled from production rather than baked-in copy — see
+> **[Live-data assets](#live-data-assets)** below.
 
 > **Product mockups** are faithful re-creations of the live app UI (real dark-theme
 > tokens, real component layout) populated with past Premier League fixtures + fake users.
@@ -175,8 +177,8 @@ group-chat screenshots).
 
 ## Live-data assets
 
-`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`, and `halftime-*` are generated from
-**real production data** when a
+`thankyou-*`, `picks-vs-model-*`, `kickoff-countdown-*`, `halftime-*`, and `fulltime-*` are
+generated from **real production data** when a
 `DATABASE_URL` is present in the environment; otherwise the generator falls back to
 baked-in sample numbers so the full kit still renders offline (the rest of the kit is
 unaffected either way). Read-only — the generator never writes to the DB.
@@ -245,6 +247,11 @@ What they pull:
   with the score in big Orbitron. Run it during the interval — the "HALF TIME" label is
   fixed, so the operator is responsible for the timing. Offline it falls back to the
   Brazil 1-0 France sample (`SAMPLE_HALFTIME`).
+- **`fulltime-*`** — a full-time result card for the most recent **finished** decisive
+  game: final score (winner bright, loser dimmed) + the points a correct pick earned,
+  computed as `(1 − winning_probability) × 100` (mirrors `lib/scoring.js` — an underdog
+  win shows a bigger number). Draws show "Both sides earn partial points" instead of a
+  figure. Offline it falls back to the Brazil 2-1 France / +62 sample (`SAMPLE_FULLTIME`).
 
 > ⚠️ **Pre-kickoff crowd**: in the app the crowd split is hidden until kickoff (anti-bias).
 > These marketing cards read the DB directly, so they **do** reveal pre-kickoff sentiment —

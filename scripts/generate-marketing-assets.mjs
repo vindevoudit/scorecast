@@ -42,6 +42,7 @@ import {
   fetchUserCount,
   fetchUpcomingGames,
   fetchLiveGames,
+  fetchFinishedGames,
 } from '../marketing/lib/livedata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -681,6 +682,20 @@ const SAMPLE_HALFTIME = {
   leagueName: 'World Cup',
 };
 
+// Offline fallback for the full-time result card. A 38% home win → +62 pts
+// (ties the brand's "+62 for a 38% upset" stat). With a live DB it features
+// the most recent decisive finished fixture and its real points.
+const SAMPLE_FULLTIME = {
+  home: 'Brazil',
+  away: 'France',
+  homeScore: 2,
+  awayScore: 1,
+  result: 'home',
+  winner: 'Brazil',
+  points: 62,
+  leagueName: 'World Cup',
+};
+
 // Floor a user count to a clean, honest milestone for display. Big crowds
 // round to "+1000"/"500+"/"300+" so the number stays tidy and never
 // overstates; a small launch crowd (<50) shows its exact value (a "+"
@@ -855,6 +870,67 @@ function renderHalftime(game, format) {
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.34, glowR: 0.65 } });
 }
 
+// ── Full-time result + points (square / story) ───────────────────────────
+// Closes the lifecycle: final score (winner bright, loser dimmed) + the
+// points a correct pick earned, e.g. "BACKING BRAZIL · +62 PTS". The score
+// and the points both use Orbitron; the points sit in the brand gradient to
+// headline the probability-scoring USP. Draws have no single winner, so they
+// show the result + a partial-credit note instead of a points figure.
+function renderFulltime(game, format) {
+  const [w, h] = SIZE[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const draw = game.result === 'draw';
+
+  const L = {
+    square: { markY: 120, markSize: 46, leagueY: 232, matchupY: 344, matchupMax: 60, ftY: 452, ftSize: 30, scoreCy: 588, scoreSize: 168, backY: 744, backSize: 28, ptsY: 836, ptsMax: 96, urlY: 1028 },
+    story: { markY: 250, markSize: 50, leagueY: 392, matchupY: 512, matchupMax: 92, ftY: 648, ftSize: 36, scoreCy: 860, scoreSize: 300, backY: 1090, backSize: 34, ptsY: 1216, ptsMax: 150, footerY: h - 200 },
+  }[format];
+
+  const matchup = `${game.home} vs ${game.away}`;
+  const matchupSize = Math.min(L.matchupMax, Math.floor((w * 0.86) / (matchup.length * 0.6)));
+  const league = (game.leagueName || 'Result').toUpperCase();
+  const hs = String(game.homeScore);
+  const as = String(game.awayScore);
+  const off = L.scoreSize * 0.42;
+  const dashSize = L.scoreSize * 0.5;
+  // Winner bright, loser dimmed (draw → both bright).
+  const homeFill = draw || game.result === 'home' ? COLOR.white : COLOR.dim;
+  const awayFill = draw || game.result === 'away' ? COLOR.white : COLOR.dim;
+
+  // Points block: decisive → "BACKING <WINNER>" + big Orbitron "+N PTS";
+  // draw → "DRAW" + a plain partial-credit note (no single figure).
+  let pointsBlock;
+  if (!draw && game.points != null) {
+    const ptsText = `+${game.points} PTS`;
+    const ptsSize = fitOrbitron(ptsText, w * 0.7, L.ptsMax);
+    pointsBlock = `
+  <text x="${cx}" y="${L.backY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.backSize}" letter-spacing="${story ? 6 : 4}" fill="${COLOR.cyanSoft}">BACKING ${esc(game.winner.toUpperCase())}</text>
+  <text x="${cx}" y="${L.ptsY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="${ptsSize}" letter-spacing="${ptsSize * 0.04}" fill="url(#mark)">${esc(ptsText)}</text>`;
+  } else {
+    pointsBlock = `
+  <text x="${cx}" y="${L.backY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.backSize}" letter-spacing="${story ? 6 : 4}" fill="${COLOR.cyanSoft}">DRAW</text>
+  <text x="${cx}" y="${L.ptsY - (story ? 40 : 30)}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 44 : 36}" letter-spacing="1" fill="${COLOR.textHi}">Both sides earn partial points</text>`;
+  }
+
+  const closing = story
+    ? footer({ cx, y: L.footerY, w: w * 0.64 })
+    : `<text x="${cx}" y="${L.urlY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`;
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, L.markY, L.markSize)}
+  <text x="${cx}" y="${L.leagueY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 32 : 26}" letter-spacing="${story ? 8 : 6}" fill="${COLOR.cyan}">${esc(league)}</text>
+  <text x="${cx}" y="${L.matchupY}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${matchupSize}" letter-spacing="0.5" fill="${COLOR.white}">${esc(matchup)}</text>
+  <text x="${cx}" y="${L.ftY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.ftSize}" letter-spacing="${story ? 12 : 8}" fill="${COLOR.cyanSoft}">FULL TIME</text>
+  <text x="${cx - off}" y="${L.scoreCy}" text-anchor="end" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.scoreSize}" fill="${homeFill}">${esc(hs)}</text>
+  <text x="${cx}" y="${L.scoreCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${dashSize}" fill="${COLOR.cyanSoft}">-</text>
+  <text x="${cx + off}" y="${L.scoreCy}" text-anchor="start" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.scoreSize}" fill="${awayFill}">${esc(as)}</text>
+  ${pointsBlock}
+  ${closing}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.34, glowR: 0.65 } });
+}
+
 // Build an SVG <rect> grid from a qrcode module bitmap (dark modules only;
 // the surrounding white card supplies the quiet zone + light background).
 function qrToSvg(qr, px) {
@@ -936,21 +1012,24 @@ async function main() {
   let userCount = SAMPLE_USER_COUNT;
   let upcoming = SAMPLE_UPCOMING;
   let liveGames = [];
+  let finishedGames = [];
   let live = false;
   if (db) {
     try {
       userCount = await fetchUserCount(db);
       upcoming = await fetchUpcomingGames(db);
       liveGames = await fetchLiveGames(db);
+      finishedGames = await fetchFinishedGames(db);
       live = true;
       console.log(
-        `\nlive data: ${userCount} users, ${upcoming.length} upcoming game(s), ${liveGames.length} in-progress`,
+        `\nlive data: ${userCount} users, ${upcoming.length} upcoming game(s), ${liveGames.length} in-progress, ${finishedGames.length} finished`,
       );
     } catch (err) {
       console.warn(`\nlive-data fetch failed (${err.message}); using sample data`);
       userCount = SAMPLE_USER_COUNT;
       upcoming = SAMPLE_UPCOMING;
       liveGames = [];
+      finishedGames = [];
     } finally {
       await db.close();
     }
@@ -977,6 +1056,16 @@ async function main() {
   }
   await emit('halftime-square', renderHalftime(halftimeGame, 'square'), SIZE.square[0]);
   await emit('halftime-story', renderHalftime(halftimeGame, 'story'), SIZE.story[0]);
+
+  // Full-time result + points — most recent decisive finished game (falls back
+  // to the most recent overall, then the Brazil 2-1 France sample).
+  const fulltimeGame =
+    finishedGames.find((g) => g.result !== 'draw') || finishedGames[0] || SAMPLE_FULLTIME;
+  if (live && finishedGames.length === 0) {
+    console.log('no finished games — full-time card uses the sample');
+  }
+  await emit('fulltime-square', renderFulltime(fulltimeGame, 'square'), SIZE.square[0]);
+  await emit('fulltime-story', renderFulltime(fulltimeGame, 'story'), SIZE.story[0]);
 
   if (upcoming.length === 0) {
     console.log('no eligible upcoming games — skipping picks-vs-model assets');

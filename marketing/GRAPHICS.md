@@ -283,10 +283,11 @@ stats-page profile). Edit those to change the shown matches/users.
 
 ## 8c. Live-data assets — [`marketing/lib/livedata.mjs`](lib/livedata.mjs)
 
-Four asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
+Five asset types pull from **production** instead of baked-in copy: `thankyou-*` (real user
 count), `picks-vs-model-<home>-vs-<away>-*` (one per upcoming game — crowd pick split vs the
 model's probabilities), `kickoff-countdown-*` (a "get your picks in" urgency card for the
-soonest fixture), and `halftime-*` (a scoreboard for an in-progress match). See the
+soonest fixture), `halftime-*` (a scoreboard for an in-progress match), and `fulltime-*`
+(the result + the points a correct pick earned). See the
 [README → Live-data assets](README.md#live-data-assets) for the operator workflow; this
 section is the maintainer view.
 
@@ -304,6 +305,10 @@ section is the maintainer view.
 - `fetchLiveGames(db)` → every `status='in-progress'` fixture that has a score, ordered
   `halfTimeReached DESC, date ASC` so a game at the break sorts first. Same placeholder
   filter. Feeds the halftime card.
+- `fetchFinishedGames(db)` → every `status='finished'` fixture with a score + result,
+  ordered `date DESC`. Precomputes `winner` + `points` via `pointsForWinner` (the
+  `lib/scoring.js` formula `(1 − winning_probability) × 100`; draws → `null`). Feeds the
+  full-time card.
 
 **Render fragment** — `picksVsModelCard({x, y, w, game})` in `product.mjs`, same idiom as
 the other product cards (reuses `rrect` / `txt` / `UI` tokens, self-measures height). Panel
@@ -326,6 +331,15 @@ dash, away digit (`text-anchor=start`), each `dominant-baseline=central` on a sh
 digits. Features `liveGames[0]` (prefers a game at the break) and falls back to
 `SAMPLE_HALFTIME` (Brazil 1-0 France). The "HALF TIME" label is fixed — run it during the
 interval.
+
+`fulltime-*` uses `renderFulltime(game, format)`: same three-piece Orbitron score as
+halftime, but the **winner digit is bright and the loser dimmed** (`COLOR.dim`; draws keep
+both bright), under a "FULL TIME" status. Below it, decisive games show "BACKING <WINNER>"
+
+- a big Orbitron `+N PTS` in the brand gradient (the probability-scoring headline); draws
+  show a partial-credit note instead. `main()` features `finishedGames.find(g => g.result !==
+'draw') || finishedGames[0]` (most recent decisive, else most recent) and falls back to
+  `SAMPLE_FULLTIME` (Brazil 2-1 France, +62 — ties the "+62 for a 38% upset" stat).
 
 **Generator wiring** — `renderThankYou(format, userCount)` (big milestone number via
 `roundDownToMilestone`) and `renderPicksVsModel(game, format)`. `main()` calls `openDb()`

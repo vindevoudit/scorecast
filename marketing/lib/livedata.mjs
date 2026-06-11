@@ -150,7 +150,7 @@ export async function fetchLiveGames(db) {
     SELECT g."homeTeam"        AS home,
            g."awayTeam"        AS away,
            g."homeScore"       AS hs,
-           g."awayScore"       AS asc,
+           g."awayScore"       AS ascore,
            g."halfTimeReached" AS htr,
            l.name              AS league
     FROM games g
@@ -167,8 +167,56 @@ export async function fetchLiveGames(db) {
       home: g.home,
       away: g.away,
       homeScore: Number(g.hs),
-      awayScore: Number(g.asc),
+      awayScore: Number(g.ascore),
       halfTimeReached: Boolean(g.htr),
+      leagueName: g.league || '',
+    }));
+}
+
+// Points a correct pick earns on a decisive result, mirroring lib/scoring.js
+// scorePick: backing the winning side pays (1 - winning_probability) × 100, so
+// backing an underdog pays more. Draws are winner-only-pick partial credit and
+// have no single "winner", so they return null here.
+function pointsForWinner(result, homeProb, awayProb) {
+  if (result === 'home') return Math.round((1 - homeProb) * 100);
+  if (result === 'away') return Math.round((1 - awayProb) * 100);
+  return null;
+}
+
+// Finished fixtures with a score + a recorded result — the source for the
+// full-time card. Precomputes the winner + the points a correct pick earned.
+// Ordered most-recent-first; placeholder fixtures filtered.
+//
+// Shape: [{ home, away, homeScore, awayScore, result, winner, points, leagueName }]
+export async function fetchFinishedGames(db) {
+  const [games] = await db.query(`
+    SELECT g."homeTeam"        AS home,
+           g."awayTeam"        AS away,
+           g."homeScore"       AS hs,
+           g."awayScore"       AS ascore,
+           g.result            AS result,
+           g."homeProbability" AS hp,
+           g."awayProbability" AS ap,
+           l.name              AS league
+    FROM games g
+    LEFT JOIN leagues l ON l.id = g."leagueId"
+    WHERE g.status = 'finished'
+      AND g.result IS NOT NULL
+      AND g."homeScore" IS NOT NULL
+      AND g."awayScore" IS NOT NULL
+    ORDER BY g.date DESC
+  `);
+
+  return games
+    .filter((g) => !isPlaceholder(g.home) && !isPlaceholder(g.away))
+    .map((g) => ({
+      home: g.home,
+      away: g.away,
+      homeScore: Number(g.hs),
+      awayScore: Number(g.ascore),
+      result: g.result,
+      winner: g.result === 'home' ? g.home : g.result === 'away' ? g.away : null,
+      points: pointsForWinner(g.result, Number(g.hp), Number(g.ap)),
       leagueName: g.league || '',
     }));
 }

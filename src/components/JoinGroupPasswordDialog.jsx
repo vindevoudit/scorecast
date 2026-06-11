@@ -6,8 +6,9 @@
 // password set (surfaced by `canJoinWithPassword` in the search response).
 // Submit calls handleJoinGroupWithPassword via DataContext. The server's
 // constant-time bcrypt compare + groupJoinPasswordLimiter (10/min/user)
-// throttles brute force; the dialog stays open on a wrong-password 401
-// so the user can retry without losing their typed value.
+// throttles brute force; the dialog stays open on a wrong-password 403
+// so the user can retry without losing their typed value. (403, not 401:
+// a 401 would trip useRequest's session-expiry path and log the user out.)
 
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from './ui/Dialog';

@@ -820,7 +820,7 @@ test.describe('POST /api/groups/:groupId/join-with-password', () => {
     }
   });
 
-  test('private + wrong password → 401', async () => {
+  test('private + wrong password → 403', async () => {
     const groupId = await createGroupAs(USERS.alice, {
       visibility: 'private',
       password: 'sosecret',
@@ -830,7 +830,10 @@ test.describe('POST /api/groups/:groupId/join-with-password', () => {
       const res = await bob.post(`/api/groups/${groupId}/join-with-password`, {
         data: { password: 'wrong' },
       });
-      expect(res.status()).toBe(401);
+      // 403, NOT 401 — a 401 here would be treated by the frontend's
+      // useRequest as an expired session and force-log-out the user.
+      expect(res.status()).toBe(403);
+      expect((await res.json()).error.message).toMatch(/incorrect password/i);
     } finally {
       await bob.dispose();
     }

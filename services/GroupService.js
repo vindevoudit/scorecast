@@ -369,7 +369,11 @@ async function joinWithPassword({ groupId, userId, password }) {
   if (existing) throw errors.badRequest('Already a member');
 
   const ok = await bcrypt.compare(password, group.passwordHash);
-  if (!ok) throw errors.unauthorized('Incorrect password');
+  // 403 (not 401): the user IS authenticated — they just gave a bad group
+  // password. A 401 here is swallowed by useRequest's session-expiry path
+  // (refresh → retry → clearSession), which force-logs-out the user. 403
+  // also matches the other rejection branches above.
+  if (!ok) throw errors.forbidden('Incorrect password — try again.');
 
   await assertCanAddMember(groupId);
   await GroupMember.create({ groupId, userId });

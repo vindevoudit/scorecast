@@ -764,9 +764,15 @@ function renderKickoffCountdown(game, format) {
   const story = format === 'story';
 
   const L = {
-    square: { markY: 120, markSize: 46, leagueY: 236, matchupY: 348, matchupMax: 72, kickerY: 470, numCy: 620, numMax: 248, unitY: 760, unitSize: 54, ctaY: 814, ctaSize: 34, urlY: 1026 },
-    story: { markY: 250, markSize: 50, leagueY: 398, matchupY: 524, matchupMax: 104, kickerY: 706, numCy: 982, numMax: 430, unitY: 1214, unitSize: 80, ctaY: 1334, ctaSize: 42, footerY: h - 210 },
+    square: { markY: 120, markSize: 46, leagueY: 236, matchupY: 348, matchupMax: 72, kickerY: 470, numMax: 248, unitY: 760, unitSize: 54, ctaY: 814, ctaSize: 34, urlY: 1026 },
+    story: { markY: 250, markSize: 50, leagueY: 398, matchupY: 524, matchupMax: 104, kickerY: 706, numMax: 430, unitY: 1214, unitSize: 80, ctaY: 1334, ctaSize: 42, footerY: h - 210 },
   }[format];
+
+  // Centre the big numeral's optical midpoint exactly between the "KICKS OFF
+  // IN" baseline (above) and the cap-top of the unit word (below) so the
+  // whitespace above and below the number is equal. The glyph's own height
+  // cancels out of the midpoint, so this holds regardless of numSize.
+  const numCy = (L.kickerY + (L.unitY - 0.72 * L.unitSize)) / 2;
 
   const matchup = `${game.home} vs ${game.away}`;
   // Conservative Bebas advance (~0.40em) so long names never overflow.
@@ -785,7 +791,7 @@ function renderKickoffCountdown(game, format) {
   <text x="${cx}" y="${L.leagueY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 32 : 26}" letter-spacing="${story ? 8 : 6}" fill="${COLOR.cyan}">${esc(league)}</text>
   <text x="${cx}" y="${L.matchupY}" text-anchor="middle" font-family="${FONT.display}" font-size="${matchupSize}" letter-spacing="1" fill="${COLOR.white}">${esc(matchup)}</text>
   <text x="${cx}" y="${L.kickerY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 36 : 30}" letter-spacing="${story ? 10 : 7}" fill="${COLOR.cyanSoft}">KICKS OFF IN</text>
-  <text x="${cx}" y="${L.numCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${numSize}" letter-spacing="${numSize * 0.04}" fill="url(#mark)">${esc(value)}</text>
+  <text x="${cx}" y="${numCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${numSize}" letter-spacing="${numSize * 0.04}" fill="url(#mark)">${esc(value)}</text>
   <text x="${cx}" y="${L.unitY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.unitSize}" letter-spacing="${story ? 14 : 10}" fill="${COLOR.cyanSoft}">${esc(unit)}</text>
   ${ctaPill({ cx, y: L.ctaY, label: 'Get your picks in', size: L.ctaSize })}
   ${closing}`;

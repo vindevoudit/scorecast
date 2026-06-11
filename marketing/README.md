@@ -268,6 +268,62 @@ What they pull:
 
 ---
 
+## Matchday automation (auto-generate + email)
+
+Instead of running the CLI by hand each matchday, the app can generate the four live-fixture
+graphics for **every worthwhile match** automatically, at the right moment, and **email** them
+to you so you just download + post (there's no IG/TikTok story API to auto-post through). It's an
+in-container cron job — [lib/jobs/postMatchdayGraphics.js](../lib/jobs/postMatchdayGraphics.js),
+every 5 min — that shares the exact same renderers as the CLI ([marketing/lib/render.mjs](lib/render.mjs)),
+so the emailed PNGs are byte-identical to `npm run assets:marketing`.
+
+**Triggers** (one email per type per tick, batched across all due matches in active leagues):
+
+| Type             | Fires when                                                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `countdown`      | scheduled game, kickoff in **1h55m–2h** away ("get your picks in")                                                            |
+| `picks-vs-model` | scheduled game, kickoff in **5–10 min** (crowd formed) — skipped if no one picked, or on placeholder / sentinel-prob fixtures |
+| `halftime`       | in-progress game at the break (`halfTimeReached`, elapsed **45–65 min**)                                                      |
+| `fulltime`       | finished game with a result + scores, kickoff within the **last 5h** (cold-start guard)                                       |
+
+Each due match is sent at **square (1080²) + story (1080×1920)**, attachments named e.g.
+`fulltime-brazil-vs-france-square.png`. Idempotency is a `marketing_posts (gameId, type)` ledger —
+each match fires **once per type**, stamped only after a successful send (a transient email
+failure retries next tick).
+
+**Enable it** (set on the Container App, or locally in `.env`):
+
+```bash
+MARKETING_AUTOMATION_ENABLED=1          # gate — unset/0 = disabled (default)
+MARKETING_EMAIL_TO=you@example.com      # recipient inbox
+# Reuses the existing Resend transport: RESEND_API_KEY + EMAIL_FROM.
+# Optional: MARKETING_GRAPHICS_CRON (default '*/5 * * * *' — don't slow below 5 min
+# or countdown graphics, whose window is exactly one tick wide, get missed).
+```
+
+In prod, set `marketingAutomationEnabled` + `marketingEmailTo` on the Bicep `app` module
+([infra/main.bicep](../infra/main.bicep) → [app.bicep](../infra/modules/app.bicep)), or flip them
+directly with `az containerapp update --set-env-vars`. Without a `RESEND_API_KEY` the job still
+renders + logs (dev log-mode) but sends nothing.
+
+> The rasterizer (`@resvg/resvg-js`) is a **prod dependency** and `marketing/lib` + `marketing/fonts`
+> are COPY'd into the runtime image ([Dockerfile](../Dockerfile)) so the container can render. The
+> CLI's `out/` dir is **not** shipped — the job renders to in-memory buffers and emails them.
+
+**Test a real send immediately** (renders the current real slate + emails it now, instead of
+waiting for a tick):
+
+```bash
+MARKETING_AUTOMATION_ENABLED=1 MARKETING_EMAIL_TO=you@example.com \
+  node -e "require('./lib/jobs/postMatchdayGraphics').run().then(r=>console.log(r))"
+```
+
+> Same anti-bias caveat as the CLI cards: `picks-vs-model` reveals pre-kickoff crowd sentiment.
+> These emails go only to the operator, so that's fine — just don't screenshot one back into a
+> product context.
+
+---
+
 ## Regenerating
 
 The 29 core assets are deterministic — re-running produces identical PNGs (the two

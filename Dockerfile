@@ -61,6 +61,15 @@ COPY services ./services
 # because backfills aren't part of `npm run db:migrate`; they have to be
 # invoked explicitly by an operator after CD lands.
 COPY scripts ./scripts
+# Marketing render libs + bundled TTF fonts — read at runtime by the matchday
+# graphics cron job (lib/jobs/postMatchdayGraphics.js) via a dynamic import of
+# marketing/lib/render.mjs (which pulls brand.mjs + product.mjs and rasterizes
+# with @resvg/resvg-js, now a prod dep). marketing/out (the CLI's output dir)
+# is intentionally NOT copied — the job renders to in-memory buffers + emails
+# them. The job is gated behind MARKETING_AUTOMATION_ENABLED, so with the env
+# unset these files just sit unused (~1 MB lib + ~1.5 MB fonts).
+COPY marketing/lib ./marketing/lib
+COPY marketing/fonts ./marketing/fonts
 COPY data.json ./data.json
 # International model dataset — read once by the international Elo bootstrap
 # seeder (seeders/20260528000003-seed-teams-from-intl-elo-history.js). Same

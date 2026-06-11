@@ -55,6 +55,12 @@ param vapidPublicKey string = ''
 @description('Push provider abuse-report URL. mailto: works; defaults to the project owner.')
 param vapidSubject string = 'mailto:vindevoudit@gmail.com'
 
+@description('Tier 31 — set to "1" to enable the matchday graphics automation cron (renders + emails per-fixture social graphics). Empty = disabled (default). Optional on reapply — defaults keep it off.')
+param marketingAutomationEnabled string = ''
+
+@description('Tier 31 — recipient inbox for the matchday graphics emails. Required when marketingAutomationEnabled is set.')
+param marketingEmailTo string = ''
+
 // Stable suffix derived from the resource group id so naming is idempotent
 // across deployments but globally unique across Azure.
 var nameSuffix = toLower(uniqueString(resourceGroup().id))
@@ -137,6 +143,8 @@ module app 'modules/app.bicep' = {
     customDomainCertId: customDomainCertId
     vapidPublicKey: vapidPublicKey
     vapidSubject: vapidSubject
+    marketingAutomationEnabled: marketingAutomationEnabled
+    marketingEmailTo: marketingEmailTo
   }
 }
 

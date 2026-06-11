@@ -46,6 +46,7 @@ const reconcileInProgressGamesJob = require('./lib/jobs/reconcileInProgressGames
 const sendKickoffRemindersJob = require('./lib/jobs/sendKickoffReminders');
 const lockPickProbabilitiesJob = require('./lib/jobs/lockPickProbabilities');
 const sendWeeklyRecapJob = require('./lib/jobs/sendWeeklyRecap');
+const postMatchdayGraphicsJob = require('./lib/jobs/postMatchdayGraphics');
 const FIXTURE_SYNC_CRON = process.env.FIXTURE_SYNC_CRON || '0 3 * * *'; // daily 03:00 UTC
 // Tier 18 Chunk 2 — 30 s live poll (was every minute). Sits comfortably in
 // the 20 req/min TIER_ONE budget (~2 req/min steady state for the global
@@ -71,6 +72,16 @@ const LOCK_PICK_PROBABILITIES_CRON = process.env.LOCK_PICK_PROBABILITIES_CRON ||
 // Cost-gated by a count() short-circuit so off-season Mondays are
 // near-free.
 const WEEKLY_RECAP_CRON = process.env.WEEKLY_RECAP_CRON || '0 2 * * 1';
+// Tier 31 — Matchday graphics automation, every 5 min. Renders + emails the
+// right social graphic per fixture at the right moment (countdown ~2h out,
+// picks-vs-model ~10m out, halftime at the break, fulltime at FT). Gated
+// behind MARKETING_AUTOMATION_ENABLED so it never registers unconfigured;
+// the job itself no-ops without MARKETING_EMAIL_TO. Idle ticks are four cheap
+// indexed SELECTs (renderer + fonts only load when something is due).
+const MARKETING_AUTOMATION_ENABLED = ['1', 'true'].includes(
+  String(process.env.MARKETING_AUTOMATION_ENABLED || '').toLowerCase(),
+);
+const MARKETING_GRAPHICS_CRON = process.env.MARKETING_GRAPHICS_CRON || '*/5 * * * *';
 scheduler.register('syncFixtures', FIXTURE_SYNC_CRON, syncFixturesJob.run);
 scheduler.register('syncLiveScores', LIVE_SCORE_SYNC_CRON, syncLiveScoresJob.run);
 scheduler.register(
@@ -85,6 +96,9 @@ scheduler.register(
   lockPickProbabilitiesJob.run,
 );
 scheduler.register('sendWeeklyRecap', WEEKLY_RECAP_CRON, sendWeeklyRecapJob.run);
+if (MARKETING_AUTOMATION_ENABLED) {
+  scheduler.register('postMatchdayGraphics', MARKETING_GRAPHICS_CRON, postMatchdayGraphicsJob.run);
+}
 
 const PORT = process.env.PORT || 3000;
 

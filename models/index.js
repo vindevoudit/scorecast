@@ -56,6 +56,7 @@ const AuditLog = require('./AuditLog')(sequelize);
 const PushSubscription = require('./PushSubscription')(sequelize);
 const UserScore = require('./UserScore')(sequelize);
 const UserScoreOverall = require('./UserScoreOverall')(sequelize);
+const MarketingPost = require('./MarketingPost')(sequelize);
 
 // Define associations.
 //
@@ -185,6 +186,11 @@ User.hasOne(UserScoreOverall, {
   as: 'overallScore',
   onDelete: 'CASCADE',
 });
+
+// Tier 31 — Matchday graphics ledger. CASCADE so a deleted game drops its
+// "already posted" rows atomically (admin bulk-delete / GameService.cascadeDelete).
+Game.hasMany(MarketingPost, { foreignKey: 'gameId', as: 'marketingPosts', onDelete: 'CASCADE' });
+MarketingPost.belongsTo(Game, { foreignKey: 'gameId' });
 
 // Initialize database
 async function initDatabase() {
@@ -337,6 +343,7 @@ module.exports = {
   PushSubscription,
   UserScore,
   UserScoreOverall,
+  MarketingPost,
   initDatabase,
   runMigrations,
 };

@@ -29,13 +29,17 @@ kit and the live site stay visually identical.
 marketing/
   lib/brand.mjs        # shared SVG fragment library (tokens, wordmark, icons, helpers)
   lib/product.mjs      # faithful GameCard + Leaderboard UI mockups (real app tokens)
+  lib/livedata.mjs     # CLI-only read-only prod-DB fetchers (user count, fixtures)
+  lib/render.mjs       # 4 live-fixture renderers + rasterize — shared CLI ↔ cron job (§8c/8d)
   fonts/*.ttf          # bundled OFL fonts (Orbitron, Bebas Neue, Inter ×5) — fed to resvg
   out/*.png            # generated campaign graphics (committed)
   README.md            # posting playbook (asset index, captions, hashtags, cadence)
   GRAPHICS.md          # this file
 scripts/
-  generate-marketing-assets.mjs   # content arrays + layout renderers for the kit
+  generate-marketing-assets.mjs   # content arrays + layout renderers for the kit (CLI)
   generate-pwa-assets.mjs         # favicon / PWA / OG rasterizer
+lib/jobs/
+  postMatchdayGraphics.js         # cron job — auto-render + email per fixture (§8d)
 public/
   logo.svg             # LIVE favicon source — Orbitron "B" glyph as a PATH (self-contained)
   og-template.svg      # OG card source — Orbitron "BANTRYX" wordmark (rasterized to og-image)
@@ -341,8 +345,17 @@ both bright), under a "FULL TIME" status. Below it, decisive games show "BACKING
 'draw') || finishedGames[0]` (most recent decisive, else most recent) and falls back to
   `SAMPLE_FULLTIME` (Brazil 2-1 France, +62 — ties the "+62 for a 38% upset" stat).
 
+**Shared renderers** — the four live-fixture renderers (`renderKickoffCountdown`,
+`renderHalftime`, `renderFulltime`, `renderPicksVsModel`) + their helpers (`topMark`,
+`countdownParts`, `fitOrbitron`) + `rasterize` + `loadFonts` + `SIZES` live in
+[`marketing/lib/render.mjs`](lib/render.mjs), imported by **both** the CLI and the matchday
+cron job (§8d) so the emailed PNGs are byte-identical to a CLI run. The CLI keeps
+`renderThankYou` + the 29 deterministic core renderers + the samples + `roundDownToMilestone`
+/ `slugify`. `render.mjs` is **DB-free + qrcode-free** — each caller fetches its own data and
+passes the game object in.
+
 **Generator wiring** — `renderThankYou(format, userCount)` (big milestone number via
-`roundDownToMilestone`) and `renderPicksVsModel(game, format)`. `main()` calls `openDb()`
+`roundDownToMilestone`) and the four shared renderers above. `main()` calls `openDb()`
 once in a `try/finally` (always `db.close()`), and falls back to `SAMPLE_USER_COUNT` /
 `SAMPLE_UPCOMING` on no-DB-or-failure so an offline run still emits example cards. The 29
 core assets are untouched by this path — they stay byte-identical.
@@ -353,6 +366,35 @@ core assets are untouched by this path — they stay byte-identical.
 
 > ⚠️ **`.env` is NOT auto-loaded** — that file points at the dev DB. The operator sets
 > `DATABASE_URL` to the prod URL explicitly so the assets reflect real numbers.
+
+---
+
+## 8d. Matchday automation — [`lib/jobs/postMatchdayGraphics.js`](../lib/jobs/postMatchdayGraphics.js)
+
+An in-container cron job (every 5 min, gated behind `MARKETING_AUTOMATION_ENABLED`) renders the
+four live-fixture graphics per match at the right moment and **emails** them to
+`MARKETING_EMAIL_TO`. It imports the renderers from `render.mjs` (§8c), so output is byte-identical
+to the CLI. It does **not** use `livedata.mjs` — it fetches via the app's own Sequelize models +
+`GameService.getCrowdForGames` (same pool as the rest of the server). See
+[README → Matchday automation](README.md#matchday-automation-auto-generate--email) for the operator
+view; this is the maintainer view.
+
+- **Trigger windows** (per type, all on active leagues): `countdown` — scheduled, kickoff in
+  `[now+1h55m, now+2h)`; `picks-vs-model` — scheduled, kickoff in `[now+5m, now+10m)`, skip
+  placeholder/sentinel + skip crowd-total-0; `halftime` — in-progress, `halfTimeReached`, elapsed
+  `[45, 65]` min; `fulltime` — finished + result + scores, kickoff within the last 5h (cold-start
+  guard — `games` has `timestamps:false`, so there's no `finishedAt` to key off).
+- **Idempotency** — `marketing_posts (gameId, type)` PK ([model](../models/MarketingPost.js) +
+  [migration](../migrations/20260611000001-create-marketing-posts.js)), FK `gameId → games(id)
+ON DELETE CASCADE`. Stamped **after** a successful send (or dev log-mode), so a transient email
+  failure retries next tick. Idle ticks are four cheap indexed SELECTs; the ESM renderer + fonts
+  only load once something is due.
+- **Email** — one message per type per tick, batched across due matches, each match at square +
+  story. `lib/email.js send()` gained an `attachments: [{filename, content}]` arg (Buffer/base64
+  → Resend); reuses `RESEND_API_KEY` + `EMAIL_FROM`. Without a key it renders + logs (no send).
+- **Image bundling** — `@resvg/resvg-js` is a **prod dependency** (was dev) and `marketing/lib` +
+  `marketing/fonts` are COPY'd into the runtime image so the container can rasterize. `marketing/out`
+  is not shipped — the job renders to buffers.
 
 ---
 

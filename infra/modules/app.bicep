@@ -55,6 +55,12 @@ param vapidPublicKey string = ''
 @description('mailto:/https: URL the push provider uses for abuse reports. No secret value.')
 param vapidSubject string = 'mailto:vindevoudit@gmail.com'
 
+@description('Tier 31 — set to "1" to enable the matchday graphics automation cron (renders + emails per-fixture social graphics). Empty = disabled (default).')
+param marketingAutomationEnabled string = ''
+
+@description('Tier 31 — recipient inbox for the matchday graphics emails. Required when marketingAutomationEnabled is set.')
+param marketingEmailTo string = ''
+
 var environmentName = '${appName}-env-${nameSuffix}'
 var containerAppName = '${appName}-app'
 
@@ -206,6 +212,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'PUBLIC_APP_URL', value: publicAppUrl }
             { name: 'CORS_ORIGINS', value: publicAppUrl }
             { name: 'EMAIL_FROM', value: emailFrom }
+            { name: 'MARKETING_AUTOMATION_ENABLED', value: marketingAutomationEnabled }
+            { name: 'MARKETING_EMAIL_TO', value: marketingEmailTo }
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
             { name: 'JWT_SECRET', secretRef: 'jwt-secret' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }

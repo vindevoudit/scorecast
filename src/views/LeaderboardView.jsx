@@ -85,7 +85,11 @@ function LeaderboardView() {
     leaderboardLoadingMore,
   } = useData();
   const isFiltered = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
-  const friendUserIds = (friends?.friends || []).map((f) => f.id);
+  // GET /api/friends returns { id: <friendship id>, userId: <friend's user id> }.
+  // Leaderboard rows + LeaderboardCard's friendUserIds prop are keyed on the
+  // USER id — map f.userId, not f.id (the friendship id never matches a row and
+  // left the Friends tab showing only the current user).
+  const friendUserIds = (friends?.friends || []).map((f) => f.userId);
 
   const tabs = [
     {

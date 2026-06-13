@@ -9,6 +9,7 @@
 import { useMemo, useState } from 'react';
 import EmptyState from './EmptyState';
 import Avatar from './Avatar';
+import StreakFlame from './StreakFlame';
 
 // Tier 30 Phase 2 — rank-primary hierarchy. The rank now leads each row
 // as a 36×36 rounded-xl pill in `.font-display` (Bebas Neue) so the
@@ -54,6 +55,12 @@ export function LeaderboardRow({ entry, rank, isCurrentUser, onSelectUser }) {
           {entry.isMasked ? (
             <span className="ml-2 text-xs uppercase tracking-widest text-fg-subtle">private</span>
           ) : null}
+        </span>
+        {/* Win-streak flame — notable runs only (>=3) so the column stays
+            uncluttered. shrink-0 keeps the chip intact while the name
+            truncates first. */}
+        <span className="shrink-0">
+          <StreakFlame current={entry.currentWinStreak} min={3} />
         </span>
       </div>
       <div className="shrink-0 text-sm font-semibold tabular-nums text-fg">{entry.points}</div>

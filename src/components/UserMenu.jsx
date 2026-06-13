@@ -11,6 +11,7 @@
 // hides the username text but keeps the flame.
 
 import Avatar from './Avatar';
+import StreakFlame from './StreakFlame';
 import { useAuth } from '../hooks/useAuth';
 import { useData } from '../hooks/useData';
 import {
@@ -21,29 +22,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/DropdownMenu';
-
-function streakChipClass(current) {
-  if (current >= 15) return 'bg-warning/35 text-warning shadow-led';
-  if (current >= 10) return 'bg-warning/25 text-warning';
-  if (current >= 5) return 'bg-warning/15 text-warning';
-  return 'bg-overlay text-fg-muted';
-}
-
-function StreakFlame({ current }) {
-  if (!current || current < 1) return null;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${streakChipClass(
-        current,
-      )}`}
-      aria-label={`${current}-game win streak`}
-      title={`${current}-game win streak`}
-    >
-      <span aria-hidden="true">🔥</span>
-      {current}
-    </span>
-  );
-}
 
 function CaretIcon() {
   return (

@@ -129,6 +129,9 @@ function applyMasking(rows, ctx) {
       username: maskedLabelFor(row),
       displayName: null,
       isMasked: true,
+      // Don't broadcast a private player's activity behind their masked
+      // label — drop the win-streak so the leaderboard chip doesn't render.
+      currentWinStreak: 0,
     };
   });
 }
@@ -180,7 +183,7 @@ async function getOverall({ leagueId, seasonId } = {}) {
     // Pre-launch every user fits in a single page; post-launch (when
     // user count grows), Chunk 4 will paginate this at the route layer.
     const allUsers = await User.findAll({
-      attributes: ['id', 'username', 'displayName', 'profileVisibility'],
+      attributes: ['id', 'username', 'displayName', 'profileVisibility', 'currentWinStreak'],
     });
 
     let pointsByUser;
@@ -201,6 +204,7 @@ async function getOverall({ leagueId, seasonId } = {}) {
       displayName: u.displayName || null,
       profileVisibility: u.profileVisibility,
       points: pointsByUser.get(u.id) ?? 0,
+      currentWinStreak: u.currentWinStreak ?? 0,
     }));
     // Pre-sorted by the SQL ORDER BY when reading from the materialized
     // table, but the LEFT-JOIN-style merge above breaks that order;
@@ -307,6 +311,7 @@ async function getForGroup(
             profileVisibility: user?.profileVisibility || 'public',
             points,
             winRate: scored > 0 ? won / scored : 0,
+            currentWinStreak: user?.currentWinStreak ?? 0,
           };
         })
         .sort((a, b) => b.points - a.points);
@@ -345,7 +350,7 @@ async function getForFriends(viewerId, { leagueId, seasonId } = {}) {
 
   const users = await User.findAll({
     where: { id: { [Op.in]: idList } },
-    attributes: ['id', 'username', 'displayName', 'profileVisibility'],
+    attributes: ['id', 'username', 'displayName', 'profileVisibility', 'currentWinStreak'],
   });
   const userById = new Map(users.map((u) => [u.id, u]));
 
@@ -374,6 +379,7 @@ async function getForFriends(viewerId, { leagueId, seasonId } = {}) {
         displayName: user.displayName || null,
         profileVisibility: user.profileVisibility,
         points: pointsByUser.get(id) ?? 0,
+        currentWinStreak: user.currentWinStreak ?? 0,
       };
     })
     .filter(Boolean)

@@ -12,7 +12,12 @@
 const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
 const { USERS } = require('./fixtures/data');
-const { getUserId, clearFriendships, createAcceptedFriendship } = require('./helpers/api');
+const {
+  getUserId,
+  clearFriendships,
+  createAcceptedFriendship,
+  updateUserFields,
+} = require('./helpers/api');
 
 function leaderboardTablist(page) {
   return page.locator('[role="tablist"][aria-label="Leaderboard sections"]');
@@ -97,6 +102,59 @@ test('Friends sub-tab lists the viewer + an accepted friend', async ({ page }) =
     // alice's own row is marked "you".
     await expect(page.getByText('you', { exact: true }).first()).toBeVisible();
   } finally {
+    await clearFriendships([aliceId, bobId]);
+  }
+});
+
+test('Leaderboard row shows the win-streak flame for a 3+ streak', async ({ page }) => {
+  // Use the Friends sub-tab (uncached server block) so the freshly-set
+  // streak is deterministic; a friendship makes the card render alice's row.
+  const aliceId = await getUserId(USERS.alice.username);
+  const bobId = await getUserId(USERS.bob.username);
+  await clearFriendships([aliceId, bobId]);
+  await createAcceptedFriendship(aliceId, bobId);
+  await updateUserFields(aliceId, { currentWinStreak: 7 });
+  try {
+    await loginViaUI(page, USERS.alice);
+    await page
+      .getByRole('tab', { name: /^Leaderboards$/ })
+      .first()
+      .click();
+    await leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true }).click();
+    // Scope to the leaderboard tabpanel so we assert the ROW chip, not the
+    // top-bar UserMenu flame (which shows for any streak >= 1).
+    const panel = page.getByRole('tabpanel');
+    await expect(panel.getByLabel('7-game win streak').first()).toBeVisible({ timeout: 10_000 });
+  } finally {
+    await updateUserFields(aliceId, { currentWinStreak: 0 });
+    await clearFriendships([aliceId, bobId]);
+  }
+});
+
+test('Leaderboard hides the flame for a streak below 3', async ({ page }) => {
+  const aliceId = await getUserId(USERS.alice.username);
+  const bobId = await getUserId(USERS.bob.username);
+  await clearFriendships([aliceId, bobId]);
+  await createAcceptedFriendship(aliceId, bobId);
+  await updateUserFields(aliceId, { currentWinStreak: 2 });
+  try {
+    await loginViaUI(page, USERS.alice);
+    await page
+      .getByRole('tab', { name: /^Leaderboards$/ })
+      .first()
+      .click();
+    await leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true }).click();
+    // Wait for the friends rows to render (bob is the friend), then assert no
+    // flame chip is present in the leaderboard panel (alice's streak of 2 is
+    // below the >=3 gate; bob's is 0). Scoped to the tabpanel so the top-bar
+    // UserMenu flame — which DOES show alice's 2-streak — doesn't false-fail.
+    const panel = page.getByRole('tabpanel');
+    await expect(
+      panel.locator('button:not([aria-haspopup]):has-text("' + USERS.bob.username + '")').first(),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(panel.locator('[aria-label$="-game win streak"]')).toHaveCount(0);
+  } finally {
+    await updateUserFields(aliceId, { currentWinStreak: 0 });
     await clearFriendships([aliceId, bobId]);
   }
 });

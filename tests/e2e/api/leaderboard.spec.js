@@ -16,6 +16,7 @@ const {
   getUserId,
   clearFriendships,
   createAcceptedFriendship,
+  updateUserFields,
 } = require('../helpers/api');
 const { assertOk, expectShape } = require('../helpers/apiAssertions');
 
@@ -114,6 +115,24 @@ test.describe('GET /api/leaderboard', () => {
       expect(payload.friends.length).toBe(0);
     } finally {
       await anon.dispose();
+    }
+  });
+
+  test('leaderboard rows carry currentWinStreak', async () => {
+    const aliceId = await getUserId(USERS.alice.username);
+    await updateUserFields(aliceId, { currentWinStreak: 5 });
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/leaderboard');
+      // Friends block is uncached, so the freshly-set value is reliable here.
+      const selfRow = payload.friends.find((r) => r.userId === aliceId);
+      expect(selfRow).toBeTruthy();
+      expect(selfRow.currentWinStreak).toBe(5);
+      // Overall rows always carry the field (numeric) post-change.
+      expect(payload.overall.every((r) => typeof r.currentWinStreak === 'number')).toBe(true);
+    } finally {
+      await authed.dispose();
+      await updateUserFields(aliceId, { currentWinStreak: 0 });
     }
   });
 

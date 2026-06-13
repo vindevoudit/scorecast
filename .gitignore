@@ -133,3 +133,9 @@ ml/*.egg-info/
 # Ad-hoc runs with custom args). Created in the repo root for each
 # manual override and removed after the run.
 body.json
+
+# Per-fixture marketing cards are transient live-data output — named by team
+# slug so each matchday slate accumulates new files (see marketing/README.md,
+# which tells the operator to `rm marketing/out/picks-vs-model-*` before a run).
+# The templates themselves (fulltime/halftime/countdown/etc.) stay tracked.
+marketing/out/picks-vs-model-*

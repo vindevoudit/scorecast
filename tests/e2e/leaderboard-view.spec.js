@@ -12,6 +12,7 @@
 const { test, expect } = require('@playwright/test');
 const { loginViaUI } = require('./helpers/auth');
 const { USERS } = require('./fixtures/data');
+const { getUserId, clearFriendships, createAcceptedFriendship } = require('./helpers/api');
 
 function leaderboardTablist(page) {
   return page.locator('[role="tablist"][aria-label="Leaderboard sections"]');
@@ -65,13 +66,37 @@ test('Friends sub-tab empty state for users with no accepted friends', async ({ 
     .click();
   await leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true }).click();
 
-  // Either the empty state title shows (bob has no entry in the leaderboard
-  // either) OR bob's own row appears (bob has points but no friends), per
-  // the FriendsLeaderboardSection's two branches.
-  const emptyOrSelf = page.locator(
-    '[role="heading"][aria-level="3"]:has-text("No friends on the leaderboard yet"), button:not([aria-haspopup]):has-text("' +
-      USERS.bob.username +
-      '")',
-  );
-  await expect(emptyOrSelf.first()).toBeVisible({ timeout: 10_000 });
+  // The Friends block always includes the viewer, so the empty state is now
+  // gated on the *friend* set: a user with no accepted friends sees the
+  // "add friends" nudge rather than a lone self-row.
+  await expect(page.getByText('No friends on the leaderboard yet').first()).toBeVisible({
+    timeout: 10_000,
+  });
+});
+
+test('Friends sub-tab lists the viewer + an accepted friend', async ({ page }) => {
+  // The Friends tab now reads the server-side friends block (the viewer + all
+  // accepted friends), so a friend appears regardless of the overall top-N
+  // slice — the regression this fix targets.
+  const aliceId = await getUserId(USERS.alice.username);
+  const bobId = await getUserId(USERS.bob.username);
+  await clearFriendships([aliceId, bobId]);
+  await createAcceptedFriendship(aliceId, bobId);
+  try {
+    await loginViaUI(page, USERS.alice);
+    await page
+      .getByRole('tab', { name: /^Leaderboards$/ })
+      .first()
+      .click();
+    await leaderboardTablist(page).getByRole('tab', { name: 'Friends', exact: true }).click();
+
+    // bob (the friend) appears as a clickable leaderboard row.
+    await expect(
+      page.locator('button:not([aria-haspopup]):has-text("' + USERS.bob.username + '")').first(),
+    ).toBeVisible({ timeout: 10_000 });
+    // alice's own row is marked "you".
+    await expect(page.getByText('you', { exact: true }).first()).toBeVisible();
+  } finally {
+    await clearFriendships([aliceId, bobId]);
+  }
 });

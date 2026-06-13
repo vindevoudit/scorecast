@@ -141,6 +141,11 @@ function LeaderboardCard({
   onLoadMore,
   onCollapse,
   loadingMore = false,
+  // The viewer's own row regardless of the loaded slice (from
+  // overallMeta.viewerRow). When the viewer sits below the loaded top-N,
+  // render a pinned "Your position" row so they always see their standing —
+  // mirrors GroupLeaderboardCard's off-page handling.
+  viewerRow,
 }) {
   const [expanded, setExpanded] = useState(false);
   const friendSet = useMemo(() => {
@@ -168,6 +173,12 @@ function LeaderboardCard({
   // user understands the filter is the cause rather than missing data.
   const allZeroPoints = entries.length > 0 && entries.every((e) => (e.points || 0) === 0);
   const showFilteredEmpty = isFiltered && (entries.length === 0 || allZeroPoints);
+
+  // Both compact and expanded modes only ever render rows that are present in
+  // `entries`, so the viewer is "on page" iff their row is in the loaded
+  // slice. When it isn't, pin a "Your position" row below the list.
+  const viewerOnPage = viewerRow ? entries.some((e) => e.userId === viewerRow.userId) : true;
+  const showViewerRow = viewerRow && !viewerOnPage && !showFilteredEmpty && entries.length > 0;
   return (
     <div className="rounded-3xl border border-default bg-elevated/85 p-6 shadow-glow">
       <div className="flex flex-wrap items-center gap-2">
@@ -222,6 +233,17 @@ function LeaderboardCard({
           )
         )}
       </div>
+      {showViewerRow ? (
+        <div className="mt-3 border-t border-default pt-3">
+          <p className="mb-2 text-xs uppercase tracking-[0.25em] text-fg-subtle">Your position</p>
+          <LeaderboardRow
+            entry={viewerRow}
+            rank={viewerRow.rank}
+            isCurrentUser
+            onSelectUser={onSelectUser}
+          />
+        </div>
+      ) : null}
       {/* Tier 33 — CTAs:
          - Compact state: "Show all N players" expands the in-memory rows.
          - Expanded + has more on server: "Show more" fetches the next page;

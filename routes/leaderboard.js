@@ -58,11 +58,20 @@ router.get(
         req.user ?? null,
       );
     }
+
+    // Friends block — the viewer + every accepted friend, scored from the
+    // materialized tables so they appear regardless of the overall top-N
+    // slice. Anonymous viewers get an empty list.
+    const friendsBlock = req.user
+      ? await LeaderboardService.getForFriendsForViewer(req.user, filterOpts)
+      : { rows: [] };
+
     res.json({
       overall: overallBlock.rows,
       overallMeta: overallBlock,
       group: groupBlock.rows,
       groupMeta: groupBlock,
+      friends: friendsBlock.rows,
     });
   }),
 );

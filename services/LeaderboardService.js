@@ -328,6 +328,74 @@ async function getForGroup(
   };
 }
 
+// Friends leaderboard read. Mirrors getForGroup but keyed on the viewer's
+// accepted-friend set + the viewer themselves, instead of a group's member
+// list. Reads the same materialized score tables so a friend (or the viewer)
+// sitting outside the overall top-N still appears with correct points. No
+// cache: the friend set is per-viewer and these are a couple of sub-ms indexed
+// SELECTs — caching would add a per-viewer keyspace + a new invalidation
+// surface for no real gain.
+async function getForFriends(viewerId, { leagueId, seasonId } = {}) {
+  if (!viewerId) return { rows: [] };
+  const friendIds = await getViewerFriendIdSet(viewerId);
+  const ids = new Set(friendIds);
+  ids.add(viewerId);
+  const idList = [...ids];
+  if (idList.length === 0) return { rows: [] };
+
+  const users = await User.findAll({
+    where: { id: { [Op.in]: idList } },
+    attributes: ['id', 'username', 'displayName', 'profileVisibility'],
+  });
+  const userById = new Map(users.map((u) => [u.id, u]));
+
+  let pointsByUser;
+  if (leagueId || seasonId) {
+    const where = { userId: { [Op.in]: idList } };
+    if (leagueId) where.leagueId = leagueId;
+    if (seasonId) where.seasonId = seasonId;
+    const scores = await UserScore.findAll({ where, attributes: ['userId', 'points'] });
+    pointsByUser = new Map(scores.map((r) => [r.userId, r.points]));
+  } else {
+    const scores = await UserScoreOverall.findAll({
+      where: { userId: { [Op.in]: idList } },
+      attributes: ['userId', 'points'],
+    });
+    pointsByUser = new Map(scores.map((r) => [r.userId, r.points]));
+  }
+
+  const rows = idList
+    .map((id) => {
+      const user = userById.get(id);
+      if (!user) return null;
+      return {
+        userId: id,
+        username: user.username,
+        displayName: user.displayName || null,
+        profileVisibility: user.profileVisibility,
+        points: pointsByUser.get(id) ?? 0,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.points || 0) - (a.points || 0) || a.userId.localeCompare(b.userId));
+  return { rows };
+}
+
+async function getForFriendsForViewer(viewer, opts = {}) {
+  if (!viewer?.id) return { rows: [] };
+  const block = await getForFriends(viewer.id, opts);
+  // Mask per the listFriendsPicks contract (Tier 18 Chunk 4): a
+  // 'friends'-visibility friend stays unmasked; a 'private' friend is masked;
+  // self is never masked (shouldMaskRow short-circuits on row.userId ===
+  // viewerId). No exemptIds — the friend graph isn't a blanket unmask.
+  const ctx = {
+    viewerId: viewer.id,
+    viewerIsAdmin: viewer.role === 'admin',
+    friendIds: await getViewerFriendIdSet(viewer.id),
+  };
+  return { ...block, rows: applyMasking(block.rows, ctx) };
+}
+
 async function getForGroupForViewer(groupId, opts, viewer) {
   const block = await getForGroup(groupId, { ...opts, viewerId: viewer?.id ?? null });
   // Implicit social contract — if the viewer belongs to the same group as
@@ -370,6 +438,8 @@ module.exports = {
   getOverallSlimForViewer,
   getForGroup,
   getForGroupForViewer,
+  getForFriends,
+  getForFriendsForViewer,
   invalidate,
   invalidatePrefix,
   stats,

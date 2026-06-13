@@ -2,16 +2,16 @@
 // surface out of DashboardView's inline 2-column block and into a
 // dedicated view with three sub-tabs:
 //
-//   Overall → the existing global leaderboard (top-3 + self + friends
-//             compact view; expandable)
+//   Overall → the global leaderboard (clean: top-3 + the viewer's own
+//             "your position" row when off-page; no friends interleaved)
 //   Groups  → the existing GroupLeaderboardCard with its group picker
-//   Friends → a friends-only filter of the overall rows (client-side;
-//             reuses `leaderboard.overall` so no extra server hit)
+//   Friends → the viewer + every accepted friend, scored server-side
+//             (`leaderboard.friends`) so a friend or the viewer below the
+//             overall top-N still appears
 //
 // LeaderboardFiltersBar sits ABOVE the SubTabs since league/season scope
 // applies to all three modes consistently.
 
-import { useMemo } from 'react';
 import LeaderboardCard from '../components/LeaderboardCard';
 import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
 import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
@@ -27,25 +27,23 @@ function FriendsLeaderboardSection({
   isFiltered,
   onSelectUser,
 }) {
-  // Friends-only projection: keep entries where userId is in the friend
-  // set OR matches the current user. Rank survives from the source
-  // ordering by re-numbering through the filter (so a friend at rank
-  // 117 still renders as rank 117 if expanded? No — we deliberately
-  // re-rank to give "rank among friends" since this is the friends
-  // view, not a slice of global standings). Spec choice: re-rank.
-  const friendsRows = useMemo(() => {
-    if (!entries || entries.length === 0) return [];
-    const idSet = new Set(friendUserIds || []);
-    if (currentUserId) idSet.add(currentUserId);
-    return entries.filter((e) => idSet.has(e.userId));
-  }, [entries, friendUserIds, currentUserId]);
-
-  if (friendsRows.length === 0) {
+  // `entries` is the server-side friends block (`leaderboard.friends`): the
+  // viewer + every accepted friend, already scored from the materialized
+  // tables and sorted by points DESC — so a friend (or the viewer) below the
+  // overall top-N still appears here. Ranks are local to this view ("rank
+  // among friends"), assigned by LeaderboardCard from list position.
+  //
+  // The block always includes the viewer themselves, so gate the empty state
+  // on the *friend* set rather than `entries.length` — otherwise a friendless
+  // user would see only their own lonely row instead of the "add friends"
+  // nudge.
+  const hasFriends = friendUserIds && friendUserIds.length > 0;
+  if (!hasFriends || !entries || entries.length === 0) {
     return (
       <EmptyState
         title="No friends on the leaderboard yet"
         description={
-          friendUserIds && friendUserIds.length > 0
+          hasFriends
             ? "Your friends haven't picked any games in this scope yet."
             : 'Add friends from the Friends tab to see how you stack up against them.'
         }
@@ -57,10 +55,11 @@ function FriendsLeaderboardSection({
     <LeaderboardCard
       title="Friends"
       description="Where you and your accepted friends stand. Re-ranked locally to focus the comparison."
-      entries={friendsRows}
+      entries={entries}
       currentUserId={currentUserId}
       onSelectUser={onSelectUser}
       isFiltered={isFiltered}
+      friendUserIds={friendUserIds}
     />
   );
 }
@@ -102,7 +101,7 @@ function LeaderboardView() {
           currentUserId={user?.id}
           onSelectUser={openProfile}
           isFiltered={isFiltered}
-          friendUserIds={friendUserIds}
+          viewerRow={leaderboard.overallMeta?.viewerRow}
           total={leaderboard.overallMeta?.total}
           onLoadMore={loadMoreLeaderboard}
           onCollapse={collapseLeaderboard}
@@ -136,7 +135,7 @@ function LeaderboardView() {
       label: 'Friends',
       content: (
         <FriendsLeaderboardSection
-          entries={leaderboard.overall}
+          entries={leaderboard.friends}
           currentUserId={user?.id}
           friendUserIds={friendUserIds}
           isFiltered={isFiltered}

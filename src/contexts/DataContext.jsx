@@ -15,7 +15,13 @@ import { dayKey } from '../hooks/useGames';
 
 const DataContext = createContext(null);
 
-const emptyLeaderboard = { overall: [], overallMeta: null, group: [], groupMeta: null };
+const emptyLeaderboard = {
+  overall: [],
+  overallMeta: null,
+  group: [],
+  groupMeta: null,
+  friends: [],
+};
 const emptyFriends = { friends: [], incoming: [], outgoing: [] };
 
 // Tier 18 Chunk 6 — notification deep-link guards. Module-scope so the
@@ -188,6 +194,7 @@ export function DataProvider({ children }) {
         overallMeta: data.overallMeta || null,
         group: data.group,
         groupMeta: data.groupMeta || null,
+        friends: data.friends || [],
       });
     },
     [request, selectedGroupId, groups, groupOrderBy, groupOffset, leaderboardFilters, overallLimit],

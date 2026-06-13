@@ -41,6 +41,7 @@ import {
   fetchUpcomingGames,
   fetchLiveGames,
   fetchFinishedGames,
+  fetchTopPlayers,
 } from '../marketing/lib/livedata.mjs';
 // Shared with the matchday cron job (lib/jobs/postMatchdayGraphics.js): the
 // four live-fixture renderers + the rasterizer live in render.mjs so both
@@ -53,6 +54,7 @@ import {
   renderKickoffCountdown,
   renderHalftime,
   renderFulltime,
+  renderTopPlayers,
 } from '../marketing/lib/render.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -493,6 +495,13 @@ const STATS_CHARTS = {
   ),
 };
 
+// Offline fallback for the top-3 graphic (matches fetchTopPlayers' shape).
+const SAMPLE_TOP_PLAYERS = [
+  { username: 'KingKenji', points: 1420, streak: 6 },
+  { username: 'PiratePam', points: 1280, streak: 4 },
+  { username: 'xGWizard', points: 1190, streak: 3 },
+];
+
 const LEADERBOARD = [
   { name: 'KingKenji', points: 1420 },
   { name: 'PiratePam', points: 1280 },
@@ -867,6 +876,24 @@ async function main() {
   }
   await emit('fulltime-square', renderFulltime(fulltimeGame, 'square'), SIZE.square[0]);
   await emit('fulltime-story', renderFulltime(fulltimeGame, 'story'), SIZE.story[0]);
+
+  // Top 3 players — reads the public leaderboard API directly (no DB creds
+  // needed), so it's current on a plain `npm run assets:marketing`. Masked
+  // (private) rows are skipped upstream; fall back to the sample when fewer
+  // than 3 live rows are available.
+  let topPlayers = await fetchTopPlayers({ limit: 3 });
+  if (topPlayers.length < 3) {
+    if (topPlayers.length > 0) {
+      console.log(`top-players: only ${topPlayers.length} live row(s) — using sample`);
+    } else {
+      console.log('top-players: live leaderboard unavailable — using sample');
+    }
+    topPlayers = SAMPLE_TOP_PLAYERS;
+  } else {
+    console.log(`top-players: ${topPlayers.map((p) => p.username).join(', ')}`);
+  }
+  await emit('top-players-square', renderTopPlayers(topPlayers, 'square'), SIZE.square[0]);
+  await emit('top-players-story', renderTopPlayers(topPlayers, 'story'), SIZE.story[0]);
 
   if (upcoming.length === 0) {
     console.log('no eligible upcoming games — skipping picks-vs-model assets');

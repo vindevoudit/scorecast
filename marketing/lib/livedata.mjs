@@ -37,6 +37,33 @@ export async function fetchUserCount(db) {
   return rows[0]?.n ?? 0;
 }
 
+// Current top N players for the "top players" marketing graphic. Reads the
+// PUBLIC leaderboard API (no DB creds needed — the same data + masking the
+// site shows), so this works with a plain `npm run assets:marketing`. Masked
+// rows (private/friends-only profiles) are skipped so we never feature a
+// "Player #abcd" placeholder on a public post. Falls back to [] on any error
+// (the generator then uses baked-in sample data).
+//
+// Shape: [{ username, displayName, points, streak }]
+export async function fetchTopPlayers({ limit = 3, baseUrl = 'https://bantryx.com' } = {}) {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/api/leaderboard?overallLimit=50`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.overall || [])
+      .filter((r) => !r.isMasked)
+      .slice(0, limit)
+      .map((r) => ({
+        username: r.username,
+        displayName: r.displayName || null,
+        points: Number(r.points || 0),
+        streak: Number(r.currentWinStreak || 0),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 // Placeholder-fixture guard — mirrors src/utils/teamNames.js isPlaceholderGame.
 // Knockout brackets ship rows like "Winner of QF1" / "Group A 1st" / "TBD"
 // before the real teams are known; a "what the model said" chart on those is

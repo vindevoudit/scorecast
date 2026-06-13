@@ -29,7 +29,7 @@ import {
   footer,
   svgDoc,
 } from './brand.mjs';
-import { picksVsModelCard } from './product.mjs';
+import { picksVsModelCard, avatar } from './product.mjs';
 
 export const URL = 'bantryx.com';
 
@@ -262,4 +262,105 @@ export function renderFulltime(game, format) {
   ${pointsBlock}
   ${closing}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.34, glowR: 0.65 } });
+}
+
+// ── Top 3 players (square / story) ───────────────────────────────────────
+// Podium of the current top three on the live leaderboard. Per the brief,
+// EVERY string is Orbitron (FONT.brand) — headline, rank numerals, points,
+// "PTS", the URL line — EXCEPT the username, which uses Inter (FONT.body) so
+// real handles stay legible (Orbitron is too wide for long usernames). The
+// avatar disc reuses the in-app deterministic colour hash; its single initial
+// is Inter too (it's username-derived). `players` shape:
+//   [{ username, displayName, points, streak }]  (streak optional / unused)
+const RANK_THEME = {
+  1: { bar: 'rgba(250,204,21,0.16)', stroke: 'rgba(250,204,21,0.55)', num: '#facc15', glow: true },
+  2: { bar: 'rgba(148,163,184,0.14)', stroke: 'rgba(148,163,184,0.45)', num: '#cbd5e1' },
+  3: { bar: 'rgba(217,119,6,0.16)', stroke: 'rgba(217,119,6,0.5)', num: '#f59e0b' },
+};
+
+// One leaderboard row: tinted shell + rank pill (Orbitron) + avatar + username
+// (Inter) + points (Orbitron) with a small "PTS" Orbitron label.
+function topPlayerRow({ x, y, w, h, rank, player, L }) {
+  const theme = RANK_THEME[rank] || RANK_THEME[3];
+  const cy = y + h / 2;
+  const pillX = x + L.pad;
+  const pillCx = pillX + L.pill / 2;
+  const avX = pillX + L.pill + L.gapPillAv + L.avR;
+  const nameX = avX + L.avR + L.gapAvName;
+  const rightX = x + w - L.pad;
+  const nameLeft = rightX - L.ptsReserve;
+  const maxNameW = nameLeft - nameX;
+
+  // Fit the username to the gutter between the avatar and the points block.
+  const raw = player.displayName || player.username || 'Player';
+  const display = raw.length > 18 ? `${raw.slice(0, 17)}…` : raw;
+  let nameSize = L.nameSize;
+  const est = display.length * nameSize * 0.56;
+  if (est > maxNameW) nameSize = Math.max(L.nameMin, Math.floor(maxNameW / (display.length * 0.56)));
+
+  const pts = Number(player.points || 0).toLocaleString();
+
+  return `
+  <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${(h * 0.22).toFixed(1)}" fill="${theme.bar}" stroke="${theme.stroke}" stroke-width="${rank === 1 ? 3 : 2}"/>
+  <rect x="${pillX.toFixed(1)}" y="${(cy - L.pill / 2).toFixed(1)}" width="${L.pill}" height="${L.pill}" rx="${(L.pill * 0.28).toFixed(1)}" fill="rgba(2,6,23,0.55)" stroke="${theme.stroke}" stroke-width="2"/>
+  <text x="${pillCx.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.rankSize}" fill="${theme.num}">${rank}</text>
+  ${avatar(avX, cy, L.avR, player.username)}
+  <text x="${nameX.toFixed(1)}" y="${(cy + nameSize * 0.34).toFixed(1)}" font-family="${FONT.body}" font-size="${nameSize}" fill="${COLOR.white}">${esc(display)}</text>
+  <text x="${rightX.toFixed(1)}" y="${cy.toFixed(1)}" text-anchor="end" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${L.ptsSize}" letter-spacing="${(L.ptsSize * 0.02).toFixed(1)}" fill="url(#mark)">${esc(pts)}</text>`;
+}
+
+export function renderTopPlayers(players, format, { generatedAt = new Date() } = {}) {
+  const [w, h] = SIZES[format];
+  const cx = w / 2;
+  const story = format === 'story';
+  const top3 = (players || []).slice(0, 3);
+
+  const L = story
+    ? {
+        cardW: 940, pad: 44, rowH: 268, gap: 44, startY: 720,
+        pill: 116, rankSize: 64, avR: 54, gapPillAv: 40, gapAvName: 34,
+        nameSize: 48, nameMin: 28, ptsReserve: 200, ptsSize: 68,
+        headCy: 372, urlY: h - 120,
+      }
+    : {
+        cardW: 880, pad: 36, rowH: 182, gap: 24, startY: 350,
+        pill: 92, rankSize: 52, avR: 42, gapPillAv: 32, gapAvName: 26,
+        nameSize: 40, nameMin: 26, ptsReserve: 180, ptsSize: 56,
+        headCy: 214, urlY: h - 56,
+      };
+  const cardX = (w - L.cardW) / 2;
+
+  const rows = top3
+    .map((p, i) =>
+      topPlayerRow({ x: cardX, y: L.startY + i * (L.rowH + L.gap), w: L.cardW, h: L.rowH, rank: i + 1, player: p, L }),
+    )
+    .join('\n');
+
+  // Generation date — sits midway between the headline and the #1 card so the
+  // graphic self-documents when its standings were captured. Orbitron, like
+  // everything except the usernames.
+  const dateLabel = (() => {
+    try {
+      return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+        .format(generatedAt)
+        .toUpperCase();
+    } catch {
+      return '';
+    }
+  })();
+  const dateY = (L.headCy + L.startY) / 2;
+  const dateSize = story ? 30 : 26;
+
+  const headSize = fitOrbitron('TOP 3', w * 0.5, story ? 200 : 150);
+  const urlColor = story ? COLOR.cyanSoft : COLOR.muted;
+  const urlSize = story ? 34 : 30;
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, story ? 235 : 110, story ? 50 : 46)}
+  <text x="${cx}" y="${L.headCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${headSize}" letter-spacing="${(headSize * 0.04).toFixed(1)}" fill="url(#mark)">TOP 3</text>
+  <text x="${cx}" y="${dateY.toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${dateSize}" letter-spacing="${story ? 6 : 5}" fill="${COLOR.cyanSoft}">${esc(dateLabel)}</text>
+  ${rows}
+  <text x="${cx}" y="${L.urlY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="${urlSize}" letter-spacing="2" fill="${urlColor}">${URL}</text>`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
 }

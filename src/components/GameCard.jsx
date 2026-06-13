@@ -395,13 +395,15 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
 // is server-gated: only present when the viewer has already picked OR
 // the game has locked (status !== 'scheduled'), so this component can
 // render unconditionally. Hidden when there are no picks yet.
-function CrowdMeter({ crowd }) {
+function CrowdMeter({ crowd, homeTeam, awayTeam }) {
   if (!crowd || !crowd.total) return null;
   const total = crowd.total;
   const homePct = Math.round((crowd.home / total) * 100);
   // Force the bar to sum to exactly 100 even after rounding so the
   // segments meet without a sliver of background showing through.
   const awayPct = 100 - homePct;
+  const homeLabel = homeTeam || 'Home';
+  const awayLabel = awayTeam || 'Away';
   return (
     <div className="mt-4 rounded-2xl border border-default bg-overlay/40 px-3 py-2.5">
       <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-fg-muted">
@@ -410,25 +412,32 @@ function CrowdMeter({ crowd }) {
           {total.toLocaleString()} pick{total === 1 ? '' : 's'}
         </span>
       </div>
+      {/* Cyan (home) + violet (away) pairing mirrors the marketing
+          "Fans vs the model" graphic so the brand palette stays consistent
+          across the product + social cards. */}
       <div className="mt-2 flex h-7 overflow-hidden rounded-full bg-overlay/60">
         <div
           className="flex items-center justify-start px-2 text-[11px] font-bold tabular-nums text-fg"
           style={{ width: `${homePct}%`, background: 'rgb(var(--c-accent) / 0.45)' }}
-          aria-label={`Home ${homePct}%`}
+          aria-label={`${homeLabel} ${homePct}%`}
         >
           {homePct >= 12 ? `${homePct}%` : null}
         </div>
         <div
           className="ml-auto flex items-center justify-end px-2 text-[11px] font-bold tabular-nums text-fg"
-          style={{ width: `${awayPct}%`, background: 'rgb(var(--c-warning) / 0.35)' }}
-          aria-label={`Away ${awayPct}%`}
+          style={{ width: `${awayPct}%`, background: 'rgb(var(--c-violet) / 0.55)' }}
+          aria-label={`${awayLabel} ${awayPct}%`}
         >
           {awayPct >= 12 ? `${awayPct}%` : null}
         </div>
       </div>
-      <div className="mt-1.5 flex items-center justify-between text-[10px] font-medium text-fg-muted">
-        <span>Home</span>
-        <span>Away</span>
+      <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] font-medium text-fg-muted">
+        <span className="min-w-0 truncate" title={homeLabel}>
+          {homeLabel}
+        </span>
+        <span className="min-w-0 truncate text-right" title={awayLabel}>
+          {awayLabel}
+        </span>
       </div>
     </div>
   );
@@ -752,7 +761,11 @@ function GameCard({ game }) {
         </div>
       ) : null}
 
-      <CrowdMeter crowd={game.crowd} />
+      <CrowdMeter
+        crowd={game.crowd}
+        homeTeam={displayTeamName(game.homeTeam)}
+        awayTeam={displayTeamName(game.awayTeam)}
+      />
 
       <FriendPicksPanel game={game} />
 

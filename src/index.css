@@ -38,6 +38,7 @@
   --c-warning: 250 204 21; /* yellow-400 */
   --c-danger: 248 113 113; /* red-400 */
   --c-info: 96 165 250; /* blue-400 */
+  --c-violet: 168 85 247; /* purple-500 — crowd "away" bar; matches marketing picks-vs-model */
 
   /* Shadows */
   --shadow-glow: 0 20px 60px rgba(6, 182, 212, 0.18);
@@ -130,6 +131,7 @@
   --c-warning: 202 138 4; /* yellow-600 */
   --c-danger: 220 38 38; /* red-600 */
   --c-info: 37 99 235; /* blue-600 */
+  --c-violet: 147 51 234; /* purple-600 (darker for AA contrast on white) */
 
   --shadow-glow: 0 20px 60px rgba(8, 145, 178, 0.12);
   --shadow-brand-glow: 0 0 8px rgba(8, 145, 178, 0.4), 0 0 16px rgba(8, 145, 178, 0.25);

@@ -210,11 +210,22 @@ function pointsForWinner(result, homeProb, awayProb) {
   return null;
 }
 
+// Partial credit a winner-only pick on `side` earns on a DRAW, mirroring
+// lib/scoring.js scorePick: (drawProb × opposite-side prob / (home+away)) × 100.
+// The two sides pay differently — backing the bigger underdog pays more.
+function pointsForDraw(side, homeProb, drawProb, awayProb) {
+  const denom = homeProb + awayProb;
+  if (!(drawProb > 0) || denom <= 0) return 0;
+  const opposite = side === 'home' ? awayProb : homeProb;
+  return Math.round(((drawProb * opposite) / denom) * 100);
+}
+
 // Finished fixtures with a score + a recorded result — the source for the
 // full-time card. Precomputes the winner + the points a correct pick earned.
 // Ordered most-recent-first; placeholder fixtures filtered.
 //
-// Shape: [{ home, away, homeScore, awayScore, result, winner, points, leagueName }]
+// Shape: [{ home, away, homeScore, awayScore, result, winner, points,
+//           drawPoints:{home,away}|null, leagueName }]
 export async function fetchFinishedGames(db) {
   const [games] = await db.query(`
     SELECT g."homeTeam"        AS home,
@@ -223,6 +234,7 @@ export async function fetchFinishedGames(db) {
            g."awayScore"       AS ascore,
            g.result            AS result,
            g."homeProbability" AS hp,
+           g."drawProbability" AS dp,
            g."awayProbability" AS ap,
            l.name              AS league
     FROM games g
@@ -244,6 +256,13 @@ export async function fetchFinishedGames(db) {
       result: g.result,
       winner: g.result === 'home' ? g.home : g.result === 'away' ? g.away : null,
       points: pointsForWinner(g.result, Number(g.hp), Number(g.ap)),
+      drawPoints:
+        g.result === 'draw'
+          ? {
+              home: pointsForDraw('home', Number(g.hp), Number(g.dp), Number(g.ap)),
+              away: pointsForDraw('away', Number(g.hp), Number(g.dp), Number(g.ap)),
+            }
+          : null,
       leagueName: g.league || '',
     }));
 }

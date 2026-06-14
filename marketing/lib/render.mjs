@@ -216,8 +216,8 @@ export function renderFulltime(game, format) {
   const draw = game.result === 'draw';
 
   const L = {
-    square: { markY: 120, markSize: 46, leagueY: 232, matchupY: 344, matchupMax: 60, ftY: 452, ftSize: 30, scoreCy: 588, scoreSize: 168, backY: 744, backSize: 28, ptsY: 836, ptsMax: 96, urlY: 1028 },
-    story: { markY: 250, markSize: 50, leagueY: 392, matchupY: 512, matchupMax: 92, ftY: 648, ftSize: 36, scoreCy: 860, scoreSize: 300, backY: 1090, backSize: 34, ptsY: 1216, ptsMax: 150, footerY: h - 200 },
+    square: { markY: 120, markSize: 46, leagueY: 232, matchupY: 344, matchupMax: 60, ftY: 452, ftSize: 30, scoreCy: 588, scoreSize: 168, backY: 744, backSize: 28, ptsY: 836, ptsMax: 96, urlY: 1028, drawTeamY: 812, drawNumY: 900, drawPtsY: 940, drawTeamMax: 34, drawNumMax: 84, drawPtsLabel: 22, drawColOff: 232 },
+    story: { markY: 250, markSize: 50, leagueY: 392, matchupY: 512, matchupMax: 92, ftY: 648, ftSize: 36, scoreCy: 860, scoreSize: 300, backY: 1090, backSize: 34, ptsY: 1216, ptsMax: 150, footerY: h - 200, drawTeamY: 1186, drawNumY: 1300, drawPtsY: 1356, drawTeamMax: 46, drawNumMax: 140, drawPtsLabel: 30, drawColOff: 236 },
   }[format];
 
   const matchup = `${game.home} vs ${game.away}`;
@@ -231,8 +231,14 @@ export function renderFulltime(game, format) {
   const homeFill = draw || game.result === 'home' ? COLOR.white : COLOR.dim;
   const awayFill = draw || game.result === 'away' ? COLOR.white : COLOR.dim;
 
-  // Points block: decisive → "BACKING <WINNER>" + big Orbitron "+N PTS";
-  // draw → "DRAW" + a plain partial-credit note (no single figure).
+  // Points block:
+  //   decisive → "BACKING <WINNER>" + big Orbitron "+N PTS"
+  //   draw with partial-credit configured → two columns showing the points a
+  //     pick on EACH team earned (draws pay partial credit, and the two sides
+  //     pay differently — backing the bigger underdog pays more)
+  //   draw without partial credit (drawProbability 0) → plain note
+  const drawPts = draw ? game.drawPoints : null;
+  const hasDrawPts = drawPts && ((drawPts.home || 0) > 0 || (drawPts.away || 0) > 0);
   let pointsBlock;
   if (!draw && game.points != null) {
     const ptsText = `+${game.points} PTS`;
@@ -240,6 +246,21 @@ export function renderFulltime(game, format) {
     pointsBlock = `
   <text x="${cx}" y="${L.backY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.backSize}" letter-spacing="${story ? 6 : 4}" fill="${COLOR.cyanSoft}">BACKING ${esc(game.winner.toUpperCase())}</text>
   <text x="${cx}" y="${L.ptsY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="${ptsSize}" letter-spacing="${ptsSize * 0.04}" fill="url(#mark)">${esc(ptsText)}</text>`;
+  } else if (hasDrawPts) {
+    // Same Orbitron size for both columns so they read as a matched pair;
+    // sized to the worst-case 3-char numeral so "+8" and "+12" align.
+    const numSize = fitOrbitron('+00', L.drawColOff * 0.9, L.drawNumMax);
+    const teamSize = (name) =>
+      Math.min(L.drawTeamMax, Math.floor((L.drawColOff * 1.7) / (Math.max(name.length, 1) * 0.58)));
+    const column = (ccx, name, n) => `
+  <text x="${ccx.toFixed(1)}" y="${L.drawTeamY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${teamSize(name)}" fill="${COLOR.white}">${esc(name)}</text>
+  <text x="${ccx.toFixed(1)}" y="${L.drawNumY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="${numSize}" letter-spacing="${(numSize * 0.03).toFixed(1)}" fill="url(#mark)">+${n}</text>
+  <text x="${ccx.toFixed(1)}" y="${L.drawPtsY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.drawPtsLabel}" letter-spacing="${(L.drawPtsLabel * 0.2).toFixed(1)}" fill="${COLOR.muted}">PTS</text>`;
+    pointsBlock = `
+  <text x="${cx}" y="${L.backY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.backSize}" letter-spacing="${story ? 6 : 4}" fill="${COLOR.cyanSoft}">DRAW · BOTH SIDES SCORE</text>
+  <line x1="${cx}" y1="${(L.drawTeamY - (story ? 30 : 22)).toFixed(1)}" x2="${cx}" y2="${(L.drawPtsY + (story ? 8 : 6)).toFixed(1)}" stroke="${COLOR.border}" stroke-width="2"/>
+  ${column(cx - L.drawColOff, game.home, drawPts.home || 0)}
+  ${column(cx + L.drawColOff, game.away, drawPts.away || 0)}`;
   } else {
     pointsBlock = `
   <text x="${cx}" y="${L.backY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${L.backSize}" letter-spacing="${story ? 6 : 4}" fill="${COLOR.cyanSoft}">DRAW</text>

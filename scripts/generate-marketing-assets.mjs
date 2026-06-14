@@ -55,6 +55,7 @@ import {
   renderHalftime,
   renderFulltime,
   renderTopPlayers,
+  renderStreaksFeature,
 } from '../marketing/lib/render.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -813,6 +814,10 @@ async function main() {
   await emit('product-stats-story', renderStats('story'), SIZE.story[0]);
   await emit('product-stats-charts', renderStatsCharts('square'), SIZE.square[0]);
   await emit('product-stats-charts-story', renderStatsCharts('story'), SIZE.story[0]);
+
+  // Feature announcement — win streaks (static, no live data).
+  await emit('feature-streaks', renderStreaksFeature('square'), SIZE.square[0]);
+  await emit('feature-streaks-story', renderStreaksFeature('story'), SIZE.story[0]);
 
   // ── Live-data assets ──
   // Pull real numbers from prod when DATABASE_URL is set; otherwise fall

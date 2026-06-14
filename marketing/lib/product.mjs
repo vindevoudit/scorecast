@@ -70,7 +70,7 @@ export function avatar(cx, cy, r, name) {
 }
 
 // Solid flame (Lucide "flame" outline, filled) for streak indicators.
-function flame(cx, cy, size, color = UI.streak) {
+export function flame(cx, cy, size, color = UI.streak) {
   const s = size / 24;
   return `<g transform="translate(${cx - 12 * s} ${cy - 12 * s}) scale(${s})"><path fill="${color}" d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-1.464-.224-3.123.5-4 .564.123 2.5 1 2.5 4 0 .5 1 1.5 2 2.5 1 1 2 2.5 2 4a4.5 4.5 0 1 1-9 0c0-1 .5-2 1.5-3"/></g>`;
 }

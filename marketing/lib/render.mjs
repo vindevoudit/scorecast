@@ -29,7 +29,7 @@ import {
   footer,
   svgDoc,
 } from './brand.mjs';
-import { picksVsModelCard, avatar } from './product.mjs';
+import { picksVsModelCard, avatar, flame, streakChip } from './product.mjs';
 
 export const URL = 'bantryx.com';
 
@@ -363,4 +363,76 @@ export function renderTopPlayers(players, format, { generatedAt = new Date() } =
   ${rows}
   <text x="${cx}" y="${L.urlY}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="${urlSize}" letter-spacing="2" fill="${urlColor}">${URL}</text>`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.16, glowR: 0.7 } });
+}
+
+// ── Feature announcement: win streaks (square / story) ───────────────────
+// "Win streaks are here" launch card. Hero is the kit's SVG flame (Lucide,
+// orange) with a big Orbitron streak numeral, then a headline (Inter Black),
+// one line of body copy (Inter), and the Streakmaster milestone chips
+// (5 / 10 / 15 — mirrors badges/catalog.js streakmaster-1/2/3 + the in-app
+// >=3 leaderboard gate). Brand chrome (BANTRYX, bantryx.com) stays Orbitron.
+function milestoneChips(cx, y, k, gap) {
+  const tiers = [
+    { count: 5, label: 'I' },
+    { count: 10, label: 'II' },
+    { count: 15, label: 'III' },
+  ];
+  const chipW = 64 * k;
+  const totalW = tiers.length * chipW + (tiers.length - 1) * gap;
+  let x = cx - totalW / 2;
+  return tiers
+    .map(({ count, label }) => {
+      const chip = streakChip(x, y, count, k);
+      const lbl = `<text x="${(x + chipW / 2).toFixed(1)}" y="${(y + 34 * k + 22 * k).toFixed(1)}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${(15 * k).toFixed(1)}" letter-spacing="${(3 * k).toFixed(1)}" fill="${COLOR.muted}">${label}</text>`;
+      x += chipW + gap;
+      return chip + lbl;
+    })
+    .join('\n');
+}
+
+export function renderStreaksFeature(format) {
+  const [w, h] = SIZES[format];
+  const cx = w / 2;
+  const story = format === 'story';
+
+  const L = story
+    ? {
+        markY: 235, markSize: 50, kickY: 440, flameCy: 770, flameSize: 380,
+        headY: 1090, headSize: 84, subY: 1190, subSize: 42, subLH: 60,
+        capY: 1390, chipY: 1440, chipK: 2.1, chipGap: 56,
+      }
+    : {
+        markY: 116, markSize: 46, kickY: 214, flameCy: 452, flameSize: 264,
+        headY: 656, headSize: 62, subY: 736, subSize: 33, subLH: 46,
+        capY: 850, chipY: 894, chipK: 1.7, chipGap: 44,
+      };
+
+  // Hero: a single bold centred flame — the universal "streak" symbol. The
+  // flame+number pairing is carried by the milestone chips below, so the hero
+  // stays iconic and uncluttered.
+  const hero = flame(cx, L.flameCy, L.flameSize);
+
+  const subLines = ['Win picks back-to-back to build a streak —', 'now shown right on the leaderboard.'];
+  const sub = subLines
+    .map(
+      (line, i) =>
+        `<text x="${cx}" y="${(L.subY + i * L.subLH).toFixed(1)}" text-anchor="middle" font-family="${FONT.body}" font-size="${L.subSize}" fill="${COLOR.textHi}">${esc(line)}</text>`,
+    )
+    .join('\n');
+
+  const closing = story
+    ? footer({ cx, y: h - 150, w: w * 0.64 })
+    : `<text x="${cx}" y="${h - 56}" text-anchor="middle" font-family="${FONT.brand}" font-weight="700" font-size="30" letter-spacing="2" fill="${COLOR.muted}">${URL}</text>`;
+
+  const body = `
+  ${background(w, h)}
+  ${topMark(cx, L.markY, L.markSize)}
+  <text x="${cx}" y="${L.kickY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 30 : 26}" letter-spacing="${story ? 10 : 8}" fill="${COLOR.cyan}">NEW ON BANTRYX</text>
+  ${hero}
+  <text x="${cx}" y="${L.headY}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${L.headSize}" letter-spacing="0.5" fill="${COLOR.white}">Win streaks are here</text>
+  ${sub}
+  <text x="${cx}" y="${L.capY}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 26 : 22}" letter-spacing="${story ? 5 : 4}" fill="${COLOR.cyanSoft}">STREAKMASTER MILESTONES</text>
+  ${milestoneChips(cx, L.chipY, L.chipK, L.chipGap)}
+  ${closing}`;
+  return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.3, glowR: 0.7 } });
 }

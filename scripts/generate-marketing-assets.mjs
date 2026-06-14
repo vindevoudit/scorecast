@@ -50,6 +50,7 @@ import {
   loadFonts,
   rasterize,
   topMark,
+  fitOrbitron,
   renderPicksVsModel,
   renderKickoffCountdown,
   renderHalftime,
@@ -736,13 +737,16 @@ function renderThankYou(format, userCount) {
   const story = format === 'story';
   const big = roundDownToMilestone(userCount);
   const bigCy = story ? h * 0.46 : h * 0.5;
-  const bigSize = story ? 460 : 320;
+  // Orbitron is wider than the old Bebas Neue display face, so fit the
+  // milestone numeral to ~82% width — large milestones (e.g. "1,000") would
+  // otherwise overflow at the headline size.
+  const bigSize = fitOrbitron(big, w * 0.82, story ? 460 : 320);
 
   const body = `
   ${background(w, h)}
   ${topMark(cx, story ? 250 : 132, story ? 50 : 46)}
   <text x="${cx}" y="${story ? 470 : 300}" text-anchor="middle" font-family="${FONT.bodyBlack}" font-size="${story ? 96 : 76}" fill="${COLOR.white}" letter-spacing="0.5">Thank you</text>
-  <text x="${cx}" y="${bigCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.display}" font-size="${bigSize}" fill="url(#mark)">${esc(big)}</text>
+  <text x="${cx}" y="${bigCy}" text-anchor="middle" dominant-baseline="central" font-family="${FONT.brand}" font-weight="700" font-size="${bigSize}" letter-spacing="${(bigSize * 0.02).toFixed(1)}" fill="url(#mark)">${esc(big)}</text>
   <text x="${cx}" y="${bigCy + bigSize * 0.34 + (story ? 70 : 84)}" text-anchor="middle" font-family="${FONT.bodySemi}" font-size="${story ? 48 : 42}" letter-spacing="1" fill="${COLOR.textHi}">players and counting</text>
   ${footer({ cx, y: h - (story ? 220 : 160), w: w * 0.64 })}`;
   return svgDoc({ w, h, body, glow: { glowCx: 0.5, glowCy: 0.42 } });

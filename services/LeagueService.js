@@ -17,6 +17,7 @@ const logger = require('../lib/logger');
 const footballApi = require('../lib/footballApi');
 const { mapUpstreamStatus, deriveResultFromFixture } = require('../lib/fixtureStatus');
 const { INITIAL_RATING } = require('../lib/ml/eloMath');
+const { isPlaceholderTeam } = require('../lib/placeholderTeam');
 
 async function listLeagues() {
   return League.findAll({ order: [['name', 'ASC']] });
@@ -144,7 +145,23 @@ async function upsertFixture({ league, fixture, transaction }) {
   // admins set probabilities by hand.
   const derivedResult = deriveResultFromFixture(fixture, localStatus);
 
+  // Tier 17 — make sure both teams exist in the teams table so the runtime
+  // cascade always has Elo to read. SKIP knockout-stage placeholder names
+  // ("TBD" / "Winner Group A") — inserting them at min(elo) would give a
+  // TBD-vs-Real fixture a real (wrong) Elo pair and defeat the null-Elo
+  // skip in rePredictFutureFixtures. Existing rows are a no-op via ON
+  // CONFLICT, so this is safe to call on every upsert.
+  const ensureRealTeam = async (name) => {
+    if (isPlaceholderTeam(name)) return;
+    await ensureTeamExists({ name, leagueId: league.id, transaction });
+  };
+
   if (existing) {
+    // Capture the prior matchup BEFORE Object.assign so we can tell when a
+    // knockout fixture's placeholder names resolve to real teams (or change
+    // in a re-draw). syncFixtures uses this to fire a re-prediction.
+    const prevHome = existing.homeTeam;
+    const prevAway = existing.awayTeam;
     Object.assign(existing, baseAttrs);
     // Only fill result if it's currently null — never clobber an admin's
     // manual entry. derivedResult itself is null for in-progress or drawn
@@ -156,9 +173,10 @@ async function upsertFixture({ league, fixture, transaction }) {
     // Tier 17 — team rows may have been added since the fixture was first
     // synced (e.g. a team was renamed upstream). Re-ensure on every update
     // path, not just the create path.
-    await ensureTeamExists({ name: fixture.homeTeam, leagueId: league.id, transaction });
-    await ensureTeamExists({ name: fixture.awayTeam, leagueId: league.id, transaction });
-    return { game: existing, created: false };
+    await ensureRealTeam(fixture.homeTeam);
+    await ensureRealTeam(fixture.awayTeam);
+    const matchupChanged = prevHome !== fixture.homeTeam || prevAway !== fixture.awayTeam;
+    return { game: existing, created: false, matchupChanged };
   }
 
   const created = await Game.create(
@@ -174,13 +192,11 @@ async function upsertFixture({ league, fixture, transaction }) {
     },
     { transaction },
   );
-  // Tier 17 — make sure both teams exist in the teams table after every
-  // upsert. Done unconditionally (existing rows are a no-op via ON
-  // CONFLICT) so the runtime cascade always has Elo to read for any
-  // synced fixture, including a brand-new club's first appearance.
-  await ensureTeamExists({ name: fixture.homeTeam, leagueId: league.id, transaction });
-  await ensureTeamExists({ name: fixture.awayTeam, leagueId: league.id, transaction });
-  return { game: created, created: true };
+  await ensureRealTeam(fixture.homeTeam);
+  await ensureRealTeam(fixture.awayTeam);
+  // A newly-created scheduled fixture is treated as a matchup change so it
+  // gets a real prediction off the bat (instead of the 0.5/0.5 default).
+  return { game: created, created: true, matchupChanged: true };
 }
 
 async function syncFixtures(leagueId) {
@@ -196,12 +212,20 @@ async function syncFixtures(leagueId) {
 
   let created = 0;
   let updated = 0;
+  // Teams whose upcoming matchup changed in this sync (knockout brackets
+  // resolving placeholder → real team, or a re-draw). Used to fire a
+  // re-prediction AFTER the transaction commits.
+  const affectedTeams = new Set();
   await sequelize.transaction(async (t) => {
     for (const fixture of fixtures) {
       try {
         const result = await upsertFixture({ league, fixture, transaction: t });
         if (result.created) created += 1;
         else updated += 1;
+        if (result.matchupChanged && result.game.status === 'scheduled') {
+          if (!isPlaceholderTeam(result.game.homeTeam)) affectedTeams.add(result.game.homeTeam);
+          if (!isPlaceholderTeam(result.game.awayTeam)) affectedTeams.add(result.game.awayTeam);
+        }
       } catch (err) {
         logger.error(
           { err, sourceId: fixture.sourceId, leagueId },
@@ -212,7 +236,55 @@ async function syncFixtures(leagueId) {
     }
   });
 
-  return { leagueId, totalUpstream: fixtures.length, created, updated };
+  // Self-heal: any scheduled fixture still sitting at the (0.50, 0.00, 0.50)
+  // sentinel has real teams but was never predicted — e.g. a knockout fixture
+  // that resolved in a PRIOR sync (before this hook existed, or before its
+  // opponent was ensured). Roll its teams into the re-prediction set so it
+  // fills on the next sync regardless of whether THIS sync changed it. A
+  // genuine prediction is always nudged off the sentinel (normalize.js), so
+  // this only ever catches never-predicted rows — manual admin edits are
+  // left untouched.
+  const sentinelGames = await Game.findAll({
+    attributes: ['homeTeam', 'awayTeam'],
+    where: {
+      leagueId,
+      status: 'scheduled',
+      pickProbabilitiesLockedAt: null,
+      homeProbability: 0.5,
+      drawProbability: 0,
+      awayProbability: 0.5,
+    },
+  });
+  for (const g of sentinelGames) {
+    if (!isPlaceholderTeam(g.homeTeam)) affectedTeams.add(g.homeTeam);
+    if (!isPlaceholderTeam(g.awayTeam)) affectedTeams.add(g.awayTeam);
+  }
+
+  let rePredicted = 0;
+  if (affectedTeams.size > 0) {
+    // Best-effort, post-commit — a model-load failure or missing-Elo skip
+    // must never fail the sync (mirrors the result-capture cascade contract).
+    // Lazy-require to dodge any require-cycle at module load.
+    try {
+      const PredictionService = require('./PredictionService');
+      const res = await PredictionService.rePredictFutureFixtures({
+        affectedTeams: [...affectedTeams],
+        leagueId,
+      });
+      rePredicted = res.rewritten || 0;
+      logger.info(
+        { leagueId, league: league.name, affectedTeams: affectedTeams.size, ...res },
+        'syncFixtures: re-predicted resolved fixtures',
+      );
+    } catch (err) {
+      logger.error(
+        { err, leagueId, league: league.name },
+        'syncFixtures: re-prediction failed (sync itself succeeded)',
+      );
+    }
+  }
+
+  return { leagueId, totalUpstream: fixtures.length, created, updated, rePredicted };
 }
 
 module.exports = {

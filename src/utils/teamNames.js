@@ -55,7 +55,9 @@ export function displayTeamName(fullName) {
 // "Winner of QF1" / "Loser of SF2" / "Group A 1st" patterns that show up
 // during the 2026 World Cup sync. Match them so GameCard can hide the
 // payout matrix + disable pick buttons until real teams populate.
-const PLACEHOLDER_PATTERN = /^(tbd|winner|loser|group\s|placeholder)/i;
+// Mirror of lib/placeholderTeam.js PLACEHOLDER_PATTERN (backend) — keep in
+// sync in the same commit.
+const PLACEHOLDER_PATTERN = /^(tbd|winner|loser|group\s|placeholder|runner-up)/i;
 
 export function isPlaceholderTeam(name) {
   if (!name) return true;

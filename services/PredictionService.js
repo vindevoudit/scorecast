@@ -37,6 +37,7 @@ const logger = require('../lib/logger');
 const eloMath = require('../lib/ml/eloMath');
 const xgboost = require('../lib/ml/xgboostInference');
 const normalize = require('../lib/ml/normalize');
+const { isPlaceholderTeam } = require('../lib/placeholderTeam');
 
 // Per-league model cache. Models are loaded lazily on first access so
 // boot doesn't fail when the JSON file is missing (PR B → PR C handoff)
@@ -311,6 +312,16 @@ async function rePredictFutureFixtures({ affectedTeams, leagueId }) {
   let rewritten = 0;
   let skipped = 0;
   for (const g of games) {
+    // Knockout-stage fixtures whose participants haven't advanced yet carry
+    // placeholder names ("TBD" / "Winner Group A"). Leave them at the
+    // (0.50, 0.00, 0.50) sentinel so the frontend placeholder-gate keeps
+    // showing "Picks open once both teams advance." A real prediction would
+    // be misleading (and a stale auto-inserted placeholder team row could
+    // otherwise resolve to a real Elo, defeating the null-Elo skip below).
+    if (isPlaceholderTeam(g.homeTeam) || isPlaceholderTeam(g.awayTeam)) {
+      skipped += 1;
+      continue;
+    }
     const homeElo = eloByName.get(g.homeTeam);
     const awayElo = eloByName.get(g.awayTeam);
     if (homeElo == null || awayElo == null) {

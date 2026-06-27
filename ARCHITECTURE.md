@@ -264,7 +264,7 @@ ScoreCast/
 │   ├── GameService.js                   # CRUD + setResult/bulkSetResult/cascadeDelete/applyLiveUpdate (notify + badge eval + cache invalidate on result transitions). status ↔ result sync (set 'home/away/draw' → status='finished'; clear → status='scheduled')
 │   ├── GroupService.js                  # CRUD + invite/accept/decline/join/leave/transfer/visibility + cascadeDelete + maskMembersForAnon (Tier 8.6) + discoverPublic/getVisible accept viewer=null for anon
 │   ├── UserService.js                   # cascadeDelete + admin list/role/delete + bulkAction (filters self id → skipped[]) + getProfileByUsername (Tier 8.6 visibility gate)
-│   ├── LeagueService.js                 # Tier 4b + Tier 17: CRUD + ensureSeason + upsertFixture (calls ensureTeamExists on both teams every upsert — newly-promoted clubs land in `teams` at MIN(elo)) + syncFixtures + ensureTeamExists helper
+│   ├── LeagueService.js                 # Tier 4b + Tier 17: CRUD + ensureSeason + upsertFixture (ensureTeamExists on both REAL teams every upsert — skips knockout placeholders; tracks matchupChanged) + syncFixtures (post-commit re-predicts resolved + sentinel fixtures so WC knockout odds auto-fill) + ensureTeamExists helper
 │   ├── PredictionService.js             # Tier 17: reactive ML cascade. onResultUpdated (idempotent + reversible via per-game snapshot) runs INSIDE the result-capture transaction; rePredictFutureFixtures runs AFTER commit and rewrites probabilities for upcoming fixtures involving either team. Per-league model cache. See §8.17
 │   └── AuditLogService.js               # Tier 4b Chunk 3: record({action, entityType, entityId, actorUserId, before, after, requestId, statusCode}) with 4KB payload truncation (replaces oversize payloads with {_truncated, _bytes, preview}) + listPaginated(limit, offset)
 │
@@ -2490,10 +2490,12 @@ Both team rows are locked with `SELECT ... FOR UPDATE` so concurrent captures in
 
 1. Resolve `leagueCode` from `leagueId` (one extra query; avoids a dep-cycle with LeagueService).
 2. Look up cached model via `getModelForSourceLeagueCode(code)`. `MODEL_PATHS` maps `PL` → `lib/ml/models/PL_elo.json`. Per-league cache populated lazily.
-3. `Game.findAll({ leagueId, status: 'scheduled', [Op.or]: [{ homeTeam IN affectedTeams }, { awayTeam IN affectedTeams }] })` — every upcoming fixture involving either side.
+3. `Game.findAll({ leagueId, status: 'scheduled', pickProbabilitiesLockedAt: null, [Op.or]: [{ homeTeam IN affectedTeams }, { awayTeam IN affectedTeams }] })` — every upcoming, unlocked fixture involving either side.
 4. Bulk-fetch the teams referenced (the affected teams + their opponents) in one query. Build `eloByName: Map<name, parseFloat(elo)>`.
-5. For each fixture: `predict()` + `toThreeWay()` + `game.update({ homeProbability, drawProbability, awayProbability })`. Skip with logged warn on missing-team / predict-throw / normalize-throw — never blocks the rest of the batch.
+5. For each fixture: **skip if either team is a placeholder** (`isPlaceholderTeam` — `TBD` / `Winner Group A` / `Runner-up …`; leaves the knockout slot at the `(0.50, 0.00, 0.50)` sentinel so the frontend gate keeps showing "Picks open once both teams advance", and a stale auto-inserted placeholder team row can't resolve to a real Elo and emit wrong odds). Otherwise `predict()` + `toThreeWay()` + `game.update({ homeProbability, drawProbability, awayProbability })`. Skip with logged warn on missing-team / predict-throw / normalize-throw — never blocks the rest of the batch.
 6. Log `rePredictFutureFixtures: cascade complete` with rewritten + skipped counts.
+
+**Sync-time re-prediction hook (2026-06-27)** — the result-capture cascade only fires when a team's Elo changes, but a **knockout team plays no match between qualifying and the fixture it advances into**, so World Cup R32/R16/QF/SF/Final slots never got odds — they stayed at the `(0.50, 0.00, 0.50)` sentinel forever after football-data.org resolved their placeholder names. [services/LeagueService.js](services/LeagueService.js) `syncFixtures` now closes this: after the upsert transaction commits, it fires `rePredictFutureFixtures` for the union of (a) teams on fixtures whose **matchup changed** this sync (`upsertFixture` returns `matchupChanged` by capturing prior `homeTeam`/`awayTeam` before `Object.assign`; a newly-created scheduled fixture counts as changed) and (b) teams on any scheduled fixture **still sitting at the sentinel** (a one-shot `Game.findAll` post-commit — self-heals fixtures that resolved in a prior sync before they were ever predicted). Best-effort + lazy-require'd PredictionService (dodges a require-cycle), wrapped in try/catch so a model-load failure never fails the sync. Returns `rePredicted` in the sync summary. Fires on BOTH the daily `syncFixtures` cron AND the admin **League Manager → Sync** button. Sentinel detection is exact (`homeProbability=0.50 AND drawProbability=0 AND awayProbability=0.50`) — a genuine prediction is always nudged off the sentinel by `normalize.js`, so this only ever catches never-predicted rows and leaves manual admin edits untouched. `upsertFixture` also stops calling `ensureTeamExists` for placeholder names so `TBD`/`Winner …` rows no longer pollute the `teams` table.
 
 **7. Teams table + Elo state** ([models/Team.js](models/Team.js))
 
@@ -2514,7 +2516,7 @@ Indexes: unique `(name, leagueId)` + non-unique on `leagueId`.
 **Two write paths populate this table**:
 
 - **Initial seed** — [seeders/20260522000001-seed-teams-from-elo-history.js](seeders/20260522000001-seed-teams-from-elo-history.js) walks the 32-season committed PL CSV history chronologically (custom sort to handle the two-digit-year wrap), applies the same K=20 / INITIAL=1500 / HFA=0 / min_rating algorithm the Python trainer uses, and inserts every team with its post-walk Elo + gamesPlayed + lastMatchDate. `ON CONFLICT (name, leagueId) DO NOTHING` — re-runs are no-ops for existing rows, so live Elo accumulated by the cascade is preserved. The seeder is NOT auto-run by CD's `db:migrate`; an operator runs it once after the first prod deploy.
-- **Runtime auto-insert** — [services/LeagueService.js](services/LeagueService.js) `ensureTeamExists` inserts a missing team at the league's current `MIN(elo)` (falling back to INITIAL_RATING=1500 when the league has zero teams). Fires on every `upsertFixture` call — both create and update paths — so newly-promoted clubs land in the table before their first match's cascade fires. Mirrors the Python pipeline's promoted-team `min_rating` strategy at the fixture-sync boundary.
+- **Runtime auto-insert** — [services/LeagueService.js](services/LeagueService.js) `ensureTeamExists` inserts a missing team at the league's current `MIN(elo)` (falling back to INITIAL_RATING=1500 when the league has zero teams). Fires on every `upsertFixture` call — both create and update paths — so newly-promoted clubs land in the table before their first match's cascade fires. Mirrors the Python pipeline's promoted-team `min_rating` strategy at the fixture-sync boundary. **Placeholder guard (2026-06-27)** — `upsertFixture` skips this call for knockout placeholder names (`isPlaceholderTeam`: `TBD` / `Winner Group A` / `Runner-up …`), so a `TBD-vs-Real` fixture isn't given a real (wrong) Elo pair — the cascade's null-Elo + placeholder skip then correctly leaves it at the sentinel until both sides resolve.
 
 #### Per-game snapshot — PR F reversibility contract
 
@@ -3850,13 +3852,14 @@ Two requirements shaped the design beyond "just train another model":
 │         │                pickProbabilitiesLockedAt: null,                        │
 │         │                homeTeam OR awayTeam IN affectedTeams})                 │
 │         ├─ for each fixture:                                                     │
+│         │     ┌─ if isPlaceholderTeam(home|away): SKIP (keep sentinel)           │
+│         │     │    (structural guard 2026-06-27 — TBD/Winner/Runner-up slots;    │
+│         │     │     no longer relies on the TBD team row being deleted)          │
 │         │     probs = xgboost.predict(model, [homeElo, awayElo])                 │
 │         │     ┌─ if g.neutralVenue (true for WC, default):                       │
 │         │     │    probsSwap = xgboost.predict(model, [awayElo, homeElo])        │
 │         │     │    probs = avg(forward, swap) with class-label swap              │
 │         │     │           → GUARANTEES predict(A,B) === predict(B,A) mirror     │
-│         │     │    (TBD-vs-Real games skip here because homeElo === null —       │
-│         │     │     TBD team row was deleted in fixup-wc-state.mjs)              │
 │         │     │    if !g.neutralVenue (PL, future Euro hosts):                   │
 │         │     │       standard inference (asymmetric — model learned HFA)        │
 │         │     └─ normalize.toThreeWay → DECIMAL(3,2)                             │
@@ -3983,6 +3986,8 @@ The five intl-model scripts:
 3. **Inspect**: `az containerapp exec --command "node scripts/inspect-wc-state.mjs"` to see game counts, sample probabilities, TBD-row presence
 4. **Fix-up (if any pre-shipped fixtures exist)**: `az containerapp exec --command "node scripts/fixup-wc-state.mjs"` for dry-run (no probability rewrite); `... --rewrite-probs` to fire `rePredictFutureFixtures` after the fixups
 5. **List participants**: `az containerapp exec --command "node scripts/list-wc-team-elo.mjs"` returns the 48 actual WC nations sorted by Elo (Spain 2091 → Curaçao 1577 at time of rollout)
+
+**Ongoing knockout rounds auto-fill (2026-06-27)** — the 32 TBD-containing knockout fixtures left at the sentinel during rollout no longer need a manual `fixup-wc-state.mjs --rewrite-probs` run each round. `LeagueService.syncFixtures` now re-predicts resolved + sentinel fixtures post-commit (see §8.17 "Sync-time re-prediction hook"), so as football-data.org fills R32/R16/QF/SF/Final brackets, the **daily sync cron or an admin League Manager → Sync click** fills the odds automatically. `fixup-wc-state.mjs` remains the one-shot for the deeper Elo/team-row repairs.
 
 #### Verification
 

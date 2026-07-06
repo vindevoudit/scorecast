@@ -37,6 +37,7 @@ const DEEP_LINK_ALLOWED_VIEWS = [
   'admin',
   'settings',
   'friends',
+  'trophy',
 ];
 const DEEP_LINK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

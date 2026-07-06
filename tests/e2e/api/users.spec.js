@@ -19,6 +19,8 @@ const {
   clearGameResults,
   clearPicksAndBadges,
   updateGameFields,
+  createWcCabinetFixture,
+  clearWcCabinetFixture,
 } = require('../helpers/api');
 const { assertOk, expectShape } = require('../helpers/apiAssertions');
 
@@ -357,6 +359,104 @@ test.describe('GET /api/users/:username/profile', () => {
     } finally {
       await bob2.dispose();
       await clearFriendships(USERS.alice.id, USERS.bob.id);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/users/:username/trophy-cabinet  (Trophy Cabinet)
+// ---------------------------------------------------------------------------
+
+test.describe('GET /api/users/:username/trophy-cabinet', () => {
+  test.afterEach(async () => {
+    await updateUserFields(USERS.alice.id, { profileVisibility: 'public' });
+  });
+
+  test('self → 200 with cabinet shape (no WC league → empty)', async () => {
+    const alice = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(
+        alice,
+        'GET',
+        `/api/users/${USERS.alice.username}/trophy-cabinet`,
+      );
+      expectShape(payload, ['userId', 'username', 'tournament', 'showcase', 'stages']);
+      expect(Array.isArray(payload.stages)).toBe(true);
+    } finally {
+      await alice.dispose();
+    }
+  });
+
+  test('anon viewing public profile → 200', async () => {
+    const anon = await apiAnon();
+    try {
+      const payload = await assertOk(
+        anon,
+        'GET',
+        `/api/users/${USERS.alice.username}/trophy-cabinet`,
+      );
+      expect(payload.username).toBe(USERS.alice.username);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test('private target → same-shape 404 (no existence leak)', async () => {
+    await setProfileVisibility(USERS.alice, 'private');
+    const bob = await apiLogin(USERS.bob);
+    try {
+      const res = await bob.get(`/api/users/${USERS.alice.username}/trophy-cabinet`);
+      expect(res.status()).toBe(404);
+    } finally {
+      await bob.dispose();
+    }
+  });
+
+  test('unknown username → 404', async () => {
+    const anon = await apiAnon();
+    try {
+      const res = await anon.get('/api/users/nobody_here/trophy-cabinet');
+      expect(res.status()).toBe(404);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  // End-to-end wiring: stage a WC league + a scored Group Stage game with
+  // alice as the only participant (correct 0.5-odds home pick → 50 pts), then
+  // assert her placement surfaces. Picks are created directly on the model so
+  // the dual-writer never touches user_scores_overall (no cross-spec leak).
+  test('scored WC game → Group Stage placement appears', async () => {
+    let leagueId = null;
+    try {
+      ({ leagueId } = await createWcCabinetFixture({
+        picks: [{ userId: USERS.alice.id, choice: 'home' }],
+      }));
+      const alice = await apiLogin(USERS.alice);
+      try {
+        const payload = await assertOk(
+          alice,
+          'GET',
+          `/api/users/${USERS.alice.username}/trophy-cabinet`,
+        );
+        expect(payload.tournament).not.toBeNull();
+        const groupStage = payload.stages.find((s) => s.stage === 'GROUP_STAGE');
+        expect(groupStage).toBeDefined();
+        expect(groupStage.entered).toBe(true);
+        expect(groupStage.points).toBe(50);
+        expect(groupStage.overall).not.toBeNull();
+        expect(groupStage.overall.rank).toBe(1);
+        expect(groupStage.overall.total).toBe(1);
+        expect(groupStage.overall.topPercent).toBe(100);
+        expect(groupStage.overall.medal).toBe('gold');
+        // Showcase reflects the single gold + best finish.
+        expect(payload.showcase.gold).toBe(1);
+        expect(payload.showcase.bestFinish.stage).toBe('GROUP_STAGE');
+      } finally {
+        await alice.dispose();
+      }
+    } finally {
+      await clearWcCabinetFixture(leagueId);
     }
   });
 });

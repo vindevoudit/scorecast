@@ -1443,6 +1443,7 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 | `appliedResult`                                           | VARCHAR(10) NULLABLE                                                        | Tier 17 PR F. The result value the cascade has Elo-applied. Mirrors the `result` enum. When `result === appliedResult` the cascade short-circuits as a no-op; when they differ, the cascade reverses + reapplies against the snapshot                                                                                                                                                                         |
 | `kickoffReminderSentAt`                                   | TIMESTAMPTZ NULLABLE                                                        | PWA Chunk 6. Stamped after the 15-min-before-kickoff push fan-out lands. Dedups across cron ticks. Indexed via the `sendKickoffReminders` job's WHERE clause                                                                                                                                                                                                                                                  |
 | `pickProbabilitiesLockedAt`                               | TIMESTAMPTZ NULLABLE                                                        | Tier 19 Chunk 5. Stamped at the moment every Pick on this game has its three `picked*Probability` snapshots overwritten with the game's then-current probabilities. After this stamp, every pick on the game scores identically for a given choice. Partial index `games_unlocked_scheduled_idx` on `(status, date) WHERE pickProbabilitiesLockedAt IS NULL` keeps the lock cron's hot query cheap. See §8.28 |
+| `stage`                                                   | VARCHAR(32) NULLABLE                                                        | Trophy Cabinet (2026-07-06). football-data.org's per-match tournament round token (`GROUP_STAGE` / `LAST_32` / `LAST_16` / `QUARTER_FINALS` / `SEMI_FINALS` / `THIRD_PLACE` / `FINAL` for the WC). Populated by `normalizeFixture` → `upsertFixture`; NULL for leagues whose upstream omits it + legacy rows. Segments the per-stage cabinet. See §8.35                                                       |
 
 **Result derivation invariant**: `result` is only set automatically (by `applyLiveUpdate` or `upsertFixture`) when `localGame.result === null`. Admin-entered results are never clobbered by upstream updates. See `lib/fixtureStatus.js deriveResultFromFixture` for the upstream → local mapping (prefers `score.winner` over score comparison so penalty-shootout knockouts resolve correctly).
 
@@ -4485,6 +4486,85 @@ Pure helpers exported for unit-testing:
 **Operator post-deploy**: no manual steps. The dashboard reads existing data via the cached aggregate. First user open per replica self-warms the cache.
 
 **Future Chunk 3.2 items still pending**: C2 (ML model-agreement chip on GameCard), C3 (watchlist / follow teams), C4 (auto-generated match preview cards).
+
+---
+
+### 8.35 Trophy Cabinet — World Cup per-stage placements (2026-07-06)
+
+A per-user, per-stage World Cup retrospective. For each tournament segment — Group
+Stage, Round of 32, Round of 16, Quarter Finals, Semi Finals, Third Place, Final — it
+reports the subject's **placement** (competition rank), **percentile** (`Top X%`), and
+**podium medal**, both OVERALL (among everyone who picked in that stage) and within the
+subject's ScoreCast social groups, plus a headline showcase (gold/silver/bronze tally +
+best finish).
+
+**Data foundation — `games.stage`.** football-data.org returns a `stage` token per match
+that was previously discarded. Added `games.stage VARCHAR(32) NULL` (migration
+[20260706000001-games-add-stage.js](../migrations/20260706000001-games-add-stage.js), raw
+SQL `ADD COLUMN IF NOT EXISTS` per the §7.3 invariant). Populated by
+[lib/footballApi.js](../lib/footballApi.js) `normalizeFixture` (`stage: raw.stage || null`)
+and stamped by [services/LeagueService.js](../services/LeagueService.js) `upsertFixture`
+into `baseAttrs` — so the update path's `Object.assign(existing, baseAttrs)` **backfills
+every existing WC game on the next sync**, no backfill script. Live-score jobs touch
+scores/status only, never `stage`.
+
+**Vocabulary — `lib/stages.js`** (mirrored on the client in
+[src/utils/stages.js](../src/utils/stages.js), keep in sync same-commit): `WC_STAGE_ORDER`
+(`GROUP_STAGE`, `LAST_32`, `LAST_16`, `QUARTER_FINALS`, `SEMI_FINALS`, `THIRD_PLACE`,
+`FINAL`), `STAGE_LABELS`, `stageLabel()` (title-case fallback for any unmapped token), and
+`medalFor(rank)` (gold/silver/bronze/null). `LAST_32` is the 48-team format's Round of 32.
+
+**Service — [services/TrophyService.js](../services/TrophyService.js) `getCabinet(target, viewer)`:**
+
+1. Resolve the WC league (`sourceLeagueId='WC'`); absent → empty cabinet.
+2. Load all WC games (`stage`, `result`, probabilities) + every pick on them.
+3. Per stage: build `pointsByUser` summing `scorePick` over that stage's **scored** games —
+   the key set is the participant set (a user who picked a scored game has a key even at 0
+   points).
+4. Overall standing for the target: `rankAmong` (standard competition ranking =
+   1 + count strictly greater), `total` = participant count, `topPercentOf` (clamped
+   [1,100] so rank 1 = "Top 1%"), `medalFor`. `null` when the target didn't participate.
+5. Group standings: filter `pointsByUser` to each visible group's members and re-rank.
+6. `buildShowcase`: medal tally + best (numerically smallest) finish.
+
+Computed **on-the-fly and cached 5 min** via [lib/cache.js](../lib/cache.js) (key
+`trophy:<targetId>:v:<viewerId|anon>` — keyed on viewer because the group section is
+viewer-dependent; cache skipped when `NODE_ENV==='test'`). **Deliberately NOT
+materialized**: the Tier 24 `user_scores` tables have no stage axis and adding one would be
+invasive; the WC is bounded (~104 games) so scoring every user's WC picks is a sub-second
+cold-path scan. If it ever becomes hot, materialize separately — do not wire into the
+dual-writer.
+
+**Route + visibility — `GET /api/users/:username/trophy-cabinet`** ([routes/users.js](../routes/users.js),
+`publicReadLimiter` + `optionalAuth`). Reuses the now-exported `UserService.canViewProfile`
+gate so a private/friends-gated target returns the same-shape 404 as the profile route. The
+payload reveals ONLY the subject's own rank numbers (never a roster), so no per-row masking
+is needed. The **group section respects the viewer**: self/admin see all the target's
+groups; anyone else sees only groups they SHARE with the target (so a private membership
+isn't leaked) — which is why the cache key includes the viewer id.
+
+**Frontend.** `🏆 Trophy Cabinet` is a new authed-only sidebar item (view id `'trophy'`,
+`ICONS.trophy` in [src/components/Sidebar.jsx](../src/components/Sidebar.jsx), tab + view
+switch in [src/views/DashboardView.jsx](../src/views/DashboardView.jsx), added to
+`DEEP_LINK_ALLOWED_VIEWS`). [src/components/TrophyCabinet.jsx](../src/components/TrophyCabinet.jsx)
+(lazy, own Vite chunk) fetches the endpoint and renders the showcase header + one card per
+stage (medal + placement + percentile overall, a compact row of group standings, and muted
+"not decided yet / didn't enter" states). It mounts in two places: the sidebar
+[src/views/TrophyCabinetView.jsx](../src/views/TrophyCabinetView.jsx) (self) and the
+**Cabinet** sub-tab in [src/components/ProfileView.jsx](../src/components/ProfileView.jsx)
+(any profile — always shown, unlike the self-only Stats sub-tab, because the backend gate
+404s a hidden profile before the fetch resolves).
+
+**Tests.** `tests/trophyService.test.js` (20 pure-function cases: `rankAmong` ties +
+strictly-greater, `topPercentOf` clamps, `orderStages`, `buildShowcase`, `stageLabel`,
+`medalFor`); `tests/e2e/api/users.spec.js` (+5: self shape, anon-public 200, private 404,
+unknown 404, and an end-to-end WC-game placement assertion via the
+`createWcCabinetFixture` helper which creates picks directly on the model so the dual-writer
+never touches `user_scores`).
+
+**Operator post-deploy**: after the migration lands, **Sync the World Cup league once**
+(admin → League Manager, or the 03:00 UTC `syncFixtures` cron) so every WC game gets its
+`stage`. No data backfill script.
 
 ---
 

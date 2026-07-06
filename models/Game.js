@@ -140,6 +140,14 @@ module.exports = (sequelize) => {
         type: DataTypes.DECIMAL(4, 2),
         allowNull: true,
       },
+      // Trophy Cabinet — per-match tournament stage token from upstream
+      // (GROUP_STAGE / LAST_32 / LAST_16 / QUARTER_FINALS / SEMI_FINALS /
+      // THIRD_PLACE / FINAL for the World Cup). Null for leagues whose
+      // upstream omits it + legacy rows. Populated by LeagueService.upsertFixture.
+      stage: {
+        type: DataTypes.STRING(32),
+        allowNull: true,
+      },
     },
     {
       tableName: 'games',

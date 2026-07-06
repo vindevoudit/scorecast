@@ -136,6 +136,10 @@ async function upsertFixture({ league, fixture, transaction }) {
     kickoffTz: fixture.venueTimezone,
     halfTimeReached: Boolean(fixture.halfTimeReached),
     phase: fixture.phase || null,
+    // Trophy Cabinet — persist the upstream tournament stage so the cabinet
+    // can segment picks by round. Object.assign on the update path backfills
+    // existing rows on the next sync.
+    stage: fixture.stage || null,
     neutralVenue: isInternationalMetaPool,
     eloKMultiplier: isInternationalMetaPool ? 3.0 : null,
   };

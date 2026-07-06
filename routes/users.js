@@ -12,9 +12,11 @@ const { Op } = require('sequelize');
 const { optionalAuth } = require('../middleware/optionalAuth');
 const { publicReadLimiter } = require('../middleware/rateLimit');
 const { getJoinedGroupIds } = require('../lib/groups');
+const { getUserByUsername } = require('../lib/users');
 const { friendStatusFrom } = require('../lib/friends');
 const { User, Group, Game, Friendship, GroupJoinRequest } = require('../models');
 const UserService = require('../services/UserService');
+const TrophyService = require('../services/TrophyService');
 const errors = require('../lib/errors');
 
 const router = express.Router();
@@ -183,6 +185,31 @@ router.get('/users/:username/profile', publicReadLimiter, optionalAuth, async (r
     }
     req.log.error({ err: error }, 'handler error');
     res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Trophy Cabinet — per-stage World Cup placements for a user. Reuses the
+// EXACT profile-visibility gate (UserService.canViewProfile) so a
+// friends-gated / private target returns the same-shape 404 as the profile
+// route — the friend graph stays un-probeable. The payload only ever reveals
+// the subject's own rank numbers, so no per-row masking is needed; the group
+// section respects the viewer inside TrophyService (self/admin → all groups,
+// otherwise shared groups only).
+router.get('/users/:username/trophy-cabinet', publicReadLimiter, optionalAuth, async (req, res) => {
+  try {
+    const target = await getUserByUsername(req.params.username);
+    if (!target || !(await UserService.canViewProfile(target, req.user ?? null))) {
+      // Same-shape 404 for missing + gated-out, matching getProfileByUsername.
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const cabinet = await TrophyService.getCabinet(target, req.user ?? null);
+    res.json(cabinet);
+  } catch (error) {
+    if (error instanceof errors.AppError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    req.log.error({ err: error }, 'handler error');
+    res.status(500).json({ error: 'Failed to fetch trophy cabinet' });
   }
 });
 

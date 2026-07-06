@@ -323,6 +323,56 @@ async function createPendingFriendship(requesterId, addresseeId) {
   return row.id;
 }
 
+// Trophy Cabinet — stage a WC league + a single scored Group Stage game, with
+// picks created DIRECTLY on the model so the Tier 24 dual-writer never fires
+// (keeps user_scores_overall untouched → no cross-spec leaderboard leakage).
+// Returns { leagueId, seasonId, gameId }. Pair with clearWcCabinetFixture().
+async function createWcCabinetFixture({ picks = [] } = {}) {
+  const { League, Season, Game, Pick } = getModels();
+  const [league] = await League.findOrCreate({
+    where: { sourceProvider: 'football-data.org', sourceLeagueId: 'WC' },
+    defaults: {
+      name: 'World Cup (cabinet test)',
+      sourceProvider: 'football-data.org',
+      sourceLeagueId: 'WC',
+      active: true,
+    },
+  });
+  const year = new Date().getUTCFullYear();
+  const [season] = await Season.findOrCreate({
+    where: { leagueId: league.id, year },
+    defaults: { leagueId: league.id, year, current: true },
+  });
+  const game = await Game.create({
+    homeTeam: 'Cabinet Home',
+    awayTeam: 'Cabinet Away',
+    date: new Date(Date.now() - 24 * 60 * 60 * 1000), // past → already played
+    homeProbability: 0.5,
+    drawProbability: 0,
+    awayProbability: 0.5,
+    leagueId: league.id,
+    seasonId: season.id,
+    status: 'finished',
+    result: 'home',
+    stage: 'GROUP_STAGE',
+  });
+  for (const p of picks) {
+    await Pick.create({ userId: p.userId, gameId: game.id, choice: p.choice });
+  }
+  return { leagueId: league.id, seasonId: season.id, gameId: game.id };
+}
+
+async function clearWcCabinetFixture(leagueId) {
+  if (!leagueId) return;
+  const { League, Season, Game, Pick } = getModels();
+  const games = await Game.findAll({ where: { leagueId }, attributes: ['id'] });
+  const gameIds = games.map((g) => g.id);
+  if (gameIds.length) await Pick.destroy({ where: { gameId: gameIds } });
+  await Game.destroy({ where: { leagueId } });
+  await Season.destroy({ where: { leagueId } });
+  await League.destroy({ where: { id: leagueId } });
+}
+
 async function closeDb() {
   if (_models) {
     await _models.sequelize.close();
@@ -360,5 +410,7 @@ module.exports = {
   getUserId,
   setProfileVisibility,
   createAcceptedFriendship,
+  createWcCabinetFixture,
+  clearWcCabinetFixture,
   closeDb,
 };

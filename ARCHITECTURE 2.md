@@ -2056,7 +2056,7 @@ Each item is **what** + **why** (the consequence if you break it). The body sect
 68. AcrPull MI-rotation recovery: `az role assignment create --assignee <current principalId> --role AcrPull --scope <acr id>` + re-run CD → _no Bicep reapply needed; the orphaned assignment is the cause of `unable to pull image using Managed identity`._
 69. JSON-LD inline block in `index.html` is CSP-hashed → _any whitespace/content change requires recomputing the `scriptSrc` SHA-256, else helmet rejects it and the SERP rich result breaks._
 70. Trust proxy is `1` (single hop), never `true` → _`true` would let an external `X-Forwarded-For` spoof bypass every per-IP rate limiter._
-71. CORS_ORIGINS empty + prod → server refuses to boot → _don't quietly add an `origin:true` prod fallback; the loud failure is the whole point (a misconfigured staging env would otherwise accept credentialed requests from any origin)._
+71. CORS*ORIGINS empty + prod → server refuses to boot → \_don't quietly add an `origin:true` prod fallback; the loud failure is the whole point (a misconfigured staging env would otherwise accept credentialed requests from any origin).*
 72. `data.json` seed re-runs only on an empty `users` table; never `closeDb()` in a Playwright `afterAll` → _`workers:1` shares the Sequelize pool across specs; closing it stalls every later spec._
 
 ---

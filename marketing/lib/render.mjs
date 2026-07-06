@@ -127,8 +127,34 @@ export function renderKickoffCountdown(game, format) {
   const story = format === 'story';
 
   const L = {
-    square: { markY: 120, markSize: 46, leagueY: 236, matchupY: 348, matchupMax: 72, kickerY: 470, numMax: 248, unitY: 760, unitSize: 54, ctaY: 814, ctaSize: 34, urlY: 1026 },
-    story: { markY: 250, markSize: 50, leagueY: 398, matchupY: 524, matchupMax: 104, kickerY: 706, numMax: 430, unitY: 1214, unitSize: 80, ctaY: 1334, ctaSize: 42, footerY: h - 210 },
+    square: {
+      markY: 120,
+      markSize: 46,
+      leagueY: 236,
+      matchupY: 348,
+      matchupMax: 72,
+      kickerY: 470,
+      numMax: 248,
+      unitY: 760,
+      unitSize: 54,
+      ctaY: 814,
+      ctaSize: 34,
+      urlY: 1026,
+    },
+    story: {
+      markY: 250,
+      markSize: 50,
+      leagueY: 398,
+      matchupY: 524,
+      matchupMax: 104,
+      kickerY: 706,
+      numMax: 430,
+      unitY: 1214,
+      unitSize: 80,
+      ctaY: 1334,
+      ctaSize: 42,
+      footerY: h - 210,
+    },
   }[format];
 
   // Centre the big numeral's optical midpoint exactly between the "KICKS OFF
@@ -172,8 +198,34 @@ export function renderHalftime(game, format) {
   const story = format === 'story';
 
   const L = {
-    square: { markY: 120, markSize: 46, leagueY: 236, matchupY: 350, matchupMax: 64, htY: 470, htSize: 30, scoreCy: 686, scoreSize: 210, taglineY: 864, taglineSize: 32, urlY: 1026 },
-    story: { markY: 250, markSize: 50, leagueY: 398, matchupY: 524, matchupMax: 96, htY: 690, htSize: 36, scoreCy: 1004, scoreSize: 360, taglineY: 1320, taglineSize: 40, footerY: h - 210 },
+    square: {
+      markY: 120,
+      markSize: 46,
+      leagueY: 236,
+      matchupY: 350,
+      matchupMax: 64,
+      htY: 470,
+      htSize: 30,
+      scoreCy: 686,
+      scoreSize: 210,
+      taglineY: 864,
+      taglineSize: 32,
+      urlY: 1026,
+    },
+    story: {
+      markY: 250,
+      markSize: 50,
+      leagueY: 398,
+      matchupY: 524,
+      matchupMax: 96,
+      htY: 690,
+      htSize: 36,
+      scoreCy: 1004,
+      scoreSize: 360,
+      taglineY: 1320,
+      taglineSize: 40,
+      footerY: h - 210,
+    },
   }[format];
 
   const matchup = `${game.home} vs ${game.away}`;
@@ -216,8 +268,52 @@ export function renderFulltime(game, format) {
   const draw = game.result === 'draw';
 
   const L = {
-    square: { markY: 120, markSize: 46, leagueY: 232, matchupY: 344, matchupMax: 60, ftY: 452, ftSize: 30, scoreCy: 588, scoreSize: 168, backY: 744, backSize: 28, ptsY: 836, ptsMax: 96, urlY: 1028, drawTeamY: 812, drawNumY: 900, drawPtsY: 940, drawTeamMax: 34, drawNumMax: 84, drawPtsLabel: 22, drawColOff: 232 },
-    story: { markY: 250, markSize: 50, leagueY: 392, matchupY: 512, matchupMax: 92, ftY: 648, ftSize: 36, scoreCy: 860, scoreSize: 300, backY: 1090, backSize: 34, ptsY: 1216, ptsMax: 150, footerY: h - 200, drawTeamY: 1186, drawNumY: 1300, drawPtsY: 1356, drawTeamMax: 46, drawNumMax: 140, drawPtsLabel: 30, drawColOff: 236 },
+    square: {
+      markY: 120,
+      markSize: 46,
+      leagueY: 232,
+      matchupY: 344,
+      matchupMax: 60,
+      ftY: 452,
+      ftSize: 30,
+      scoreCy: 588,
+      scoreSize: 168,
+      backY: 744,
+      backSize: 28,
+      ptsY: 836,
+      ptsMax: 96,
+      urlY: 1028,
+      drawTeamY: 812,
+      drawNumY: 900,
+      drawPtsY: 940,
+      drawTeamMax: 34,
+      drawNumMax: 84,
+      drawPtsLabel: 22,
+      drawColOff: 232,
+    },
+    story: {
+      markY: 250,
+      markSize: 50,
+      leagueY: 392,
+      matchupY: 512,
+      matchupMax: 92,
+      ftY: 648,
+      ftSize: 36,
+      scoreCy: 860,
+      scoreSize: 300,
+      backY: 1090,
+      backSize: 34,
+      ptsY: 1216,
+      ptsMax: 150,
+      footerY: h - 200,
+      drawTeamY: 1186,
+      drawNumY: 1300,
+      drawPtsY: 1356,
+      drawTeamMax: 46,
+      drawNumMax: 140,
+      drawPtsLabel: 30,
+      drawColOff: 236,
+    },
   }[format];
 
   const matchup = `${game.home} vs ${game.away}`;
@@ -317,7 +413,8 @@ function topPlayerRow({ x, y, w, h, rank, player, L }) {
   const display = raw.length > 18 ? `${raw.slice(0, 17)}…` : raw;
   let nameSize = L.nameSize;
   const est = display.length * nameSize * 0.56;
-  if (est > maxNameW) nameSize = Math.max(L.nameMin, Math.floor(maxNameW / (display.length * 0.56)));
+  if (est > maxNameW)
+    nameSize = Math.max(L.nameMin, Math.floor(maxNameW / (display.length * 0.56)));
 
   const pts = Number(player.points || 0).toLocaleString();
 
@@ -338,22 +435,54 @@ export function renderTopPlayers(players, format, { generatedAt = new Date() } =
 
   const L = story
     ? {
-        cardW: 940, pad: 44, rowH: 268, gap: 44, startY: 720,
-        pill: 116, rankSize: 64, avR: 54, gapPillAv: 40, gapAvName: 34,
-        nameSize: 48, nameMin: 28, ptsReserve: 200, ptsSize: 68,
-        headCy: 372, urlY: h - 120,
+        cardW: 940,
+        pad: 44,
+        rowH: 268,
+        gap: 44,
+        startY: 720,
+        pill: 116,
+        rankSize: 64,
+        avR: 54,
+        gapPillAv: 40,
+        gapAvName: 34,
+        nameSize: 48,
+        nameMin: 28,
+        ptsReserve: 200,
+        ptsSize: 68,
+        headCy: 372,
+        urlY: h - 120,
       }
     : {
-        cardW: 880, pad: 36, rowH: 182, gap: 24, startY: 350,
-        pill: 92, rankSize: 52, avR: 42, gapPillAv: 32, gapAvName: 26,
-        nameSize: 40, nameMin: 26, ptsReserve: 180, ptsSize: 56,
-        headCy: 214, urlY: h - 56,
+        cardW: 880,
+        pad: 36,
+        rowH: 182,
+        gap: 24,
+        startY: 350,
+        pill: 92,
+        rankSize: 52,
+        avR: 42,
+        gapPillAv: 32,
+        gapAvName: 26,
+        nameSize: 40,
+        nameMin: 26,
+        ptsReserve: 180,
+        ptsSize: 56,
+        headCy: 214,
+        urlY: h - 56,
       };
   const cardX = (w - L.cardW) / 2;
 
   const rows = top3
     .map((p, i) =>
-      topPlayerRow({ x: cardX, y: L.startY + i * (L.rowH + L.gap), w: L.cardW, h: L.rowH, rank: i + 1, player: p, L }),
+      topPlayerRow({
+        x: cardX,
+        y: L.startY + i * (L.rowH + L.gap),
+        w: L.cardW,
+        h: L.rowH,
+        rank: i + 1,
+        player: p,
+        L,
+      }),
     )
     .join('\n');
 
@@ -418,14 +547,36 @@ export function renderStreaksFeature(format) {
 
   const L = story
     ? {
-        markY: 235, markSize: 50, kickY: 440, flameCy: 770, flameSize: 380,
-        headY: 1090, headSize: 84, subY: 1190, subSize: 42, subLH: 60,
-        capY: 1390, chipY: 1440, chipK: 2.1, chipGap: 56,
+        markY: 235,
+        markSize: 50,
+        kickY: 440,
+        flameCy: 770,
+        flameSize: 380,
+        headY: 1090,
+        headSize: 84,
+        subY: 1190,
+        subSize: 42,
+        subLH: 60,
+        capY: 1390,
+        chipY: 1440,
+        chipK: 2.1,
+        chipGap: 56,
       }
     : {
-        markY: 116, markSize: 46, kickY: 214, flameCy: 452, flameSize: 264,
-        headY: 656, headSize: 62, subY: 736, subSize: 33, subLH: 46,
-        capY: 850, chipY: 894, chipK: 1.7, chipGap: 44,
+        markY: 116,
+        markSize: 46,
+        kickY: 214,
+        flameCy: 452,
+        flameSize: 264,
+        headY: 656,
+        headSize: 62,
+        subY: 736,
+        subSize: 33,
+        subLH: 46,
+        capY: 850,
+        chipY: 894,
+        chipK: 1.7,
+        chipGap: 44,
       };
 
   // Hero: a single bold centred flame — the universal "streak" symbol. The
@@ -433,7 +584,10 @@ export function renderStreaksFeature(format) {
   // stays iconic and uncluttered.
   const hero = flame(cx, L.flameCy, L.flameSize);
 
-  const subLines = ['Win picks back-to-back to build a streak —', 'now shown right on the leaderboard.'];
+  const subLines = [
+    'Win picks back-to-back to build a streak —',
+    'now shown right on the leaderboard.',
+  ];
   const sub = subLines
     .map(
       (line, i) =>

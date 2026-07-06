@@ -68,6 +68,18 @@ const ICONS = {
       <path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" strokeLinecap="round" />
     </svg>
   ),
+  trophy: (props) => (
+    // Trophy cup with handles + plinth — the Trophy Cabinet view.
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
+      <path d="M8 4h8v4a4 4 0 01-8 0V4z" />
+      <path
+        d="M8 6H5v1.5A3.5 3.5 0 008.5 11M16 6h3v1.5A3.5 3.5 0 0115.5 11"
+        strokeLinecap="round"
+      />
+      <path d="M10 12.5h4V16h-4z" />
+      <path d="M8 20h8M9.5 20l.5-4M14.5 20l-.5-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
   admin: (props) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
       <circle cx="12" cy="12" r="3" />

@@ -23,6 +23,12 @@ import { Badge, Button } from './ui';
 // bundle; it only ships when the user clicks the Stats sub-tab.
 const StatsDashboard = lazy(() => import('./StatsDashboard'));
 
+// Trophy Cabinet — lazy-loaded so its chunk only ships when the sub-tab is
+// opened. Shared with the sidebar TrophyCabinetView (Vite dedupes the chunk).
+// Unlike Stats (self-only), the Cabinet mounts on ANY profile — the backend
+// route already 404s a hidden profile before the fetch resolves.
+const TrophyCabinet = lazy(() => import('./TrophyCabinet'));
+
 // Tier 22 — TwoFactorSetup was removed. See routes/auth.js header for the
 // revival recipe; this file's diff in the removal commit shows the original
 // mount + handler wiring.
@@ -181,6 +187,21 @@ function ProfileView({ profile, onFriendAction, busy, editable }) {
     { value: 'summary', label: 'Summary', content: <OverviewSection profile={profile} /> },
     { value: 'badges', label: 'Badges', content: <BadgesSection profile={profile} /> },
     { value: 'activity', label: 'Activity', content: <ActivitySection profile={profile} /> },
+    {
+      value: 'cabinet',
+      label: 'Cabinet',
+      content: (
+        <Suspense
+          fallback={
+            <p className="rounded-3xl border border-default bg-elevated/40 px-4 py-8 text-center text-sm text-fg-muted">
+              Loading trophy cabinet…
+            </p>
+          }
+        >
+          <TrophyCabinet username={profile.username} />
+        </Suspense>
+      ),
+    },
   ];
   // Stats sub-tab is self-only — the StatsService gate scopes to the calling
   // user, and we don't want to expose another user's pick history through

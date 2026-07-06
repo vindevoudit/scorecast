@@ -12,11 +12,10 @@ import { writeFileSync, readFileSync } from 'node:fs';
 const SEED_FILE = '20260528000003-seed-teams-from-intl-elo-history.js';
 const LOG_PATH = '/tmp/int-seed.log';
 
-const child = spawn(
-  'npx',
-  ['sequelize-cli', 'db:seed', '--seed', SEED_FILE],
-  { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' } },
-);
+const child = spawn('npx', ['sequelize-cli', 'db:seed', '--seed', SEED_FILE], {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+});
 
 let stdout = '';
 let stderr = '';

@@ -119,12 +119,17 @@ export function gameCard({ x, y, w, state, data }) {
     );
   } else {
     parts.push(
-      txt(x + pad, cy + 26 * k, `${data.dateLabel} · ${final ? 'Final' : 'Upcoming'}`.toUpperCase(), {
-        size: 18 * k,
-        font: FONT.bodySemi,
-        fill: 'rgba(34,211,238,0.8)',
-        ls: 4 * k,
-      }),
+      txt(
+        x + pad,
+        cy + 26 * k,
+        `${data.dateLabel} · ${final ? 'Final' : 'Upcoming'}`.toUpperCase(),
+        {
+          size: 18 * k,
+          font: FONT.bodySemi,
+          fill: 'rgba(34,211,238,0.8)',
+          ls: 4 * k,
+        },
+      ),
     );
   }
   // right-side pill / outcome badge (uppercase, matching the live Badge)
@@ -142,8 +147,20 @@ export function gameCard({ x, y, w, state, data }) {
     const tone = draw ? UI.warning : won ? UI.success : UI.danger;
     const bw = badgeTxt.length * 11.5 * k + 28 * k;
     parts.push(
-      rrect(x + w - pad - bw, cy - 10 * k, bw, 36 * k, 18 * k, `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`),
-      txt(x + w - pad - bw / 2, cy + 13 * k, badgeTxt, { size: 18 * k, font: FONT.bodySemi, fill: tone, anchor: 'middle' }),
+      rrect(
+        x + w - pad - bw,
+        cy - 10 * k,
+        bw,
+        36 * k,
+        18 * k,
+        `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`,
+      ),
+      txt(x + w - pad - bw / 2, cy + 13 * k, badgeTxt, {
+        size: 18 * k,
+        font: FONT.bodySemi,
+        fill: tone,
+        anchor: 'middle',
+      }),
     );
   } else {
     const pill = live
@@ -154,7 +171,12 @@ export function gameCard({ x, y, w, state, data }) {
     const pw = pill.length * 9.5 * k + 28 * k;
     parts.push(
       rrect(x + w - pad - pw, cy + 2 * k, pw, 36 * k, 18 * k, `fill="rgba(15,23,42,0.7)"`),
-      txt(x + w - pad - pw / 2, cy + 25 * k, pill, { size: 17 * k, font: FONT.body, fill: UI.fgMuted, anchor: 'middle' }),
+      txt(x + w - pad - pw / 2, cy + 25 * k, pill, {
+        size: 17 * k,
+        font: FONT.body,
+        fill: UI.fgMuted,
+        anchor: 'middle',
+      }),
     );
   }
   cy += 40 * k + 34 * k;
@@ -162,17 +184,46 @@ export function gameCard({ x, y, w, state, data }) {
   // ── body: teams + score/kickoff ──
   const showScore = live || final;
   const winSide = final && (data.result === 'home' || data.result === 'away') ? data.result : null;
-  const leadSide = live && data.homeScore !== data.awayScore ? (data.homeScore > data.awayScore ? 'home' : 'away') : null;
+  const leadSide =
+    live && data.homeScore !== data.awayScore
+      ? data.homeScore > data.awayScore
+        ? 'home'
+        : 'away'
+      : null;
   const teamFont = 32 * k;
   // home (left)
   const homeDim = winSide && winSide !== 'home' ? ' opacity="0.55"' : '';
   const awayDim = winSide && winSide !== 'away' ? ' opacity="0.55"' : '';
   // Box vertically centred on its text: name cap-top ≈ cy−23k, WINNER baseline
   // cy+28k → top cy−37k + height 79k gives ~14k equal padding top & bottom.
-  if (winSide === 'home') parts.push(rrect(x + pad - 12 * k, cy - 37 * k, 300 * k, 79 * k, 18 * k, `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`));
-  if (winSide === 'away') parts.push(rrect(x + w - pad - 300 * k + 12 * k, cy - 37 * k, 300 * k, 79 * k, 18 * k, `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`));
-  parts.push(`<g${homeDim}>${txt(x + pad, cy, data.home, { size: teamFont, font: FONT.bodySemi, fill: UI.fg })}${winSide === 'home' ? txt(x + pad, cy + 28 * k, 'WINNER', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1.5 * k }) : ''}</g>`);
-  parts.push(`<g${awayDim}>${txt(x + w - pad, cy, data.away, { size: teamFont, font: FONT.bodySemi, fill: UI.fg, anchor: 'end' })}${winSide === 'away' ? txt(x + w - pad, cy + 28 * k, 'WINNER', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1.5 * k, anchor: 'end' }) : ''}</g>`);
+  if (winSide === 'home')
+    parts.push(
+      rrect(
+        x + pad - 12 * k,
+        cy - 37 * k,
+        300 * k,
+        79 * k,
+        18 * k,
+        `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`,
+      ),
+    );
+  if (winSide === 'away')
+    parts.push(
+      rrect(
+        x + w - pad - 300 * k + 12 * k,
+        cy - 37 * k,
+        300 * k,
+        79 * k,
+        18 * k,
+        `fill="rgba(74,222,128,0.06)" stroke="${UI.success}" stroke-opacity="0.4" stroke-width="1"`,
+      ),
+    );
+  parts.push(
+    `<g${homeDim}>${txt(x + pad, cy, data.home, { size: teamFont, font: FONT.bodySemi, fill: UI.fg })}${winSide === 'home' ? txt(x + pad, cy + 28 * k, 'WINNER', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1.5 * k }) : ''}</g>`,
+  );
+  parts.push(
+    `<g${awayDim}>${txt(x + w - pad, cy, data.away, { size: teamFont, font: FONT.bodySemi, fill: UI.fg, anchor: 'end' })}${winSide === 'away' ? txt(x + w - pad, cy + 28 * k, 'WINNER', { size: 15 * k, font: FONT.bodySemi, fill: UI.success, ls: 1.5 * k, anchor: 'end' }) : ''}</g>`,
+  );
 
   // middle
   if (showScore) {
@@ -187,15 +238,39 @@ export function gameCard({ x, y, w, state, data }) {
     const tileAttr = `fill="rgba(15,23,42,0.6)" stroke="${UI.accent}" stroke-opacity="0.22" stroke-width="1"`;
     parts.push(
       rrect(hx, ty, tileW, tileH, 10 * k, tileAttr),
-      txt(hx + tileW / 2, ty + tileH / 2 + 16 * k, String(data.homeScore), { size: 44 * k, font: FONT.brand, weight: 700, fill: homeHi ? UI.accent : UI.fg, anchor: 'middle' }),
+      txt(hx + tileW / 2, ty + tileH / 2 + 16 * k, String(data.homeScore), {
+        size: 44 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: homeHi ? UI.accent : UI.fg,
+        anchor: 'middle',
+      }),
       txt(cx, cy - 6 * k, '-', { size: 34 * k, fill: UI.fgSubtle, anchor: 'middle' }),
       rrect(ax, ty, tileW, tileH, 10 * k, tileAttr),
-      txt(ax + tileW / 2, ty + tileH / 2 + 16 * k, String(data.awayScore), { size: 44 * k, font: FONT.brand, weight: 700, fill: awayHi ? UI.accent : UI.fg, anchor: 'middle' }),
+      txt(ax + tileW / 2, ty + tileH / 2 + 16 * k, String(data.awayScore), {
+        size: 44 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: awayHi ? UI.accent : UI.fg,
+        anchor: 'middle',
+      }),
     );
   } else {
     parts.push(
-      txt(cx, cy - 6 * k, data.kickoff, { size: 30 * k, font: FONT.brand, weight: 700, fill: UI.fg, anchor: 'middle' }),
-      txt(cx, cy + 20 * k, 'KICKOFF', { size: 13 * k, font: FONT.bodySemi, fill: UI.fgSubtle, anchor: 'middle', ls: 4 * k }),
+      txt(cx, cy - 6 * k, data.kickoff, {
+        size: 30 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: UI.fg,
+        anchor: 'middle',
+      }),
+      txt(cx, cy + 20 * k, 'KICKOFF', {
+        size: 13 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgSubtle,
+        anchor: 'middle',
+        ls: 4 * k,
+      }),
     );
   }
   cy += 40 * k;
@@ -237,7 +312,14 @@ export function gameCard({ x, y, w, state, data }) {
     };
     drawCells(cells, gridY + 1 * k, gridH / 2 - 1.5 * k);
     drawCells(row2, gridY + gridH / 2 + 0.5 * k, gridH / 2 - 1.5 * k);
-    parts.push(txt(cx, gridY + gridH + 30 * k, 'Points allocation locks in at kickoff.', { size: 15 * k, font: FONT.body, fill: UI.fgMuted, anchor: 'middle' }));
+    parts.push(
+      txt(cx, gridY + gridH + 30 * k, 'Points allocation locks in at kickoff.', {
+        size: 15 * k,
+        font: FONT.body,
+        fill: UI.fgMuted,
+        anchor: 'middle',
+      }),
+    );
     cy = gridY + gridH + 48 * k;
 
     // pick buttons
@@ -247,15 +329,31 @@ export function gameCard({ x, y, w, state, data }) {
     const homeActive = data.pickSide === 'home';
     const awayActive = data.pickSide === 'away';
     const btn = (bx, label, active) =>
-      rrect(bx, cy, btnW, btnH, 22 * k, active ? `fill="rgba(34,211,238,0.3)" stroke="${UI.accentSoft}" stroke-width="1.5"` : `fill="rgba(34,211,238,0.1)" stroke="rgba(34,211,238,0.2)" stroke-width="1.5"`) +
-      txt(bx + btnW / 2, cy + btnH / 2 + 8 * k, label, { size: 22 * k, font: FONT.bodySemi, fill: active ? UI.fg : UI.accentSoft, anchor: 'middle' });
+      rrect(
+        bx,
+        cy,
+        btnW,
+        btnH,
+        22 * k,
+        active
+          ? `fill="rgba(34,211,238,0.3)" stroke="${UI.accentSoft}" stroke-width="1.5"`
+          : `fill="rgba(34,211,238,0.1)" stroke="rgba(34,211,238,0.2)" stroke-width="1.5"`,
+      ) +
+      txt(bx + btnW / 2, cy + btnH / 2 + 8 * k, label, {
+        size: 22 * k,
+        font: FONT.bodySemi,
+        fill: active ? UI.fg : UI.accentSoft,
+        anchor: 'middle',
+      });
     parts.push(btn(x + pad, `Pick ${data.home}`, homeActive));
     parts.push(btn(x + pad + btnW + btnGap, `Pick ${data.away}`, awayActive));
     cy += btnH + pad;
   } else {
     // locked-pick chip (live / final)
     cy += 18 * k;
-    parts.push(`<line x1="${x + pad}" y1="${cy}" x2="${x + w - pad}" y2="${cy}" stroke="${UI.border}" stroke-width="1"/>`);
+    parts.push(
+      `<line x1="${x + pad}" y1="${cy}" x2="${x + w - pad}" y2="${cy}" stroke="${UI.border}" stroke-width="1"/>`,
+    );
     cy += 32 * k;
     const suffix = final
       ? data.result === 'draw'
@@ -265,12 +363,22 @@ export function gameCard({ x, y, w, state, data }) {
           : 'lost'
       : `locked · ${data.points} pts on the line`;
     const label = `Your pick: ${data.pickTeam} · ${suffix}`;
-    parts.push(txt(cx, cy, label.toUpperCase(), { size: 16 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'middle', ls: 2 * k }));
+    parts.push(
+      txt(cx, cy, label.toUpperCase(), {
+        size: 16 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgMuted,
+        anchor: 'middle',
+        ls: 2 * k,
+      }),
+    );
     cy += pad;
   }
 
   const h = cy - y;
-  const shellBorder = live ? `stroke="${UI.danger}" stroke-opacity="0.35"` : `stroke="${UI.border}"`;
+  const shellBorder = live
+    ? `stroke="${UI.danger}" stroke-opacity="0.35"`
+    : `stroke="${UI.border}"`;
   const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" ${shellBorder} stroke-width="1.5"`);
   return { svg: shell + parts.join('\n'), h };
 }
@@ -286,7 +394,9 @@ export function leaderboardCard({ x, y, w, title, description, rows }) {
 
   parts.push(txt(x + pad, cy + 34 * k, title, { size: 40 * k, font: FONT.bodySemi, fill: UI.fg }));
   cy += 34 * k + 18 * k;
-  parts.push(txt(x + pad, cy + 20 * k, description, { size: 19 * k, font: FONT.body, fill: UI.fgMuted }));
+  parts.push(
+    txt(x + pad, cy + 20 * k, description, { size: 19 * k, font: FONT.body, fill: UI.fgMuted }),
+  );
   cy += 20 * k + 30 * k;
 
   const rowH = 76 * k;
@@ -296,18 +406,38 @@ export function leaderboardCard({ x, y, w, title, description, rows }) {
     const ry = cy;
     const you = row.you;
     parts.push(
-      rrect(x + pad, ry, w - pad * 2, rowH, 24 * k, you ? `fill="rgba(34,211,238,0.1)" stroke="${UI.accent}" stroke-opacity="0.4" stroke-width="1.5"` : `fill="rgba(15,23,42,0.7)"`),
+      rrect(
+        x + pad,
+        ry,
+        w - pad * 2,
+        rowH,
+        24 * k,
+        you
+          ? `fill="rgba(34,211,238,0.1)" stroke="${UI.accent}" stroke-opacity="0.4" stroke-width="1.5"`
+          : `fill="rgba(15,23,42,0.7)"`,
+      ),
     );
     // rank pill
     const pillSize = 46 * k;
     const px = x + pad + 18 * k;
     const py = ry + rowH / 2 - pillSize / 2;
     const pillFill =
-      rank === 1 ? 'rgba(250,204,21,0.4)' : rank === 2 ? 'rgba(100,116,139,0.35)' : rank === 3 ? 'rgba(250,204,21,0.2)' : 'rgba(15,23,42,0.9)';
+      rank === 1
+        ? 'rgba(250,204,21,0.4)'
+        : rank === 2
+          ? 'rgba(100,116,139,0.35)'
+          : rank === 3
+            ? 'rgba(250,204,21,0.2)'
+            : 'rgba(15,23,42,0.9)';
     const pillTxt = rank <= 3 ? UI.fg : UI.fgMuted;
     parts.push(
       rrect(px, py, pillSize, pillSize, 13 * k, `fill="${pillFill}"`),
-      txt(px + pillSize / 2, py + pillSize / 2 + 13 * k, String(rank), { size: 32 * k, font: FONT.display, fill: pillTxt, anchor: 'middle' }),
+      txt(px + pillSize / 2, py + pillSize / 2 + 13 * k, String(rank), {
+        size: 32 * k,
+        font: FONT.display,
+        fill: pillTxt,
+        anchor: 'middle',
+      }),
     );
     // avatar
     const avR = 22 * k;
@@ -315,24 +445,56 @@ export function leaderboardCard({ x, y, w, title, description, rows }) {
     parts.push(avatar(avCx, ry + rowH / 2, avR, row.name));
     // name (+ you tag)
     let nameX = avCx + avR + 18 * k;
-    parts.push(txt(nameX, ry + rowH / 2 + 8 * k, row.name, { size: 24 * k, font: you ? FONT.bodySemi : FONT.body, fill: UI.fg }));
+    parts.push(
+      txt(nameX, ry + rowH / 2 + 8 * k, row.name, {
+        size: 24 * k,
+        font: you ? FONT.bodySemi : FONT.body,
+        fill: UI.fg,
+      }),
+    );
     nameX += row.name.length * 13 * k + 16 * k;
     if (you) {
-      parts.push(txt(nameX, ry + rowH / 2 + 7 * k, 'YOU', { size: 15 * k, font: FONT.bodySemi, fill: UI.accent, ls: 2 * k }));
+      parts.push(
+        txt(nameX, ry + rowH / 2 + 7 * k, 'YOU', {
+          size: 15 * k,
+          font: FONT.bodySemi,
+          fill: UI.accent,
+          ls: 2 * k,
+        }),
+      );
     }
     // NOTE: win streaks are not shown — the live leaderboard doesn't display
     // them, so we don't either (see streakChip note above).
     // points (right)
     parts.push(
-      txt(x + w - pad - 70 * k, ry + rowH / 2 + 9 * k, row.points.toLocaleString(), { size: 26 * k, font: FONT.brand, weight: 700, fill: UI.fg, anchor: 'end' }),
-      txt(x + w - pad - 18 * k, ry + rowH / 2 + 8 * k, 'PTS', { size: 14 * k, font: FONT.bodySemi, fill: UI.fgSubtle, anchor: 'end', ls: 1 * k }),
+      txt(x + w - pad - 70 * k, ry + rowH / 2 + 9 * k, row.points.toLocaleString(), {
+        size: 26 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: UI.fg,
+        anchor: 'end',
+      }),
+      txt(x + w - pad - 18 * k, ry + rowH / 2 + 8 * k, 'PTS', {
+        size: 14 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgSubtle,
+        anchor: 'end',
+        ls: 1 * k,
+      }),
     );
     cy += rowH + rowGap;
   });
   cy += pad - rowGap;
 
   const h = cy - y;
-  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  const shell = rrect(
+    x,
+    y,
+    w,
+    h,
+    r,
+    `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`,
+  );
   return { svg: shell + parts.join('\n'), h };
 }
 
@@ -341,7 +503,13 @@ export function leaderboardCard({ x, y, w, title, description, rows }) {
 // over time" (cyan daily + purple running total), stacked "Per-league" bars
 // (green/amber/red), and the cyan "Pick-time heatmap". `full` adds the bars +
 // heatmap (story); otherwise just the hero line chart (square).
-const CHART = { line1: '#22d3ee', line2: '#a855f7', win: '#22c55e', draw: '#fbbf24', loss: '#ef4444' };
+const CHART = {
+  line1: '#22d3ee',
+  line2: '#a855f7',
+  win: '#22c55e',
+  draw: '#fbbf24',
+  loss: '#ef4444',
+};
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function statsCharts({ x, y, w, data, full = false }) {
@@ -355,7 +523,11 @@ export function statsCharts({ x, y, w, data, full = false }) {
   // ── header + window toggle ──
   parts.push(
     txt(x + pad, cy + 30 * k, 'Your stats', { size: 38 * k, font: FONT.bodySemi, fill: UI.fg }),
-    txt(x + pad, cy + 60 * k, 'Trends, leagues, and what to watch for.', { size: 18 * k, font: FONT.body, fill: UI.fgMuted }),
+    txt(x + pad, cy + 60 * k, 'Trends, leagues, and what to watch for.', {
+      size: 18 * k,
+      font: FONT.body,
+      fill: UI.fgMuted,
+    }),
   );
   const windows = ['30 days', '90 days', 'Season'];
   let wx = x + w - pad;
@@ -364,8 +536,20 @@ export function statsCharts({ x, y, w, data, full = false }) {
     const tw = windows[i].length * 10 * k + 28 * k;
     wx -= tw + (i < windows.length - 1 ? 8 * k : 0);
     parts.push(
-      rrect(wx, cy + 6 * k, tw, 44 * k, 14 * k, active ? `fill="${UI.accent}"` : `fill="rgba(0,0,0,0.001)"`),
-      txt(wx + tw / 2, cy + 34 * k, windows[i], { size: 18 * k, font: FONT.bodySemi, fill: active ? UI.base : UI.fgMuted, anchor: 'middle' }),
+      rrect(
+        wx,
+        cy + 6 * k,
+        tw,
+        44 * k,
+        14 * k,
+        active ? `fill="${UI.accent}"` : `fill="rgba(0,0,0,0.001)"`,
+      ),
+      txt(wx + tw / 2, cy + 34 * k, windows[i], {
+        size: 18 * k,
+        font: FONT.bodySemi,
+        fill: active ? UI.base : UI.fgMuted,
+        anchor: 'middle',
+      }),
     );
   }
   cy += 92 * k;
@@ -378,8 +562,18 @@ export function statsCharts({ x, y, w, data, full = false }) {
     const tx = x + pad + i * (tW + tGap);
     parts.push(
       rrect(tx, cy, tW, tH, 18 * k, `fill="rgba(15,23,42,0.7)"`),
-      txt(tx + 20 * k, cy + 34 * k, s.label.toUpperCase(), { size: 13 * k, font: FONT.bodySemi, fill: UI.fgMuted, ls: 2 * k }),
-      txt(tx + 20 * k, cy + 78 * k, s.value, { size: 38 * k, font: FONT.brand, weight: 700, fill: s.accent ? UI.accent : UI.fg }),
+      txt(tx + 20 * k, cy + 34 * k, s.label.toUpperCase(), {
+        size: 13 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgMuted,
+        ls: 2 * k,
+      }),
+      txt(tx + 20 * k, cy + 78 * k, s.value, {
+        size: 38 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: s.accent ? UI.accent : UI.fg,
+      }),
     );
   });
   cy += tH + 22 * k;
@@ -388,9 +582,25 @@ export function statsCharts({ x, y, w, data, full = false }) {
   const panel = (title, subtitle, ph, inner) => {
     const py = cy;
     parts.push(
-      rrect(x + pad, py, innerW, ph, 24 * k, `fill="rgba(11,19,33,0.6)" stroke="${UI.border}" stroke-width="1.5"`),
-      txt(x + pad + 26 * k, py + 36 * k, title.toUpperCase(), { size: 15 * k, font: FONT.bodySemi, fill: UI.fgMuted, ls: 3 * k }),
-      txt(x + pad + 26 * k, py + 62 * k, subtitle, { size: 16 * k, font: FONT.body, fill: UI.fgSubtle }),
+      rrect(
+        x + pad,
+        py,
+        innerW,
+        ph,
+        24 * k,
+        `fill="rgba(11,19,33,0.6)" stroke="${UI.border}" stroke-width="1.5"`,
+      ),
+      txt(x + pad + 26 * k, py + 36 * k, title.toUpperCase(), {
+        size: 15 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgMuted,
+        ls: 3 * k,
+      }),
+      txt(x + pad + 26 * k, py + 62 * k, subtitle, {
+        size: 16 * k,
+        font: FONT.body,
+        fill: UI.fgSubtle,
+      }),
     );
     parts.push(inner(x + pad, py, innerW, ph));
     cy += ph + 20 * k;
@@ -409,16 +619,31 @@ export function statsCharts({ x, y, w, data, full = false }) {
       const gy = plotY + (plotH * i) / 4;
       const val = Math.round((yMax * (4 - i)) / 4);
       g += `<line x1="${plotX}" y1="${gy}" x2="${plotX + plotW}" y2="${gy}" stroke="rgb(148,163,184)" stroke-opacity="0.18" stroke-dasharray="3 3" stroke-width="1"/>`;
-      g += txt(plotX - 12 * k, gy + 5 * k, String(val), { size: 12 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'end' });
+      g += txt(plotX - 12 * k, gy + 5 * k, String(val), {
+        size: 12 * k,
+        font: FONT.body,
+        fill: UI.fgSubtle,
+        anchor: 'end',
+      });
     }
     // x labels
     data.pointsOverTime.xLabels.forEach((lab, i, arr) => {
       const lx = plotX + (plotW * i) / (arr.length - 1);
-      g += txt(lx, plotY + plotH + 26 * k, lab, { size: 12 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'middle' });
+      g += txt(lx, plotY + plotH + 26 * k, lab, {
+        size: 12 * k,
+        font: FONT.body,
+        fill: UI.fgSubtle,
+        anchor: 'middle',
+      });
     });
     const poly = (vals, color) => {
       const n = vals.length;
-      const pts = vals.map((v, i) => `${(plotX + (plotW * i) / (n - 1)).toFixed(1)},${(plotY + plotH - (v / yMax) * plotH).toFixed(1)}`).join(' ');
+      const pts = vals
+        .map(
+          (v, i) =>
+            `${(plotX + (plotW * i) / (n - 1)).toFixed(1)},${(plotY + plotH - (v / yMax) * plotH).toFixed(1)}`,
+        )
+        .join(' ');
       return `<polyline fill="none" stroke="${color}" stroke-width="${3 * k}" stroke-linejoin="round" stroke-linecap="round" points="${pts}"/>`;
     };
     g += poly(data.pointsOverTime.cumulative, CHART.line2);
@@ -444,19 +669,33 @@ export function statsCharts({ x, y, w, data, full = false }) {
       for (let i = 0; i <= 4; i++) {
         const gy = plotY + (plotH * i) / 4;
         g += `<line x1="${plotX}" y1="${gy}" x2="${plotX + plotW}" y2="${gy}" stroke="rgb(148,163,184)" stroke-opacity="0.18" stroke-dasharray="3 3" stroke-width="1"/>`;
-        g += txt(plotX - 12 * k, gy + 5 * k, String(Math.round((yMax * (4 - i)) / 4)), { size: 12 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'end' });
+        g += txt(plotX - 12 * k, gy + 5 * k, String(Math.round((yMax * (4 - i)) / 4)), {
+          size: 12 * k,
+          font: FONT.body,
+          fill: UI.fgSubtle,
+          anchor: 'end',
+        });
       }
       const slot = plotW / data.perLeague.length;
       const bw = slot * 0.5;
       data.perLeague.forEach((l, i) => {
         const bx = plotX + slot * i + (slot - bw) / 2;
         let stackTop = plotY + plotH;
-        [['wins', CHART.win], ['draws', CHART.draw], ['losses', CHART.loss]].forEach(([key, color]) => {
+        [
+          ['wins', CHART.win],
+          ['draws', CHART.draw],
+          ['losses', CHART.loss],
+        ].forEach(([key, color]) => {
           const segH = (l[key] / yMax) * plotH;
           stackTop -= segH;
           g += rrect(bx, stackTop, bw, segH, 0, `fill="${color}"`);
         });
-        g += txt(bx + bw / 2, plotY + plotH + 26 * k, l.name, { size: 13 * k, font: FONT.body, fill: UI.fgMuted, anchor: 'middle' });
+        g += txt(bx + bw / 2, plotY + plotH + 26 * k, l.name, {
+          size: 13 * k,
+          font: FONT.body,
+          fill: UI.fgMuted,
+          anchor: 'middle',
+        });
       });
       g += legend(plotX + plotW - 300 * k, py + 40 * k, k, [
         { color: CHART.win, name: 'Wins' },
@@ -476,14 +715,27 @@ export function statsCharts({ x, y, w, data, full = false }) {
       const gap = 3 * k;
       let g = '';
       for (let h = 0; h < cols; h += 3) {
-        g += txt(gridX + h * (cellW) + cellW / 2, gridY - 10 * k, String(h), { size: 11 * k, font: FONT.body, fill: UI.fgSubtle, anchor: 'middle' });
+        g += txt(gridX + h * cellW + cellW / 2, gridY - 10 * k, String(h), {
+          size: 11 * k,
+          font: FONT.body,
+          fill: UI.fgSubtle,
+          anchor: 'middle',
+        });
       }
       data.heatmap.forEach((row, d) => {
         const ry = gridY + d * (cellH + gap);
-        g += txt(gridX - 14 * k, ry + cellH * 0.72, DOW[d], { size: 12 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'end' });
+        g += txt(gridX - 14 * k, ry + cellH * 0.72, DOW[d], {
+          size: 12 * k,
+          font: FONT.bodySemi,
+          fill: UI.fgMuted,
+          anchor: 'end',
+        });
         row.forEach((cell, h) => {
           const intensity = cell / 5;
-          const fill = cell === 0 ? 'rgba(30,41,59,0.55)' : `rgba(34,211,238,${(0.18 + intensity * 0.7).toFixed(2)})`;
+          const fill =
+            cell === 0
+              ? 'rgba(30,41,59,0.55)'
+              : `rgba(34,211,238,${(0.18 + intensity * 0.7).toFixed(2)})`;
           g += rrect(gridX + h * cellW, ry, cellW - gap, cellH, 3 * k, `fill="${fill}"`);
         });
       });
@@ -493,7 +745,14 @@ export function statsCharts({ x, y, w, data, full = false }) {
 
   cy += pad - 20 * k;
   const h = cy - y;
-  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  const shell = rrect(
+    x,
+    y,
+    w,
+    h,
+    r,
+    `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`,
+  );
   return { svg: shell + parts.join('\n'), h };
 }
 
@@ -503,7 +762,11 @@ function legend(x, y, k, items) {
   let cursor = x;
   for (const it of items) {
     g += `<line x1="${cursor}" y1="${y}" x2="${cursor + 24 * k}" y2="${y}" stroke="${it.color}" stroke-width="${3 * k}" stroke-linecap="round"/>`;
-    g += txt(cursor + 32 * k, y + 5 * k, it.name, { size: 14 * k, font: FONT.body, fill: UI.fgMuted });
+    g += txt(cursor + 32 * k, y + 5 * k, it.name, {
+      size: 14 * k,
+      font: FONT.body,
+      fill: UI.fgMuted,
+    });
     cursor += 32 * k + it.name.length * 8.5 * k + 24 * k;
   }
   return g;
@@ -529,9 +792,18 @@ export function statsPage({ x, y, w, data, activityCount = 3 }) {
   parts.push(avatar(avCx, avCy, avR, data.name));
   const tx = avCx + avR + 26 * k;
   parts.push(
-    txt(tx, cy + 18 * k, 'PROFILE', { size: 16 * k, font: FONT.bodySemi, fill: 'rgba(34,211,238,0.8)', ls: 4 * k }),
+    txt(tx, cy + 18 * k, 'PROFILE', {
+      size: 16 * k,
+      font: FONT.bodySemi,
+      fill: 'rgba(34,211,238,0.8)',
+      ls: 4 * k,
+    }),
     txt(tx, cy + 58 * k, data.name, { size: 42 * k, font: FONT.bodySemi, fill: UI.fg }),
-    txt(tx, cy + 90 * k, `@${data.username}  ·  ${data.joined}`, { size: 19 * k, font: FONT.body, fill: UI.fgMuted }),
+    txt(tx, cy + 90 * k, `@${data.username}  ·  ${data.joined}`, {
+      size: 19 * k,
+      font: FONT.body,
+      fill: UI.fgMuted,
+    }),
   );
   cy += avR * 2 + 30 * k;
 
@@ -544,9 +816,27 @@ export function statsPage({ x, y, w, data, activityCount = 3 }) {
     parts.push(rrect(txx, cy, tileW, tileH, 18 * k, `fill="rgba(15,23,42,0.7)"`));
     const cxx = txx + tileW / 2;
     parts.push(
-      txt(cxx, cy + 34 * k, t.label[0].toUpperCase(), { size: 13 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'middle', ls: 2 * k }),
-      txt(cxx, cy + 54 * k, t.label[1].toUpperCase(), { size: 13 * k, font: FONT.bodySemi, fill: UI.fgMuted, anchor: 'middle', ls: 2 * k }),
-      txt(cxx, cy + 104 * k, t.value, { size: 38 * k, font: FONT.brand, weight: 700, fill: UI.fg, anchor: 'middle' }),
+      txt(cxx, cy + 34 * k, t.label[0].toUpperCase(), {
+        size: 13 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgMuted,
+        anchor: 'middle',
+        ls: 2 * k,
+      }),
+      txt(cxx, cy + 54 * k, t.label[1].toUpperCase(), {
+        size: 13 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgMuted,
+        anchor: 'middle',
+        ls: 2 * k,
+      }),
+      txt(cxx, cy + 104 * k, t.value, {
+        size: 38 * k,
+        font: FONT.brand,
+        weight: 700,
+        fill: UI.fg,
+        anchor: 'middle',
+      }),
     );
   });
   cy += tileH + 30 * k;
@@ -554,7 +844,14 @@ export function statsPage({ x, y, w, data, activityCount = 3 }) {
   // ── recent activity ──
   const rows = data.activity.slice(0, activityCount);
   if (rows.length) {
-    parts.push(txt(x + pad, cy, 'RECENT ACTIVITY', { size: 16 * k, font: FONT.bodySemi, fill: UI.fgMuted, ls: 3 * k }));
+    parts.push(
+      txt(x + pad, cy, 'RECENT ACTIVITY', {
+        size: 16 * k,
+        font: FONT.bodySemi,
+        fill: UI.fgMuted,
+        ls: 3 * k,
+      }),
+    );
     cy += 32 * k;
     const rowH = 78 * k;
     const rowGap = 12 * k;
@@ -562,14 +859,30 @@ export function statsPage({ x, y, w, data, activityCount = 3 }) {
       parts.push(rrect(x + pad, cy, w - pad * 2, rowH, 20 * k, `fill="rgba(15,23,42,0.7)"`));
       parts.push(
         `${txt(x + pad + 26 * k, cy + 32 * k, a.home, { size: 22 * k, font: FONT.body, fill: UI.fg })}${txt(x + pad + 26 * k + a.home.length * 12.5 * k + 10 * k, cy + 32 * k, 'vs', { size: 18 * k, font: FONT.body, fill: UI.fgSubtle })}${txt(x + pad + 26 * k + a.home.length * 12.5 * k + 46 * k, cy + 32 * k, a.away, { size: 22 * k, font: FONT.body, fill: UI.fg })}`,
-        txt(x + pad + 26 * k, cy + 58 * k, `Picked ${a.pick}`, { size: 17 * k, font: FONT.body, fill: UI.fgSubtle }),
+        txt(x + pad + 26 * k, cy + 58 * k, `Picked ${a.pick}`, {
+          size: 17 * k,
+          font: FONT.body,
+          fill: UI.fgSubtle,
+        }),
       );
       // status badge (right)
       const tone = TONE[a.tone] || UI.fgMuted;
       const bw = a.status.length * 11 * k + 28 * k;
       parts.push(
-        rrect(x + w - pad - bw - 16 * k, cy + rowH / 2 - 18 * k, bw, 36 * k, 18 * k, `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`),
-        txt(x + w - pad - bw / 2 - 16 * k, cy + rowH / 2 + 6 * k, a.status.toUpperCase(), { size: 17 * k, font: FONT.bodySemi, fill: tone, anchor: 'middle' }),
+        rrect(
+          x + w - pad - bw - 16 * k,
+          cy + rowH / 2 - 18 * k,
+          bw,
+          36 * k,
+          18 * k,
+          `fill="rgba(0,0,0,0.001)" stroke="${tone}" stroke-opacity="0.5" stroke-width="1.5"`,
+        ),
+        txt(x + w - pad - bw / 2 - 16 * k, cy + rowH / 2 + 6 * k, a.status.toUpperCase(), {
+          size: 17 * k,
+          font: FONT.bodySemi,
+          fill: tone,
+          anchor: 'middle',
+        }),
       );
       cy += rowH + rowGap;
     });
@@ -578,7 +891,14 @@ export function statsPage({ x, y, w, data, activityCount = 3 }) {
   cy += pad;
 
   const h = cy - y;
-  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  const shell = rrect(
+    x,
+    y,
+    w,
+    h,
+    r,
+    `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`,
+  );
   return { svg: shell + parts.join('\n'), h };
 }
 
@@ -679,7 +999,14 @@ export function picksVsModelCard({ x, y, w, game }) {
   } else {
     // empty state — no picks yet
     parts.push(
-      rrect(x + pad, cy, innerW, barH, barH / 2, `fill="rgba(15,23,42,0.7)" stroke="${UI.border}" stroke-width="1.5"`),
+      rrect(
+        x + pad,
+        cy,
+        innerW,
+        barH,
+        barH / 2,
+        `fill="rgba(15,23,42,0.7)" stroke="${UI.border}" stroke-width="1.5"`,
+      ),
       txt(cx, cy + barH / 2 + 7 * k, 'No picks yet — be the first', {
         size: 20 * k,
         font: FONT.body,
@@ -715,10 +1042,21 @@ export function picksVsModelCard({ x, y, w, game }) {
     const ty = cy;
     parts.push(
       // label (truncate-safe: anchored start, sits in the gutter)
-      txt(x + pad, ty + rowH / 2 + 7 * k, row.label, { size: 22 * k, font: FONT.body, fill: UI.fg }),
+      txt(x + pad, ty + rowH / 2 + 7 * k, row.label, {
+        size: 22 * k,
+        font: FONT.body,
+        fill: UI.fg,
+      }),
       // track + fill
       rrect(trackX, ty, trackW, rowH, rowH / 2, `fill="rgba(15,23,42,0.8)"`),
-      rrect(trackX, ty, Math.max((row.pct / 100) * trackW, rowH), rowH, rowH / 2, `fill="${row.color}"`),
+      rrect(
+        trackX,
+        ty,
+        Math.max((row.pct / 100) * trackW, rowH),
+        rowH,
+        rowH / 2,
+        `fill="${row.color}"`,
+      ),
       // % at the right edge
       txt(x + pad + innerW, ty + rowH / 2 + 8 * k, `${row.pct}%`, {
         size: 24 * k,
@@ -733,6 +1071,13 @@ export function picksVsModelCard({ x, y, w, game }) {
   cy += pad - rowGap;
 
   const h = cy - y;
-  const shell = rrect(x, y, w, h, r, `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`);
+  const shell = rrect(
+    x,
+    y,
+    w,
+    h,
+    r,
+    `fill="${UI.elevated}" stroke="${UI.border}" stroke-width="1.5"`,
+  );
   return { svg: shell + parts.join('\n'), h };
 }

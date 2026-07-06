@@ -58,7 +58,9 @@ try {
     const homeTeam = arg1;
     const awayTeam = arg2;
     if (!homeTeam || !awayTeam) {
-      console.error('Usage: node scripts/find-game.mjs "<homeTeam>" "<awayTeam>"   (or --like <substr>)');
+      console.error(
+        'Usage: node scripts/find-game.mjs "<homeTeam>" "<awayTeam>"   (or --like <substr>)',
+      );
       process.exit(1);
     }
     const [rows] = await s.query(

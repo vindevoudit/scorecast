@@ -321,11 +321,7 @@ input {
    * over a surface so the edges fall off and the eye lands on the centre.
    * Used as a wrapper on hero panels and the auth ambient scene. */
   .bg-stadium-vignette {
-    background-image: radial-gradient(
-      ellipse at center,
-      transparent 35%,
-      rgba(0, 0, 0, 0.35) 100%
-    );
+    background-image: radial-gradient(ellipse at center, transparent 35%, rgba(0, 0, 0, 0.35) 100%);
   }
 
   /* Tier 30 Phase 2 — horizontal fade-to-transparent mask for ticker strips

@@ -29,12 +29,7 @@ import {
   iconBadge,
   svgDoc,
 } from '../marketing/lib/brand.mjs';
-import {
-  gameCard,
-  leaderboardCard,
-  statsPage,
-  statsCharts,
-} from '../marketing/lib/product.mjs';
+import { gameCard, leaderboardCard, statsPage, statsCharts } from '../marketing/lib/product.mjs';
 import {
   openDb,
   fetchUserCount,
@@ -122,8 +117,16 @@ const STATS = [
 
 const STEPS = [
   { n: '01', title: 'Sign up free', body: 'Under 30 seconds. No credit card, no betting.' },
-  { n: '02', title: 'Pick your winners', body: 'Browse matches and lock picks right up to kickoff.' },
-  { n: '03', title: 'Climb the rankings', body: 'Earn points by probability and rise up the live board.' },
+  {
+    n: '02',
+    title: 'Pick your winners',
+    body: 'Browse matches and lock picks right up to kickoff.',
+  },
+  {
+    n: '03',
+    title: 'Climb the rankings',
+    body: 'Earn points by probability and rise up the live board.',
+  },
 ];
 
 // ── Hero kicker ──────────────────────────────────────────────────────────
@@ -146,9 +149,39 @@ function renderLaunch(format) {
   const cx = w / 2;
 
   const L = {
-    square: { kickY: 320, wmTargetW: 940, wmY: 500, tagY: 580, bodyY: 700, bodySize: 46, ctaY: 866, ctaSize: 36, urlY: 1004 },
-    story: { kickY: 540, wmTargetW: 940, wmY: 720, tagY: 804, bodyY: 928, bodySize: 50, ctaY: 1560, ctaSize: 40, urlY: 1756 },
-    landscape: { kickY: 222, wmTargetW: 1180, wmY: 420, tagY: 494, bodySize: 38, bodyY: 584, ctaY: 712, ctaSize: 33, urlY: 856 },
+    square: {
+      kickY: 320,
+      wmTargetW: 940,
+      wmY: 500,
+      tagY: 580,
+      bodyY: 700,
+      bodySize: 46,
+      ctaY: 866,
+      ctaSize: 36,
+      urlY: 1004,
+    },
+    story: {
+      kickY: 540,
+      wmTargetW: 940,
+      wmY: 720,
+      tagY: 804,
+      bodyY: 928,
+      bodySize: 50,
+      ctaY: 1560,
+      ctaSize: 40,
+      urlY: 1756,
+    },
+    landscape: {
+      kickY: 222,
+      wmTargetW: 1180,
+      wmY: 420,
+      tagY: 494,
+      bodySize: 38,
+      bodyY: 584,
+      ctaY: 712,
+      ctaSize: 33,
+      urlY: 856,
+    },
   }[format];
 
   const wmSize = wmSizeFor(L.wmTargetW);
@@ -212,7 +245,13 @@ function renderFeature(feat, format) {
   const headLh = headSize * 1.08;
   const subFirstBaseline = story ? 1190 : 792;
   const iconBottom = iconCy + badgeR;
-  const headBaseline = centeredBlockBaseline(iconBottom, subFirstBaseline - subSize, headLines.length, headSize, headLh);
+  const headBaseline = centeredBlockBaseline(
+    iconBottom,
+    subFirstBaseline - subSize,
+    headLines.length,
+    headSize,
+    headLh,
+  );
 
   const body = `
   ${background(w, h)}
@@ -302,8 +341,26 @@ function renderShareToStory(format) {
   const story = format === 'story';
 
   const L = {
-    square: { topY: 132, headY: 360, headSize: 76, headLh: 86, tagY: 612, tagSize: 40, handleCy: 748, handleSize: 60 },
-    story: { topY: 250, headY: 700, headSize: 100, headLh: 116, tagY: 1080, tagSize: 48, handleCy: 1296, handleSize: 64 },
+    square: {
+      topY: 132,
+      headY: 360,
+      headSize: 76,
+      headLh: 86,
+      tagY: 612,
+      tagSize: 40,
+      handleCy: 748,
+      handleSize: 60,
+    },
+    story: {
+      topY: 250,
+      headY: 700,
+      headSize: 100,
+      headLh: 116,
+      tagY: 1080,
+      tagSize: 48,
+      handleCy: 1296,
+      handleSize: 64,
+    },
   }[format];
 
   const body = `
@@ -462,7 +519,13 @@ const STATS_PROFILE = {
     { label: ['Best', 'streak'], value: '4' },
   ],
   activity: [
-    { home: 'Man City', away: 'Aston Villa', pick: 'Aston Villa', status: 'Won +74', tone: 'success' },
+    {
+      home: 'Man City',
+      away: 'Aston Villa',
+      pick: 'Aston Villa',
+      status: 'Won +74',
+      tone: 'success',
+    },
     { home: 'Arsenal', away: 'Chelsea', pick: 'Arsenal', status: 'Missed', tone: 'danger' },
     { home: 'Liverpool', away: 'Tottenham', pick: 'Liverpool', status: 'Won +48', tone: 'success' },
   ],
@@ -577,7 +640,14 @@ function renderLeaderboard(format) {
   const cardW = 880;
   const cardX = (w - cardW) / 2;
   const rows = story ? LEADERBOARD : LEADERBOARD.slice(0, 5);
-  const probe = leaderboardCard({ x: cardX, y: 0, w: cardW, title: 'Leaderboard', description: '', rows });
+  const probe = leaderboardCard({
+    x: cardX,
+    y: 0,
+    w: cardW,
+    title: 'Leaderboard',
+    description: '',
+    rows,
+  });
   const top = story ? 470 : 300;
   const bottom = story ? h - 170 : h - 110;
   const cardY = story ? top : Math.max(top, top + (bottom - top - probe.h) / 2);
@@ -808,9 +878,36 @@ async function main() {
   await emit('flyer-a4', await renderFlyer(), SIZE.flyer[0]);
 
   // Product mockups — real GameCard states + leaderboard
-  await emit('product-gamecard-upcoming', renderProductCard({ state: 'upcoming', data: GAMES.upcoming, heading: 'Pick before kickoff', sub: 'The bigger the upset, the more points' }), SIZE.square[0]);
-  await emit('product-gamecard-live', renderProductCard({ state: 'live', data: GAMES.live, heading: 'Follow it live', sub: 'Scores + your points, updating in real time' }), SIZE.square[0]);
-  await emit('product-gamecard-final', renderProductCard({ state: 'final', data: GAMES.final, heading: 'Score the upset', sub: 'A 34% underdog away win earned +66 points' }), SIZE.square[0]);
+  await emit(
+    'product-gamecard-upcoming',
+    renderProductCard({
+      state: 'upcoming',
+      data: GAMES.upcoming,
+      heading: 'Pick before kickoff',
+      sub: 'The bigger the upset, the more points',
+    }),
+    SIZE.square[0],
+  );
+  await emit(
+    'product-gamecard-live',
+    renderProductCard({
+      state: 'live',
+      data: GAMES.live,
+      heading: 'Follow it live',
+      sub: 'Scores + your points, updating in real time',
+    }),
+    SIZE.square[0],
+  );
+  await emit(
+    'product-gamecard-final',
+    renderProductCard({
+      state: 'final',
+      data: GAMES.final,
+      heading: 'Score the upset',
+      sub: 'A 34% underdog away win earned +66 points',
+    }),
+    SIZE.square[0],
+  );
   await emit('product-game-lifecycle', renderGameLifecycle(), SIZE.story[0]);
   await emit('product-leaderboard', renderLeaderboard('square'), SIZE.square[0]);
   await emit('product-leaderboard-story', renderLeaderboard('story'), SIZE.story[0]);
@@ -864,8 +961,16 @@ async function main() {
   // sample. `.find` guards against the sample-upcoming fallback rows, which
   // have no kickoffAt.
   const countdownGame = upcoming.find((g) => g.kickoffAt instanceof Date) || SAMPLE_COUNTDOWN;
-  await emit('kickoff-countdown-square', renderKickoffCountdown(countdownGame, 'square'), SIZE.square[0]);
-  await emit('kickoff-countdown-story', renderKickoffCountdown(countdownGame, 'story'), SIZE.story[0]);
+  await emit(
+    'kickoff-countdown-square',
+    renderKickoffCountdown(countdownGame, 'square'),
+    SIZE.square[0],
+  );
+  await emit(
+    'kickoff-countdown-story',
+    renderKickoffCountdown(countdownGame, 'story'),
+    SIZE.story[0],
+  );
 
   // Halftime score — the most relevant in-progress game (prefers one at the
   // break); offline that's the Brazil 1-0 France sample.

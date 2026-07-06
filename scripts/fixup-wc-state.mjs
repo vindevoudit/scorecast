@@ -383,9 +383,7 @@ async function main() {
         if (resultMatch) {
           try {
             const parsed = JSON.parse(resultMatch[1]);
-            process.stdout.write(
-              `REWRITTEN=${parsed.rewritten} SKIPPED=${parsed.skipped ?? 0}\n`,
-            );
+            process.stdout.write(`REWRITTEN=${parsed.rewritten} SKIPPED=${parsed.skipped ?? 0}\n`);
           } catch (parseErr) {
             process.stdout.write(`RESULT_PARSE_FAILED=${parseErr.message}\n`);
           }
@@ -414,7 +412,9 @@ try {
   await sequelize.close();
   process.exit(code);
 } catch (err) {
-  process.stdout.write(`STATUS=FAIL EXCEPTION=${String(err.message || err).replace(/[^ -~]/g, '')}\n`);
+  process.stdout.write(
+    `STATUS=FAIL EXCEPTION=${String(err.message || err).replace(/[^ -~]/g, '')}\n`,
+  );
   try {
     await sequelize.close();
   } catch (closeErr) {

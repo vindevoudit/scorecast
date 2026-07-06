@@ -69,7 +69,9 @@ async function doClear() {
   if (groupIds.length) await GroupMember.destroy({ where: { groupId: groupIds } });
   await Group.destroy({ where: { name: GROUP_NAMES } });
   if (ids.length) await User.destroy({ where: { id: ids } });
-  console.log(`cleared: ${ids.length} users, ${groupIds.length} groups (+ their picks/members/scores)`);
+  console.log(
+    `cleared: ${ids.length} users, ${groupIds.length} groups (+ their picks/members/scores)`,
+  );
 }
 
 async function main() {
@@ -82,8 +84,11 @@ async function main() {
   if (!wc) throw new Error('No WC league found — sync it first (admin League Manager → Sync).');
   const games = await Game.findAll({ where: { leagueId: wc.id } });
   const scored = games.filter((g) => g.result);
-  console.log(`WC games: ${games.length} total, ${scored.length} scored (picks seeded on scored games).`);
-  if (scored.length === 0) throw new Error('No scored WC games — nothing to build a cabinet from yet.');
+  console.log(
+    `WC games: ${games.length} total, ${scored.length} scored (picks seeded on scored games).`,
+  );
+  if (scored.length === 0)
+    throw new Error('No scored WC games — nothing to build a cabinet from yet.');
 
   const now = new Date();
   const hash = await bcrypt.hash(DEMO_PASSWORD, 10);

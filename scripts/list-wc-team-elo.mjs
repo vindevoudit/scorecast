@@ -60,7 +60,9 @@ try {
   await sequelize.close();
   process.exit(0);
 } catch (err) {
-  process.stdout.write(`STATUS=FAIL EXCEPTION=${String(err.message || err).replace(/[^ -~]/g, '')}\n`);
+  process.stdout.write(
+    `STATUS=FAIL EXCEPTION=${String(err.message || err).replace(/[^ -~]/g, '')}\n`,
+  );
   try {
     await sequelize.close();
   } catch (closeErr) {

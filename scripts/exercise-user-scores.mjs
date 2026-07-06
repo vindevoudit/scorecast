@@ -155,17 +155,14 @@ async function simulateSetResult(gameId, newResult) {
     const game = gameRows[0];
     const oldResult = game.result;
     game.result = newResult;
-    await s.query(
-      `UPDATE games SET result = :newResult, status = :status WHERE id = :id`,
-      {
-        transaction: t,
-        replacements: {
-          newResult,
-          status: newResult ? 'finished' : 'scheduled',
-          id: gameId,
-        },
+    await s.query(`UPDATE games SET result = :newResult, status = :status WHERE id = :id`, {
+      transaction: t,
+      replacements: {
+        newResult,
+        status: newResult ? 'finished' : 'scheduled',
+        id: gameId,
       },
-    );
+    });
 
     const [picks] = await s.query(
       `SELECT id, "userId", choice, "pickedHomeProbability", "pickedDrawProbability", "pickedAwayProbability",
@@ -259,7 +256,9 @@ try {
   const users = await getUsers();
   const games = await getGames();
   if (users.length < 2 || games.length < 1) {
-    console.error(`Need ≥2 users + ≥1 upcoming game; have users=${users.length} games=${games.length}`);
+    console.error(
+      `Need ≥2 users + ≥1 upcoming game; have users=${users.length} games=${games.length}`,
+    );
     process.exit(1);
   }
 

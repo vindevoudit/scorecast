@@ -96,7 +96,15 @@ export function wordmarkWidth(size, text = 'BANTRYX', letterSpacing) {
   const ls = letterSpacing ?? size * 0.04;
   return text.length * size * ORBITRON_EM + (text.length - 1) * ls;
 }
-export function wordmark({ x, y, size = 120, anchor = 'start', fill = 'url(#mark)', letterSpacing, text = 'BANTRYX' }) {
+export function wordmark({
+  x,
+  y,
+  size = 120,
+  anchor = 'start',
+  fill = 'url(#mark)',
+  letterSpacing,
+  text = 'BANTRYX',
+}) {
   const ls = letterSpacing ?? size * 0.04;
   return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${FONT.brand}" font-weight="700" font-size="${size}" letter-spacing="${ls}" fill="${fill}">${esc(text)}</text>`;
 }
@@ -164,7 +172,17 @@ export function wrapLines(text, maxChars) {
   return lines;
 }
 
-export function textBlock({ x, y, lines, size, lineHeight, anchor = 'start', fill = COLOR.textHi, font = FONT.body, letterSpacing = 0 }) {
+export function textBlock({
+  x,
+  y,
+  lines,
+  size,
+  lineHeight,
+  anchor = 'start',
+  fill = COLOR.textHi,
+  font = FONT.body,
+  letterSpacing = 0,
+}) {
   const lh = lineHeight ?? size * 1.3;
   return lines
     .map(

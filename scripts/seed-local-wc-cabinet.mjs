@@ -42,7 +42,6 @@ const PARTICIPATION = 0.85; // chance a given fan picked a given scored game
 const UPSET_NOISE = 0.25; // chance a fan flips off the favourite (spread)
 const DEMO_USERNAME = 'wc_demo';
 const DEMO_PASSWORD = 'password123';
-const SEED_PREFIX = 'wc_'; // wc_demo + wc_fan_NN
 const GROUP_NAMES = ['World Cup Office Pool', 'The Pundits'];
 
 const clear = process.argv.slice(2).includes('--clear');

@@ -137,6 +137,11 @@ test('Leaderboard hides the flame for a streak below 3', async ({ page }) => {
   await clearFriendships([aliceId, bobId]);
   await createAcceptedFriendship(aliceId, bobId);
   await updateUserFields(aliceId, { currentWinStreak: 2 });
+  // Both users in the Friends panel must be below the >=3 flame gate. bob is
+  // asserted to be flame-free, so reset his streak too — an earlier win-streak
+  // spec (e.g. games.spec.js) can leave bob at a 3+ streak in the shared
+  // (workers:1) DB, which would surface a stray row flame and false-fail this.
+  await updateUserFields(bobId, { currentWinStreak: 0 });
   try {
     await loginViaUI(page, USERS.alice);
     await page

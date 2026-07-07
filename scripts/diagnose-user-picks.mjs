@@ -60,7 +60,7 @@ try {
 
   // 2. every pick this user owns
   const [picks] = await s.query(
-    `SELECT p.id, p.choice, p."submittedAt", p."createdAt",
+    `SELECT p.id, p.choice, p."submittedAt",
             p."appliedResult", p."appliedPoints",
             g.id AS "gameId", g."homeTeam", g."awayTeam", g.date,
             g.status, g.result

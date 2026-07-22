@@ -28,6 +28,7 @@ const { User, sequelize } = require('../models');
 const LeaderboardService = require('../services/LeaderboardService');
 const PushService = require('../services/PushService');
 const StatsService = require('../services/StatsService');
+const WrappedService = require('../services/WrappedService');
 
 const router = express.Router();
 
@@ -171,6 +172,20 @@ router.get('/me/stats', authMiddleware, async (req, res) => {
   } catch (error) {
     req.log.error({ err: error.message }, 'stats-fetch failed');
     res.status(500).json({ error: 'Failed to load stats' });
+  }
+});
+
+// World Cup Wrapped — self-only tournament retrospective (see
+// services/WrappedService.js). Scoped to req.user.id; there is deliberately no
+// per-username surface. Mirrors the /me/stats handler.
+router.get('/me/wrapped', authMiddleware, async (req, res) => {
+  try {
+    const wrapped = await WrappedService.getWrappedForUser(req.user.id);
+    if (!wrapped) return res.status(404).json({ error: 'User not found' });
+    res.json(wrapped);
+  } catch (error) {
+    req.log.error({ err: error.message }, 'wrapped-fetch failed');
+    res.status(500).json({ error: 'Failed to load wrapped' });
   }
 });
 

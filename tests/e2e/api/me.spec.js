@@ -14,7 +14,14 @@
 const { test, expect } = require('@playwright/test');
 
 const { USERS } = require('../fixtures/data');
-const { apiLogin, setUserPassword, updateUserFields } = require('../helpers/api');
+const {
+  apiLogin,
+  setUserPassword,
+  updateUserFields,
+  createWcCabinetFixture,
+  clearWcCabinetFixture,
+  getUserId,
+} = require('../helpers/api');
 const {
   assertOk,
   assertUnauthorized,
@@ -467,6 +474,72 @@ test.describe('GET /api/me/stats', () => {
 
   test('no auth → 401', async () => {
     await assertUnauthorized('GET', '/api/me/stats');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/me/wrapped — World Cup Wrapped self-only retrospective. Reachable
+// only scoped to req.user.id; there is no per-username surface.
+// ---------------------------------------------------------------------------
+
+test.describe('GET /api/me/wrapped', () => {
+  test('no auth → 401', async () => {
+    await assertUnauthorized('GET', '/api/me/wrapped');
+  });
+
+  test('authed with no WC picks → 200 hasData:false shape', async () => {
+    const authed = await apiLogin(USERS.alice);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/me/wrapped');
+      expectShape(payload, [
+        'userId',
+        'username',
+        'displayName',
+        'tournament',
+        'hasData',
+        'summary',
+        'overall',
+        'boldestCall',
+        'teamOfTournament',
+        'upsetsCalled',
+        'bestStage',
+        'medals',
+        'groups',
+        'archetype',
+        'generatedAt',
+      ]);
+      // Alice has no scored World Cup picks in the seed → nothing to celebrate.
+      expect(payload.hasData).toBe(false);
+      expectShape(payload.summary, ['picks', 'scored', 'wins', 'points', 'winRate']);
+      // Archetype is always present (Newcomer fallback).
+      expectShape(payload.archetype, ['key', 'title', 'emoji', 'blurb']);
+    } finally {
+      await authed.dispose();
+    }
+  });
+
+  test('authed with a scored WC win → hasData:true with populated stats', async () => {
+    const bobId = await getUserId(USERS.bob.username);
+    const { leagueId } = await createWcCabinetFixture({
+      picks: [{ userId: bobId, choice: 'home' }],
+    });
+    const authed = await apiLogin(USERS.bob);
+    try {
+      const payload = await assertOk(authed, 'GET', '/api/me/wrapped');
+      expect(payload.hasData).toBe(true);
+      // The staged game is result='home' at 0.5 → a correct pick scores 50.
+      expect(payload.summary.wins).toBeGreaterThanOrEqual(1);
+      expect(payload.summary.points).toBeGreaterThanOrEqual(50);
+      // Bob is a participant → an overall placement + a best stage exist.
+      expect(payload.overall).not.toBeNull();
+      expect(payload.overall.rank).toBeGreaterThanOrEqual(1);
+      expect(payload.bestStage).not.toBeNull();
+      expect(payload.boldestCall).not.toBeNull();
+      expect(payload.teamOfTournament).not.toBeNull();
+    } finally {
+      await authed.dispose();
+      await clearWcCabinetFixture(leagueId);
+    }
   });
 });
 

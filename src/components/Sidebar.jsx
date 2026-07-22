@@ -80,6 +80,18 @@ const ICONS = {
       <path d="M8 20h8M9.5 20l.5-4M14.5 20l-.5-4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  wrapped: (props) => (
+    // Sparkle / gift — the World Cup Wrapped retrospective. A four-point
+    // sparkle with two small companion sparkles reads as "a special,
+    // celebratory recap" distinct from the trophy glyph above.
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
+      <path
+        d="M12 3l1.8 4.9L18.7 9.7 13.8 11.5 12 16.4 10.2 11.5 5.3 9.7 10.2 7.9z"
+        strokeLinejoin="round"
+      />
+      <path d="M18.5 15l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z" strokeLinejoin="round" />
+    </svg>
+  ),
   admin: (props) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
       <circle cx="12" cy="12" r="3" />

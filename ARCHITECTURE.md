@@ -4566,6 +4566,59 @@ never touches `user_scores`).
 (admin → League Manager, or the 03:00 UTC `syncFixtures` cron) so every WC game gets its
 `stage`. No data backfill script.
 
+### 8.36 World Cup Aftermatch — per-user Wrapped-style recap (2026-07-21)
+
+A Spotify-Wrapped-style, **self-only** retrospective of a user's whole World Cup prediction
+run: a full-screen, tappable **story** of one-big-stat-per-slide (total points, accuracy,
+boldest call, team of the tournament, upsets called, deepest stage run, overall percentile,
+a templated "prediction personality"), ending on a **shareable image**. The user-facing name
+is **Aftermatch**; all code identifiers keep the `wrapped` name (service, route, view id,
+files) for contract stability — the rename is copy-only. No migration; reuses the exact
+patterns proven by §8.35 Trophy Cabinet + §8.35 Personal Stats.
+
+**Service — [services/WrappedService.js](../services/WrappedService.js) `getWrappedForUser(userId)`:**
+resolves the WC league (`sourceLeagueId='WC'`), loads all WC games + every pick on them, and
+scores with `scorePick` (the authority). Reuses TrophyService's exported `rankAmong` /
+`topPercentOf` and `lib/stages.js` `stageLabel` / `medalFor`. Builds `pointsByUser` across all
+scored WC games (the participant set) for the overall percentile + group/friend comparisons,
+then a per-stage pass for the best finish + medal tally. Pure, DB-free helpers exported for
+tests: `findBoldestCall` (lowest-probability winning pick), `teamOfTournament` (most-backed
+nation, tie-break by wins), `countUpsets` (correct picks under 0.33), `buildArchetype`
+(Oracle / Daredevil / Analyst / Optimist, `< 3` scored → Newcomer; axes = win rate + mean
+`1 − picked-side-probability`). Computed **on-the-fly, 5-min cached** (`wrapped:<userId>`,
+skipped in test); **not materialized** (same rationale as Trophy Cabinet). `hasData:false`
+when the user has no scored WC picks → the launch tile shows an empty state.
+
+**Route + visibility — `GET /api/me/wrapped`** ([routes/me.js](../routes/me.js),
+`authMiddleware`, scoped to `req.user.id`). **Self-only by design** — there is deliberately
+NO `/api/users/:username/wrapped` surface; the boldest call + personality leak granular pick
+history, mirroring the self-only Personal Stats dashboard. Because the payload only ever
+reveals the subject's own numbers, no masking is needed.
+
+**Frontend.** `✨ Aftermatch` is a new authed-only sidebar item (view id `'wrapped'`,
+`ICONS.wrapped` in [src/components/Sidebar.jsx](../src/components/Sidebar.jsx), tab + view
+switch in [src/views/DashboardView.jsx](../src/views/DashboardView.jsx), added to
+`DEEP_LINK_ALLOWED_VIEWS`). [src/views/WrappedView.jsx](../src/views/WrappedView.jsx) (lazy,
+own Vite chunk) fetches the endpoint and renders a launch tile; Play mounts
+[src/components/wrapped/WrappedStory.jsx](../src/components/wrapped/WrappedStory.jsx) — a
+fixed-overlay story machine with segmented progress bars, tap/swipe/arrow nav, config-driven
+`SLIDES` that auto-skip empty stats, `AnimatePresence` transitions, and count-up numbers
+(`animate` + `statsCountUp`). It calls the **raw** `useReducedMotion` from `motion/react`
+(NOT the `src/lib/motion.js` wrapper, which treats mobile as reduced-motion) so motion stays
+on for the mobile-first experience. The final slide shares a 1080×1920
+[WrappedShareCard.jsx](../src/components/wrapped/WrappedShareCard.jsx) (inline-styled,
+Orbitron; includes the **boldest upset + the match it came in**) via
+[shareWrapped.jsx](../src/components/wrapped/shareWrapped.jsx) — the imperative createRoot +
+double-RAF + `document.fonts.load` Orbitron gate + `captureNodeToPng` + `shareBlob` template
+lifted from GameCard's `captureAndShare`.
+
+**Tests.** `tests/wrappedService.test.js` (14 pure-function cases across the four helpers +
+archetype boundaries); `tests/e2e/api/me.spec.js` (+3: anon 401, `hasData:false` shape,
+`hasData:true` with a staged WC win via the `createWcCabinetFixture` helper).
+
+**Operator post-deploy**: none — additive read-path only, no migration. Reads existing WC
+picks; the story populates once a user has settled World Cup picks.
+
 ---
 
 ## 11. Operational Notes

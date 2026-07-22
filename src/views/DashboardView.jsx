@@ -30,6 +30,7 @@ const FriendsView = lazyWithReload(() => import('./FriendsView'));
 const GroupsView = lazyWithReload(() => import('./GroupsView'));
 const LeaderboardView = lazyWithReload(() => import('./LeaderboardView'));
 const TrophyCabinetView = lazyWithReload(() => import('./TrophyCabinetView'));
+const WrappedView = lazyWithReload(() => import('./WrappedView'));
 
 function LazyFallback({ label = 'Loading…' }) {
   return <p className="text-sm text-fg-muted">{label}</p>;
@@ -48,6 +49,7 @@ const BASE_TABS = [
   { id: 'friends', label: 'Friends' },
   { id: 'groups', label: 'Groups' },
   { id: 'trophy', label: 'Trophy Cabinet' },
+  { id: 'wrapped', label: 'Aftermatch' },
   { id: 'profile', label: 'Profile' },
 ];
 const ADMIN_TAB = { id: 'admin', label: 'Admin' };
@@ -423,6 +425,12 @@ function DashboardView() {
           {view === 'trophy' && user ? (
             <Suspense fallback={<LazyFallback label="Loading trophy cabinet…" />}>
               <TrophyCabinetView />
+            </Suspense>
+          ) : null}
+
+          {view === 'wrapped' && user ? (
+            <Suspense fallback={<LazyFallback label="Loading your Aftermatch…" />}>
+              <WrappedView />
             </Suspense>
           ) : null}
         </section>

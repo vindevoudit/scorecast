@@ -115,7 +115,7 @@ const SLIDES = [
         </m.div>
         <m.div
           variants={heroRevealItem}
-          className="font-led text-shadow-brand-glow-strong text-6xl font-bold text-accent sm:text-7xl"
+          className="font-led text-shadow-brand-glow-strong text-4xl font-bold text-accent sm:text-6xl"
         >
           AFTERMATCH
         </m.div>

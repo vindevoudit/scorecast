@@ -40,6 +40,12 @@ function friendOutcomeBadge(row, game) {
   if (row.choice === game.result) {
     return <Badge tone="success">✓ +{row.points} pts</Badge>;
   }
+  // row.points is already server-scored (PickService.listFriendsPicks runs
+  // scorePick), so a cricket pick that missed the winner but nailed the runs
+  // arrives with a real total — showing a bare "Missed" would throw it away.
+  if (row.points > 0) {
+    return <Badge tone="warning">✗ +{row.points} pts</Badge>;
+  }
   return <Badge tone="danger">✗ Missed</Badge>;
 }
 

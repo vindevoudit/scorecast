@@ -15,6 +15,7 @@
 import LeaderboardCard from '../components/LeaderboardCard';
 import GroupLeaderboardCard from '../components/GroupLeaderboardCard';
 import LeaderboardFiltersBar from '../components/LeaderboardFiltersBar';
+import SportSwitcher from '../components/SportSwitcher';
 import EmptyState from '../components/EmptyState';
 import SubTabs from '../components/SubTabs';
 import { useAuth } from '../hooks/useAuth';
@@ -147,6 +148,7 @@ function LeaderboardView() {
 
   return (
     <div className="space-y-4 motion-safe:duration-180 motion-safe:ease-out-expo motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1">
+      <SportSwitcher surface="leaderboard" />
       <LeaderboardFiltersBar />
       <SubTabs tabs={tabs} defaultValue="overall" ariaLabel="Leaderboard sections" />
     </div>

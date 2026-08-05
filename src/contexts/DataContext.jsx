@@ -54,7 +54,9 @@ export function DataProvider({ children }) {
   // Tier 4b Chunk 3 — league/season picker state. Sits in DataContext so
   // refreshGames (called from many places after picks/admin mutations)
   // preserves the active filter instead of clobbering it.
-  const [gameFilters, setGameFiltersState] = useState({ leagueId: '', seasonId: '' });
+  // Tier 34 — `sport` joins the existing league/season axes. '' means "all",
+  // consistent with the other two.
+  const [gameFilters, setGameFiltersState] = useState({ leagueId: '', seasonId: '', sport: '' });
   // Leaderboard filter (shared by Leaderboard + My Picks). Separate state
   // slot from gameFilters so picking a league for stats doesn't also scope
   // the games view (and vice versa). URL keys are `?lbLeague=` / `?lbSeason=`
@@ -124,6 +126,7 @@ export function DataProvider({ children }) {
       const params = new URLSearchParams();
       if (filters.leagueId) params.set('leagueId', filters.leagueId);
       if (filters.seasonId) params.set('seasonId', filters.seasonId);
+      if (filters.sport) params.set('sport', filters.sport);
       const qs = params.toString() ? `?${params.toString()}` : '';
       const data = await request(`/api/games${qs}`);
       const sorted = data.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -137,11 +140,17 @@ export function DataProvider({ children }) {
   // the two together means a stale fetch can't race the state update.
   const applyGameFilters = useCallback(
     async (next) => {
-      const normalized = { leagueId: next.leagueId || '', seasonId: next.seasonId || '' };
+      const normalized = {
+        leagueId: next.leagueId || '',
+        seasonId: next.seasonId || '',
+        sport: next.sport ?? gameFilters.sport ?? '',
+      };
       setGameFiltersState(normalized);
       await refreshGames(normalized);
     },
-    [refreshGames],
+    // gameFilters.sport is read for the "leave sport alone" fallback, so it
+    // must be a dependency or GameFiltersBar would apply a stale sport.
+    [refreshGames, gameFilters.sport],
   );
 
   const refreshGroups = useCallback(async () => {
@@ -189,6 +198,7 @@ export function DataProvider({ children }) {
       params.set('overallLimit', String(effectiveOverallLimit));
       if (filters.leagueId) params.set('leagueId', filters.leagueId);
       if (filters.seasonId) params.set('seasonId', filters.seasonId);
+      if (filters.sport) params.set('sport', filters.sport);
       const query = params.toString() ? `?${params.toString()}` : '';
       const data = await request(`/api/leaderboard${query}`);
       setLeaderboard({
@@ -232,11 +242,17 @@ export function DataProvider({ children }) {
   // stale fetch can't race the state update.
   const applyLeaderboardFilters = useCallback(
     async (next) => {
-      const normalized = { leagueId: next.leagueId || '', seasonId: next.seasonId || '' };
+      const normalized = {
+        leagueId: next.leagueId || '',
+        seasonId: next.seasonId || '',
+        sport: next.sport ?? leaderboardFilters.sport ?? '',
+      };
       setLeaderboardFiltersState(normalized);
       await refreshLeaderboard('', { leaderboardFilters: normalized });
     },
-    [refreshLeaderboard],
+    // leaderboardFilters.sport is read for the "leave sport alone" fallback,
+    // so LeaderboardFiltersBar would otherwise apply a stale sport.
+    [refreshLeaderboard, leaderboardFilters.sport],
   );
 
   const handleChangeGroupOrder = useCallback(
@@ -487,8 +503,8 @@ export function DataProvider({ children }) {
     setView('games');
     setFriends(emptyFriends);
     setOwnProfile(null);
-    setGameFiltersState({ leagueId: '', seasonId: '' });
-    setLeaderboardFiltersState({ leagueId: '', seasonId: '' });
+    setGameFiltersState({ leagueId: '', seasonId: '', sport: '' });
+    setLeaderboardFiltersState({ leagueId: '', seasonId: '', sport: 'football' });
   }, [user]);
 
   // Profile (own profile view) refetch when picks/games change.
@@ -593,20 +609,29 @@ export function DataProvider({ children }) {
   // runs and replaces the temp pick with the real one (matching gameId);
   // on server error we restore the snapshot.
   const submitPick = useCallback(
-    async (gameId, choice) => {
+    async (gameId, choice, extras = {}) => {
       const snapshot = picks;
+      const previous = picks.find((p) => p.gameId === gameId) || null;
       const optimistic = {
         id: `temp-${gameId}`,
         userId: user?.id,
         gameId,
         choice,
+        // Tier 34 — the optimistic row MUST carry the cricket runs legs, or a
+        // tap on the winner button would blank the two runs inputs until
+        // refreshPicks lands. Fall back to the previous pick's values so
+        // switching winner does not discard runs the user already saved.
+        predictedHomeRuns: extras.predictedHomeRuns ?? previous?.predictedHomeRuns ?? null,
+        predictedAwayRuns: extras.predictedAwayRuns ?? previous?.predictedAwayRuns ?? null,
         createdAt: new Date().toISOString(),
       };
       setPicks((prev) => [...prev.filter((p) => p.gameId !== gameId), optimistic]);
       try {
         await request('/api/picks', {
           method: 'POST',
-          body: JSON.stringify({ gameId, choice }),
+          // Omitted keys are "leave alone" server-side, so a plain winner tap
+          // on a cricket game does not clear previously saved runs.
+          body: JSON.stringify({ gameId, choice, ...extras }),
         });
         await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
         await showStatus('Pick saved successfully');

@@ -1,6 +1,14 @@
 import { useState } from 'react';
-import { scorePick, expectedWinPoints, expectedDrawPoints } from '../utils/scoring';
+import {
+  scorePick,
+  expectedWinPoints,
+  expectedDrawPoints,
+  scoreCricketBreakdown,
+  CRICKET_WINNER_POINTS,
+} from '../utils/scoring';
 import { displayTeamName, isPlaceholderGame } from '../utils/teamNames';
+import { CRICKET, formatCricketScore, ballsToOvers } from '../utils/sports';
+import CricketMarketPanel from './CricketMarketPanel';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
 import FriendPicksPanel from './FriendPicksPanel';
@@ -338,6 +346,31 @@ function ScoreboardBody({ game, live, finished, isHalted }) {
           <p className="text-xs font-bold uppercase tracking-[0.3em] text-fg-muted">
             {statusLabel(game)}
           </p>
+        ) : showScores && game.sport === CRICKET ? (
+          // A cricket scoreline is runs/wickets, and the overs faced are what
+          // the runs legs are actually scored against — so both are shown.
+          // The bare two-tile football layout would drop information the user
+          // needs to reason about their prediction.
+          <div
+            className="flex flex-col items-center gap-0.5"
+            aria-label={`Score ${formatCricketScore(game.homeScore, game.homeWickets)} to ${formatCricketScore(game.awayScore, game.awayWickets)}`}
+          >
+            <div className="flex items-center justify-center gap-2 sm:gap-3">
+              <span className="font-led text-2xl tabular-nums text-fg sm:text-3xl">
+                {formatCricketScore(game.homeScore, game.homeWickets)}
+              </span>
+              <span className="text-xl text-fg-subtle sm:text-2xl" aria-hidden="true">
+                -
+              </span>
+              <span className="font-led text-2xl tabular-nums text-fg sm:text-3xl">
+                {formatCricketScore(game.awayScore, game.awayWickets)}
+              </span>
+            </div>
+            <p className="text-[10px] tabular-nums text-fg-subtle">
+              ({ballsToOvers(game.homeBallsFaced) ?? '?'} ov) v (
+              {ballsToOvers(game.awayBallsFaced) ?? '?'} ov)
+            </p>
+          </div>
         ) : showScores ? (
           <div
             className="flex items-center justify-center gap-2 sm:gap-3"
@@ -557,6 +590,10 @@ function GameCard({ game }) {
   // probabilities populate, so the user isn't tempted to commit a pick
   // against a meaningless 50/50 fixture.
   const isPlaceholder = isPlaceholderGame(game);
+  // Tier 34 — market switch. Every football expression below is left exactly
+  // as it was and simply guarded, rather than extracted into a panel, so the
+  // football path has no diff to regress.
+  const isCricket = game.sport === CRICKET;
   const countdown = useCountdown(game.date);
   const liveTime = useMatchMinute(game.date, live, {
     halfTimeReached: game.halfTimeReached,
@@ -576,15 +613,25 @@ function GameCard({ game }) {
   // honors the pick-time snapshot when present. Legacy NULL-snapshot picks
   // fall through to game.* via the all-or-nothing read in scoring.js.
   const pointsIfWon = game.result && existingPick ? scorePick(existingPick, game) : 0;
-  const potentialPoints = existingPick
-    ? scorePick(existingPick, { ...game, result: existingPick.choice })
-    : 0;
+  // "N pts on the line". For cricket this must NOT include the runs legs while
+  // the match is unsettled: effectiveRuns would prorate a partial in-progress
+  // score (40 off 5 overs reads as 160), so the number would swing wildly ball
+  // to ball. Show the winner leg alone until there is a real result.
+  const potentialPoints = !existingPick
+    ? 0
+    : isCricket
+      ? finished
+        ? scoreCricketBreakdown(existingPick, game).total
+        : CRICKET_WINNER_POINTS
+      : scorePick(existingPick, { ...game, result: existingPick.choice });
 
   // Locked vs current payout for the user's chosen side. `lockedPayout` is
   // null on legacy NULL-snapshot picks (nothing to compare against, so no
   // "odds shifted" hint and no undo warning fires). currentPayout always
   // computable from game.*.
-  const usesSnapshot = existingPick?.pickedHomeProbability != null;
+  // Odds shift + the undo-downgrade warning are probability-based, and
+  // cricket's winner leg is a flat +50 that never moves. Force them off.
+  const usesSnapshot = !isCricket && existingPick?.pickedHomeProbability != null;
   const lockedPayout = usesSnapshot
     ? Math.round(
         (1 -
@@ -596,7 +643,8 @@ function GameCard({ game }) {
           100,
       )
     : null;
-  const currentPayout = existingChoice ? expectedWinPoints(existingChoice, game) : null;
+  const currentPayout =
+    !isCricket && existingChoice ? expectedWinPoints(existingChoice, game) : null;
   const oddsShifted =
     lockedPayout != null && currentPayout != null && lockedPayout !== currentPayout;
   // Hint shown under the chip on live games — informational only. Skip on
@@ -607,7 +655,24 @@ function GameCard({ game }) {
   const [confirmingUndo, setConfirmingUndo] = useState(false);
 
   let outcomeBadge = null;
-  if (game.result) {
+  if (isCricket && !game.result && isHalted) {
+    // Abandoned. Scores nothing and is not counted as a scored pick, so
+    // "Missed" would be both wrong and unfair-looking.
+    outcomeBadge = <Badge tone="neutral">No result</Badge>;
+  } else if (isCricket && game.result) {
+    // A cricket pick can miss the winner and still bank up to 200 from the
+    // runs legs, so the football "Missed" copy — which shows no number — would
+    // read as a zero. Always lead with the total.
+    if (!existingChoice) {
+      outcomeBadge = <Badge tone="neutral">No pick</Badge>;
+    } else if (existingChoice === game.result) {
+      outcomeBadge = <Badge tone="success">✓ Correct +{pointsIfWon} pts</Badge>;
+    } else if (pointsIfWon > 0) {
+      outcomeBadge = <Badge tone="warning">✗ Wrong winner, +{pointsIfWon} pts</Badge>;
+    } else {
+      outcomeBadge = <Badge tone="danger">✗ Missed</Badge>;
+    }
+  } else if (game.result) {
     if (!existingChoice) {
       outcomeBadge = <Badge tone="neutral">No pick</Badge>;
     } else if (game.result === 'draw') {
@@ -667,7 +732,7 @@ function GameCard({ game }) {
       />
       <ScoreboardBody game={game} live={live} finished={finished} isHalted={isHalted} />
 
-      {upcoming && !isPlaceholder ? <PayoutMatrix game={game} /> : null}
+      {upcoming && !isPlaceholder && !isCricket ? <PayoutMatrix game={game} /> : null}
 
       {upcoming && isPlaceholder ? (
         <div
@@ -678,7 +743,11 @@ function GameCard({ game }) {
         </div>
       ) : null}
 
-      {upcoming && !isPlaceholder ? (
+      {upcoming && !isPlaceholder && isCricket ? (
+        <CricketMarketPanel game={game} existingPick={existingPick} onSubmit={submitPick} />
+      ) : null}
+
+      {upcoming && !isPlaceholder && !isCricket ? (
         <>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <button

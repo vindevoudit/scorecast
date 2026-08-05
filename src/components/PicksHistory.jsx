@@ -17,6 +17,7 @@ import { useAutoAnimate } from '@formkit/auto-animate/react';
 import Avatar from './Avatar';
 import EmptyState from './EmptyState';
 import SubTabs from './SubTabs';
+import { CRICKET } from '../utils/sports';
 import { Badge } from './ui';
 import LeaderboardFiltersBar from './LeaderboardFiltersBar';
 import { useData } from '../hooks/useData';
@@ -38,7 +39,18 @@ function formatDate(value) {
 function statusBadge(status, points) {
   if (status === 'won') return <Badge tone="success">Won +{points} pts</Badge>;
   if (status === 'draw') return <Badge tone="warning">Drew +{points} pts</Badge>;
-  if (status === 'lost') return <Badge tone="danger">Missed</Badge>;
+  // Tier 34 — a cricket pick can miss the winner and still bank up to 200 from
+  // the runs legs, so a bare "Missed" would read as a zero. Show the total
+  // whenever there is one; the tone still says it was the wrong call.
+  if (status === 'lost') {
+    return points > 0 ? (
+      <Badge tone="warning">Missed +{points} pts</Badge>
+    ) : (
+      <Badge tone="danger">Missed</Badge>
+    );
+  }
+  // Abandoned cricket match: scored nothing and not counted as a scored pick.
+  if (status === 'void') return <Badge tone="neutral">No result</Badge>;
   if (status === 'live') return <Badge tone="warning">Live</Badge>;
   return <Badge tone="neutral">Pending</Badge>;
 }
@@ -50,6 +62,13 @@ function statusBadge(status, points) {
 function friendPickStatus(row, game) {
   if (!game) return 'pending';
   if (game.status === 'in-progress') return 'live';
+  if (
+    game.sport === CRICKET &&
+    !game.result &&
+    (game.status === 'cancelled' || game.status === 'postponed')
+  ) {
+    return 'void';
+  }
   if (!game.result) return 'pending';
   if (game.result === 'draw') return 'draw';
   if (row.choice === game.result) return 'won';

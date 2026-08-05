@@ -13,6 +13,7 @@ import Sidebar from '../components/Sidebar';
 import UserMenu from '../components/UserMenu';
 import InstallPrompt from '../components/InstallPrompt';
 import GameFiltersBar from '../components/GameFiltersBar';
+import SportSwitcher from '../components/SportSwitcher';
 import { Button } from '../components/ui';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthGate } from '../hooks/useAuthGate';
@@ -356,6 +357,7 @@ function DashboardView() {
                   Pick winners, earn more points for underdog upsets, draws give partial credit.
                 </p>
                 <div className="mt-4">
+                  <SportSwitcher surface="games" />
                   <GameFiltersBar />
                 </div>
               </div>

@@ -2,7 +2,7 @@
 //
 // Import a cricket fixture schedule from a JSON file.
 //
-//   node scripts/import-cricket-fixtures.mjs data/cpl-2026-fixtures.json [--dry-run] [--activate]
+//   node scripts/import-cricket-fixtures.mjs data/cpl-2026-fixtures.json [--dry-run] [--inactive]
 //
 // There is no cricket fixture feed in scope, so the schedule is a committed
 // data file (see data/cpl-2026-fixtures.json for the expected shape) and
@@ -26,7 +26,7 @@ import { Sequelize } from 'sequelize';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
-const activate = args.includes('--activate');
+const inactive = args.includes('--inactive');
 const fileArg = args.find((a) => !a.startsWith('--'));
 
 // Fold anything non-ASCII so the Azure CLI's cp1252 decoder cannot choke.
@@ -44,7 +44,7 @@ const die = (msg) => {
   process.exit(1);
 };
 
-if (!fileArg) die('Usage: node scripts/import-cricket-fixtures.mjs <schedule.json> [--dry-run] [--activate]');
+if (!fileArg) die('Usage: node scripts/import-cricket-fixtures.mjs <schedule.json> [--dry-run] [--inactive]');
 
 const filePath = path.resolve(process.cwd(), fileArg);
 if (!fs.existsSync(filePath)) die(`Schedule file not found: ${filePath}`);
@@ -145,11 +145,14 @@ try {
           provider: league.sourceProvider || 'manual',
           code: league.sourceLeagueId,
           country: league.country || null,
-          // Default INACTIVE. `active` gates the four football cron jobs, and
-          // although they now also filter on sport, leaving a manual league
-          // inactive is the belt-and-braces position: nothing schedulable can
-          // reach a league with no upstream feed. --activate opts in.
-          active: activate,
+          // Active by default. `active` does double duty: it gates the four
+          // football cron jobs AND it is what routes/leagues.js exposes
+          // publicly, so an inactive league is invisible in the league picker.
+          // Leaving it off would hide the competition we just imported. The
+          // crons are already protected by their own `sport: 'football'`
+          // filter, and syncFixtures throws outright for a non-football
+          // league, so activation carries no cron risk. --inactive opts out.
+          active: !inactive,
         },
       },
     );
@@ -233,9 +236,9 @@ try {
 
   say('');
   say(dryRun ? `Dry run OK: ${fixtures.length} fixtures validated` : `Created ${created}, updated ${updated}`);
-  if (!dryRun && !activate && !existingLeague) {
-    say('League is INACTIVE. Fixtures are visible and pickable regardless -');
-    say('active only gates the football cron jobs. Re-run with --activate to flip it.');
+  if (!dryRun && inactive && !existingLeague) {
+    say('League is INACTIVE, so it will not appear in the public league picker.');
+    say('Flip it from the admin League Manager when you are ready to show it.');
   }
 } catch (err) {
   die(`Import failed: ${err.message}`);

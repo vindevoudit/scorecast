@@ -1,0 +1,423 @@
+{
+  "_comment": [
+    "Republic Bank Caribbean Premier League 2026 — full 39-match schedule.",
+    "Sourced from the CPL fixture announcement (cricketworld.com) and cross-checked",
+    "against en.wikipedia.org/wiki/2026_Caribbean_Premier_League. Both agree on every",
+    "date, time, matchup and venue.",
+    "",
+    "Times are LOCAL to the venue, with the venue's UTC offset stated per fixture so a",
+    "human can verify a row against cplt20.com without doing timezone arithmetic.",
+    "scripts/import-cricket-fixtures.mjs computes the UTC instant from the three.",
+    "Every Caribbean venue here is UTC-4 year-round EXCEPT Sabina Park in Jamaica,",
+    "which is UTC-5 and does not observe DST — the single most likely thing to get",
+    "wrong in this file.",
+    "",
+    "The four playoff slots carry deliberately placeholder-shaped team names so that",
+    "isPlaceholderTeam() matches them and the UI disables picks until the",
+    "participants are known. Rename them through the admin game editor once the",
+    "league table settles.",
+    "",
+    "sourceId is the import idempotency key, paired with leagueId in the partial",
+    "unique index games_league_source_unique. It must be stable across re-imports."
+  ],
+  "league": {
+    "name": "Caribbean Premier League",
+    "sport": "cricket",
+    "sourceProvider": "manual",
+    "sourceLeagueId": "CPL",
+    "country": "Caribbean"
+  },
+  "season": { "year": 2026, "current": true },
+  "fixtures": [
+    {
+      "sourceId": "CPL2026-M01",
+      "date": "2026-08-07",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Jamaica Kingsmen",
+      "away": "Antigua & Barbuda Falcons",
+      "venue": "Arnos Vale Stadium, St Vincent",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M02",
+      "date": "2026-08-08",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "St Kitts & Nevis Patriots",
+      "away": "Trinbago Knight Riders",
+      "venue": "Arnos Vale Stadium, St Vincent",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M03",
+      "date": "2026-08-09",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Antigua & Barbuda Falcons",
+      "away": "Saint Lucia Kings",
+      "venue": "Arnos Vale Stadium, St Vincent",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M04",
+      "date": "2026-08-11",
+      "time": "19:00",
+      "utcOffset": -5,
+      "home": "Jamaica Kingsmen",
+      "away": "Barbados Tridents",
+      "venue": "Sabina Park, Jamaica",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M05",
+      "date": "2026-08-12",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Saint Lucia Kings",
+      "away": "St Kitts & Nevis Patriots",
+      "venue": "Daren Sammy Cricket Ground, Saint Lucia",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M06",
+      "date": "2026-08-13",
+      "time": "19:00",
+      "utcOffset": -5,
+      "home": "Jamaica Kingsmen",
+      "away": "Guyana Amazon Warriors",
+      "venue": "Sabina Park, Jamaica",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M07",
+      "date": "2026-08-14",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Saint Lucia Kings",
+      "away": "Antigua & Barbuda Falcons",
+      "venue": "Daren Sammy Cricket Ground, Saint Lucia",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M08",
+      "date": "2026-08-15",
+      "time": "19:00",
+      "utcOffset": -5,
+      "home": "Jamaica Kingsmen",
+      "away": "Trinbago Knight Riders",
+      "venue": "Sabina Park, Jamaica",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M09",
+      "date": "2026-08-16",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Saint Lucia Kings",
+      "away": "Barbados Tridents",
+      "venue": "Daren Sammy Cricket Ground, Saint Lucia",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M10",
+      "date": "2026-08-18",
+      "time": "19:00",
+      "utcOffset": -5,
+      "home": "Jamaica Kingsmen",
+      "away": "St Kitts & Nevis Patriots",
+      "venue": "Sabina Park, Jamaica",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M11",
+      "date": "2026-08-19",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Saint Lucia Kings",
+      "away": "Guyana Amazon Warriors",
+      "venue": "Daren Sammy Cricket Ground, Saint Lucia",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M12",
+      "date": "2026-08-20",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Antigua & Barbuda Falcons",
+      "away": "St Kitts & Nevis Patriots",
+      "venue": "Sir Vivian Richards Stadium, Antigua",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M13",
+      "date": "2026-08-21",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Saint Lucia Kings",
+      "away": "Jamaica Kingsmen",
+      "venue": "Daren Sammy Cricket Ground, Saint Lucia",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M14",
+      "date": "2026-08-22",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Antigua & Barbuda Falcons",
+      "away": "Trinbago Knight Riders",
+      "venue": "Sir Vivian Richards Stadium, Antigua",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M15",
+      "date": "2026-08-23",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Antigua & Barbuda Falcons",
+      "away": "Guyana Amazon Warriors",
+      "venue": "Sir Vivian Richards Stadium, Antigua",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M16",
+      "date": "2026-08-25",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Antigua & Barbuda Falcons",
+      "away": "Barbados Tridents",
+      "venue": "Sir Vivian Richards Stadium, Antigua",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M17",
+      "date": "2026-08-26",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Trinbago Knight Riders",
+      "away": "Saint Lucia Kings",
+      "venue": "Queen's Park Oval, Trinidad",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M18",
+      "date": "2026-08-27",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "St Kitts & Nevis Patriots",
+      "away": "Jamaica Kingsmen",
+      "venue": "Warner Park, Saint Kitts",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M19",
+      "date": "2026-08-28",
+      "time": "20:00",
+      "utcOffset": -4,
+      "home": "Trinbago Knight Riders",
+      "away": "Barbados Tridents",
+      "venue": "Queen's Park Oval, Trinidad",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M20",
+      "date": "2026-08-29",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Trinbago Knight Riders",
+      "away": "Guyana Amazon Warriors",
+      "venue": "Queen's Park Oval, Trinidad",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M21",
+      "date": "2026-08-30",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "St Kitts & Nevis Patriots",
+      "away": "Antigua & Barbuda Falcons",
+      "venue": "Warner Park, Saint Kitts",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M22",
+      "date": "2026-08-31",
+      "time": "17:00",
+      "utcOffset": -4,
+      "home": "Trinbago Knight Riders",
+      "away": "Jamaica Kingsmen",
+      "venue": "Queen's Park Oval, Trinidad",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M23",
+      "date": "2026-09-01",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "St Kitts & Nevis Patriots",
+      "away": "Barbados Tridents",
+      "venue": "Warner Park, Saint Kitts",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M24",
+      "date": "2026-09-02",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Trinbago Knight Riders",
+      "away": "Antigua & Barbuda Falcons",
+      "venue": "Queen's Park Oval, Trinidad",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M25",
+      "date": "2026-09-03",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "St Kitts & Nevis Patriots",
+      "away": "Saint Lucia Kings",
+      "venue": "Warner Park, Saint Kitts",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M26",
+      "date": "2026-09-04",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Guyana Amazon Warriors",
+      "away": "Jamaica Kingsmen",
+      "venue": "Providence Stadium, Guyana",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M27",
+      "date": "2026-09-05",
+      "time": "20:00",
+      "utcOffset": -4,
+      "home": "Barbados Tridents",
+      "away": "Trinbago Knight Riders",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M28",
+      "date": "2026-09-06",
+      "time": "10:00",
+      "utcOffset": -4,
+      "home": "Guyana Amazon Warriors",
+      "away": "St Kitts & Nevis Patriots",
+      "venue": "Providence Stadium, Guyana",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M29",
+      "date": "2026-09-06",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Barbados Tridents",
+      "away": "Saint Lucia Kings",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M30",
+      "date": "2026-09-08",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Guyana Amazon Warriors",
+      "away": "Antigua & Barbuda Falcons",
+      "venue": "Providence Stadium, Guyana",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M31",
+      "date": "2026-09-09",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Guyana Amazon Warriors",
+      "away": "Saint Lucia Kings",
+      "venue": "Providence Stadium, Guyana",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M32",
+      "date": "2026-09-10",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Barbados Tridents",
+      "away": "St Kitts & Nevis Patriots",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M33",
+      "date": "2026-09-11",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Guyana Amazon Warriors",
+      "away": "Trinbago Knight Riders",
+      "venue": "Providence Stadium, Guyana",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M34",
+      "date": "2026-09-12",
+      "time": "20:00",
+      "utcOffset": -4,
+      "home": "Barbados Tridents",
+      "away": "Jamaica Kingsmen",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M35",
+      "date": "2026-09-13",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Barbados Tridents",
+      "away": "Guyana Amazon Warriors",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "LEAGUE_STAGE"
+    },
+    {
+      "sourceId": "CPL2026-M36",
+      "date": "2026-09-16",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "TBD (3rd place)",
+      "away": "TBD (4th place)",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "ELIMINATOR"
+    },
+    {
+      "sourceId": "CPL2026-M37",
+      "date": "2026-09-17",
+      "time": "20:00",
+      "utcOffset": -4,
+      "home": "TBD (1st place)",
+      "away": "TBD (2nd place)",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "QUALIFIER_1"
+    },
+    {
+      "sourceId": "CPL2026-M38",
+      "date": "2026-09-18",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Loser of Qualifier 1",
+      "away": "Winner of Eliminator",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "QUALIFIER_2"
+    },
+    {
+      "sourceId": "CPL2026-M39",
+      "date": "2026-09-20",
+      "time": "19:00",
+      "utcOffset": -4,
+      "home": "Winner of Qualifier 1",
+      "away": "Winner of Qualifier 2",
+      "venue": "Kensington Oval, Barbados",
+      "stage": "FINAL"
+    }
+  ]
+}

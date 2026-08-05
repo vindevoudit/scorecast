@@ -19,6 +19,7 @@ const {
   bulkUserSchema,
   createLeagueSchema,
   updateLeagueSchema,
+  cricketResultSchema,
 } = require('../validation/schemas');
 const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -27,6 +28,7 @@ const GameService = require('../services/GameService');
 const UserService = require('../services/UserService');
 const LeaderboardService = require('../services/LeaderboardService');
 const LeagueService = require('../services/LeagueService');
+const CricketResultService = require('../services/CricketResultService');
 const AuditLogService = require('../services/AuditLogService');
 const footballApi = require('../lib/footballApi');
 
@@ -100,6 +102,21 @@ router.delete(
   asyncHandler(async (req, res) => {
     await UserService.deleteUserById({ targetId: req.params.id, requesterId: req.user.id });
     res.json({ success: true });
+  }),
+);
+
+// Tier 34 — T20 result entry. A separate route from the football
+// POST /api/games/:gameId/result on purpose: that path and its resultSchema
+// stay frozen, so the football wire format cannot be disturbed by cricket.
+router.post(
+  '/admin/games/:gameId/cricket-result',
+  authMiddleware,
+  requireAdmin,
+  auditMutation('admin.game.cricketResult', 'game'),
+  validate(cricketResultSchema),
+  asyncHandler(async (req, res) => {
+    const game = await CricketResultService.setCricketResult(req.params.gameId, req.body);
+    res.json({ success: true, game });
   }),
 );
 

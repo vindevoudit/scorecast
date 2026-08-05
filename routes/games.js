@@ -9,6 +9,7 @@ const { authMiddleware, requireAdmin } = require('../middleware/auth');
 const { optionalAuth } = require('../middleware/optionalAuth');
 const { commentLimiter, publicReadLimiter } = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
+const { SPORTS } = require('../lib/sports');
 const GameService = require('../services/GameService');
 const CommentService = require('../services/CommentService');
 
@@ -29,6 +30,9 @@ router.get(
     const games = await GameService.listGames({
       leagueId: safeUuid(req.query.leagueId),
       seasonId: safeUuid(req.query.seasonId),
+      // Tier 34 — allowlisted rather than passed through, so an arbitrary
+      // query string can never reach the WHERE clause.
+      sport: SPORTS.includes(req.query.sport) ? req.query.sport : undefined,
       viewerId: req.user?.id || null,
     });
     res.json(games);

@@ -272,6 +272,19 @@ async function getStatsForUser(userId, { window = '30d', now = new Date() } = {}
       'homeProbability',
       'drawProbability',
       'awayProbability',
+      // Tier 34 — REQUIRED for scorePick to pick the right market. Without
+      // `sport` the game arrives with sport === undefined, scorePick falls
+      // through to the football branch, and both cricket runs legs silently
+      // vanish — so this dashboard would disagree with the leaderboard
+      // forever, with no error anywhere. The innings columns feed the
+      // proration inside effectiveRuns.
+      'sport',
+      'homeScore',
+      'awayScore',
+      'homeBallsFaced',
+      'awayBallsFaced',
+      'homeAllOut',
+      'awayAllOut',
     ],
   });
   const gameById = new Map(games.map((g) => [g.id, g]));

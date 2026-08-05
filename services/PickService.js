@@ -11,13 +11,14 @@ const { Op } = require('sequelize');
 const { Pick, Game, User, sequelize } = require('../models');
 const errors = require('../lib/errors');
 const { scorePick } = require('../lib/scoring');
+const { CRICKET } = require('../lib/sports');
 const { getViewerFriendIdSet } = require('../lib/friends');
 const BadgeService = require('./BadgeService');
 const LeaderboardService = require('./LeaderboardService');
 const UserScoreService = require('./UserScoreService');
 const GameService = require('./GameService');
 
-async function createPick({ userId, gameId, choice }) {
+async function createPick({ userId, gameId, choice, predictedHomeRuns, predictedAwayRuns }) {
   const game = await Game.findByPk(gameId);
   if (!game) throw errors.notFound('Game not found');
 
@@ -38,6 +39,17 @@ async function createPick({ userId, gameId, choice }) {
     pickedDrawProbability: game.drawProbability,
     pickedAwayProbability: game.awayProbability,
   };
+
+  // Tier 34 — the optional cricket runs legs. Written ONLY for cricket games,
+  // so a football pick can never carry them and the football write path is
+  // byte-identical to before. Like the probability snapshot, the client sends
+  // the full desired state on every save, so `undefined` (field omitted) is
+  // treated as "leave alone" while an explicit null clears the leg.
+  const runsUpdate = {};
+  if (game.sport === CRICKET) {
+    if (predictedHomeRuns !== undefined) runsUpdate.predictedHomeRuns = predictedHomeRuns;
+    if (predictedAwayRuns !== undefined) runsUpdate.predictedAwayRuns = predictedAwayRuns;
+  }
 
   // Tier 24 — pick create/update wrapped in a transaction so the
   // user_scores delta (when the game is already scored) lands atomically
@@ -66,9 +78,13 @@ async function createPick({ userId, gameId, choice }) {
           pick.pickedHomeProbability = snapshot.pickedHomeProbability;
           pick.pickedDrawProbability = snapshot.pickedDrawProbability;
           pick.pickedAwayProbability = snapshot.pickedAwayProbability;
+          Object.assign(pick, runsUpdate);
           await pick.save({ transaction: t });
         } else {
-          pick = await Pick.create({ userId, gameId, choice, ...snapshot }, { transaction: t });
+          pick = await Pick.create(
+            { userId, gameId, choice, ...snapshot, ...runsUpdate },
+            { transaction: t },
+          );
         }
         await UserScoreService.applyPickTransition(t, { pick, game });
       });

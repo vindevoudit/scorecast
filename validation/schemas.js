@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const { extendZodWithOpenApi } = require('@asteasolutions/zod-to-openapi');
 const { RegExpMatcher, englishDataset, englishRecommendedTransformers } = require('obscenity');
+const { SPORTS } = require('../lib/sports');
 
 extendZodWithOpenApi(z);
 
@@ -227,12 +228,67 @@ const createGroupSchema = z
   })
   .openapi('CreateGroupRequest');
 const inviteSchema = z.object({ username }).openapi('InviteRequest');
+// Tier 34 — the two runs fields are optional and only persisted when the
+// target game is cricket, so football clients (which never send them) are
+// unaffected. Note zod strips unknown keys after safeParse and
+// validation/middleware.js reassigns req.body to the parsed result, so an
+// UNextended schema would drop these silently with a 200 — they must be
+// declared here for PickService to ever see them.
+// 400 is a generous ceiling: the highest T20 franchise total is around 280.
+const predictedRuns = z.number().int().min(0).max(400);
 const pickSchema = z
-  .object({ gameId: uuid, choice: z.enum(['home', 'away']) })
+  .object({
+    gameId: uuid,
+    choice: z.enum(['home', 'away']),
+    predictedHomeRuns: predictedRuns.nullable().optional(),
+    predictedAwayRuns: predictedRuns.nullable().optional(),
+  })
   .openapi('PickRequest');
 const resultSchema = z
   .object({ result: z.union([z.enum(['home', 'away', 'draw']), z.null()]) })
   .openapi('SetResultRequest');
+
+// Tier 34 — cricket result entry. A SEPARATE schema and route from the
+// football result path above, which stays frozen. Overs are entered in
+// cricket notation ("18.4" = 18 overs 4 balls) and converted to balls by the
+// service; the regex rejects a .6-.9 fractional part because there is no 7th
+// ball in an over and coercing it would shift the proration denominator.
+//
+// 'draw' is deliberately absent from the result union: pick.choice can only
+// ever be 'home' | 'away', so a cricket game stored as a draw would award no
+// winner points while the runs legs still scored — a silently wrong state.
+// A tie is settled by a super over, and an abandoned match uses result: null.
+const oversFaced = z
+  .string()
+  .trim()
+  .regex(/^\d{1,2}(\.[0-5])?$/, 'Overs must look like "18.4" — there is no 7th ball in an over');
+const cricketInnings = z.object({
+  runs: z.number().int().min(0).max(999),
+  wickets: z.number().int().min(0).max(10),
+  overs: oversFaced,
+  // Authoritative for scoring: an all-out side is never prorated. Usually
+  // wickets === 10, but a side can be all out at 9 down with a batter absent
+  // hurt, so the admin form derives it with an override rather than inferring.
+  allOut: z.boolean(),
+});
+const cricketResultSchema = z
+  .object({
+    result: z.union([z.enum(['home', 'away']), z.null()]),
+    home: cricketInnings,
+    away: cricketInnings,
+  })
+  // Ten wickets IS all out — a side has eleven players. The reverse is not
+  // enforced, because a side can legitimately be all out at 9 down with a
+  // batter absent hurt or retired out.
+  .refine((v) => !(v.home.wickets === 10 && !v.home.allOut), {
+    message: 'Home side is 10 wickets down, so it must be marked all out',
+    path: ['home', 'allOut'],
+  })
+  .refine((v) => !(v.away.wickets === 10 && !v.away.allOut), {
+    message: 'Away side is 10 wickets down, so it must be marked all out',
+    path: ['away', 'allOut'],
+  })
+  .openapi('SetCricketResultRequest');
 
 const friendRequestSchema = z.object({ username }).openapi('FriendRequest');
 // Tier 19 Chunks 1+3 — visibility flip optionally accepts a password (only
@@ -394,13 +450,16 @@ const clientErrorSchema = z
   })
   .openapi('ClientErrorRequest');
 
-// Tier 4b Chunk 1 — league management. Provider is restricted to the one
-// we support today; expanding to API-Football or a custom source is a
-// schema bump.
-const leagueProviderEnum = z.enum(['football-data.org']);
+// Tier 4b Chunk 1 — league management.
+// Tier 34 adds 'manual' for leagues with no upstream feed (cricket fixtures
+// are imported from a file and results are entered by hand). Widening an enum
+// cannot reject anything it previously accepted, so football is unaffected.
+const leagueProviderEnum = z.enum(['football-data.org', 'manual']);
+const sportEnum = z.enum(SPORTS);
 const createLeagueSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
+    sport: sportEnum.optional(),
     sourceProvider: leagueProviderEnum.optional(),
     sourceLeagueId: z.string().trim().min(1).max(40),
     country: z.string().trim().max(80).optional(),
@@ -409,6 +468,9 @@ const createLeagueSchema = z
   })
   .openapi('CreateLeagueRequest');
 
+// `sport` is deliberately NOT updatable: games denormalise it at insert time,
+// so flipping a league's sport would silently orphan every existing game on
+// the old market. Create the league under the right sport instead.
 const updateLeagueSchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
@@ -437,6 +499,10 @@ const leaderboardQuerySchema = z
     overallLimit: z.coerce.number().int().min(1).max(500).optional(),
     leagueId: uuid.optional(),
     seasonId: uuid.optional(),
+    // Tier 34 — sport scoping. Resolves to "every league of this sport", so
+    // it composes with (and is narrowed by) an explicit leagueId. Absent on
+    // every pre-Tier-34 request, which keeps the existing read path.
+    sport: z.enum(SPORTS).optional(),
   })
   .openapi('LeaderboardQuery');
 
@@ -457,6 +523,7 @@ module.exports = {
   inviteSchema,
   pickSchema,
   resultSchema,
+  cricketResultSchema,
   friendRequestSchema,
   visibilitySchema,
   GROUP_VISIBILITY,

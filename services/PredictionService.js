@@ -38,6 +38,7 @@ const eloMath = require('../lib/ml/eloMath');
 const xgboost = require('../lib/ml/xgboostInference');
 const normalize = require('../lib/ml/normalize');
 const { isPlaceholderTeam } = require('../lib/placeholderTeam');
+const { FOOTBALL } = require('../lib/sports');
 
 // Per-league model cache. Models are loaded lazily on first access so
 // boot doesn't fail when the JSON file is missing (PR B → PR C handoff)
@@ -107,6 +108,11 @@ async function onResultUpdated(game, { transaction }) {
   if (!game || !game.leagueId) {
     return null;
   }
+  // Tier 34 — the Elo cascade is football-only. Cricket carries no rating
+  // model (MODEL_PATHS has no entry, so rePredictFutureFixtures would no-op
+  // anyway), but without this guard every cricket result would still take two
+  // SELECT ... FOR UPDATE locks on team rows and log a misleading warning.
+  if (game.sport && game.sport !== FOOTBALL) return null;
   const previous = game.appliedResult ?? null;
   const next = game.result ?? null;
 

@@ -18,6 +18,7 @@ const footballApi = require('../lib/footballApi');
 const { mapUpstreamStatus, deriveResultFromFixture } = require('../lib/fixtureStatus');
 const { INITIAL_RATING } = require('../lib/ml/eloMath');
 const { isPlaceholderTeam } = require('../lib/placeholderTeam');
+const { FOOTBALL } = require('../lib/sports');
 
 async function listLeagues() {
   return League.findAll({ order: [['name', 'ASC']] });
@@ -36,6 +37,9 @@ async function createLeague(attrs) {
   try {
     return await League.create({
       name: attrs.name,
+      // Tier 34 — immutable after creation (see updateLeagueSchema): games
+      // denormalise sport at insert, so flipping it would orphan them.
+      sport: attrs.sport || FOOTBALL,
       sourceProvider: attrs.sourceProvider || 'football-data.org',
       sourceLeagueId: attrs.sourceLeagueId,
       country: attrs.country || null,
@@ -142,6 +146,10 @@ async function upsertFixture({ league, fixture, transaction }) {
     stage: fixture.stage || null,
     neutralVenue: isInternationalMetaPool,
     eloKMultiplier: isInternationalMetaPool ? 3.0 : null,
+    // Tier 34 — denormalised from the league. Always 'football' here, since
+    // syncFixtures refuses any other sport, but stamped explicitly so the
+    // column can never drift from its owning league.
+    sport: league.sport,
   };
 
   // Probabilities: leave existing values intact on update; for new rows
@@ -212,6 +220,15 @@ async function syncFixtures(leagueId) {
     );
   }
   const league = await getLeagueById(leagueId);
+  // Tier 34 — fixture sync is football-only. Without this, an admin clicking
+  // Sync on a cricket league would send its sourceLeagueId (e.g. 'CPL') to
+  // football-data.org as a competition code. Cricket fixtures arrive via
+  // scripts/import-cricket-fixtures.mjs instead.
+  if (league.sport !== FOOTBALL) {
+    throw errors.badRequest(
+      `Fixture sync is football-only; ${league.sport} fixtures are imported, not synced`,
+    );
+  }
   const fixtures = await footballApi.getFixtures({ code: league.sourceLeagueId });
 
   let created = 0;

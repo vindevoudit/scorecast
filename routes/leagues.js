@@ -31,6 +31,9 @@ router.get(
       leagues.map((l) => ({
         id: l.id,
         name: l.name,
+        // Tier 34 — the SportSwitcher and both filter bars resolve league
+        // options against this endpoint, so they need the sport to group by.
+        sport: l.sport,
         sourceLeagueId: l.sourceLeagueId,
         country: l.country,
         seasons: (l.seasons || [])

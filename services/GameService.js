@@ -9,7 +9,8 @@ const { Op } = require('sequelize');
 const { Game, League, Pick, Comment, Notification, sequelize } = require('../models');
 const errors = require('../lib/errors');
 const logger = require('../lib/logger');
-const { scorePick } = require('../lib/scoring');
+const { scorePick, scoreCricketBreakdown } = require('../lib/scoring');
+const { CRICKET } = require('../lib/sports');
 const { mapUpstreamStatus, deriveResultFromFixture } = require('../lib/fixtureStatus');
 const NotificationService = require('./NotificationService');
 const BadgeService = require('./BadgeService');
@@ -26,10 +27,13 @@ const cache = require('../lib/cache');
 const PROBABILITY_DELTA_EPSILON = 0.01;
 const ODDS_SHIFT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
-async function listGames({ leagueId, seasonId } = {}) {
+async function listGames({ leagueId, seasonId, sport } = {}) {
   const where = {};
   if (leagueId) where.leagueId = leagueId;
   if (seasonId) where.seasonId = seasonId;
+  // Tier 34 — undefined on every pre-Tier-34 call, so the football path is
+  // unchanged. Backed by games_sport_idx.
+  if (sport) where.sport = sport;
   const games = await Game.findAll({ where, order: [['date', 'ASC']] });
 
   // Tier 30 Phase 3 A3 — voice-of-the-crowd. Per-game gate to preserve
@@ -149,7 +153,14 @@ async function createGame(attrs) {
     }
     attrs = { ...attrs, leagueId: legacy.id };
   }
-  return Game.create(attrs);
+  // Tier 34 — games.sport is denormalised and has NO FK-level enforcement,
+  // so every writer must stamp it from the owning league. Resolved here
+  // rather than trusted from the request body: the admin create form has no
+  // sport field, and a mismatch would silently put the game on the wrong
+  // market for the rest of its life.
+  const owningLeague = await League.findByPk(attrs.leagueId, { attributes: ['id', 'sport'] });
+  if (!owningLeague) throw errors.badRequest('League not found');
+  return Game.create({ ...attrs, sport: owningLeague.sport });
 }
 
 async function updateGame(gameId, patch) {
@@ -351,6 +362,14 @@ async function bulkSetResult(ids, result) {
     throw errors.badRequest('setResult requires result of home, away, draw, or null');
   }
   const games = await Game.findAll({ where: { id: ids } });
+  // Tier 34 — a cricket game must never be stored as a draw. pick.choice is
+  // only ever 'home' | 'away', so the 50-point winner leg could never be
+  // awarded while the runs legs still scored: a silently wrong state rather
+  // than a loud failure. T20 ties are settled by a super over; an abandoned
+  // match uses result null via CricketResultService.
+  if (result === 'draw' && games.some((g) => g.sport === CRICKET)) {
+    throw errors.badRequest('Cricket matches cannot be drawn - use a winner, or clear the result');
+  }
   const affected = [];
   // Coalesce affected teams per league across the entire bulk so the
   // cascade runs once per league at the end — not once per game. A full
@@ -435,6 +454,19 @@ async function bulkSetResult(ids, result) {
 // the bell and the card.
 function pickResultTitle(pick, game, result, points) {
   const matchup = `${game.homeTeam} vs ${game.awayTeam}`;
+  // Tier 34 — a cricket pick can miss the winner and still bank up to 200
+  // from the runs legs, so the football "Missed" copy (which shows no score)
+  // would read as a zero. Always lead with the total, and itemise it.
+  if (game.sport === CRICKET) {
+    const b = scoreCricketBreakdown(pick, game);
+    const legs = [
+      b.winner ? `winner +${b.winner}` : null,
+      b.homeRuns ? `${game.homeTeam} runs +${b.homeRuns}` : null,
+      b.awayRuns ? `${game.awayTeam} runs +${b.awayRuns}` : null,
+    ].filter(Boolean);
+    const detail = legs.length ? ` (${legs.join(', ')})` : '';
+    return `Your prediction on ${matchup}: +${points} pts${detail}`;
+  }
   if (result === 'draw') return `Your pick on ${matchup}: Drew +${points} pts`;
   if (pick.choice === result) return `Your pick on ${matchup}: ✓ Correct +${points} pts`;
   return `Your pick on ${matchup}: ✗ Missed`;

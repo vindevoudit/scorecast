@@ -23,6 +23,10 @@ router.post(
       userId: req.user.id,
       gameId: req.body.gameId,
       choice: req.body.choice,
+      // Tier 34 — optional cricket runs legs. Ignored by PickService for
+      // football games, so passing them through unconditionally is safe.
+      predictedHomeRuns: req.body.predictedHomeRuns,
+      predictedAwayRuns: req.body.predictedAwayRuns,
     });
     res.json({ success: true });
   }),

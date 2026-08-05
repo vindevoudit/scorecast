@@ -9,6 +9,8 @@ import { useRequest } from '../../hooks/useRequest';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useData } from '../../hooks/useData';
 import { displayTeamName } from '../../utils/teamNames';
+import { CRICKET, FOOTBALL, formatCricketScore, ballsToOvers } from '../../utils/sports';
+import CricketResultForm from './CricketResultForm';
 
 const EMPTY_FORM = {
   homeTeam: '',
@@ -36,8 +38,12 @@ function toIsoUtc(localValue) {
   return new Date(localValue).toISOString();
 }
 
-function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
+function GameRow({ game, leagueName, onSave, onSetResult, onSetCricketResult, onDelete, busy }) {
   const [editing, setEditing] = useState(false);
+  // Tier 34 — cricket needs a scorecard, not a one-click winner, so its
+  // result entry is a collapsible form rather than the four football buttons.
+  const [enteringCricket, setEnteringCricket] = useState(false);
+  const isCricket = game.sport === CRICKET;
   const [form, setForm] = useState({
     homeTeam: game.homeTeam,
     awayTeam: game.awayTeam,
@@ -143,36 +149,61 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
                     : displayTeamName(game.result === 'home' ? game.homeTeam : game.awayTeam)}
                 </span>
               ) : null}
+              {isCricket && game.homeScore != null ? (
+                <span className="ml-2 rounded-full bg-overlay px-2 py-0.5 tabular-nums text-fg-subtle">
+                  {formatCricketScore(game.homeScore, game.homeWickets)} (
+                  {ballsToOvers(game.homeBallsFaced) ?? '?'}) v{' '}
+                  {formatCricketScore(game.awayScore, game.awayWickets)} (
+                  {ballsToOvers(game.awayBallsFaced) ?? '?'})
+                </span>
+              ) : null}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => onSetResult(game.id, 'home')}
-              disabled={busy}
-              className="border-success/30 bg-success/10 text-success"
-            >
-              Home won
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => onSetResult(game.id, 'away')}
-              disabled={busy}
-              className="border-success/30 bg-success/10 text-success"
-            >
-              Away won
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => onSetResult(game.id, 'draw')}
-              disabled={busy}
-              className="border-warning/30 bg-warning/10 text-warning"
-            >
-              Draw
-            </Button>
+            {isCricket ? (
+              // Cricket: no one-click winner. The runs legs score against each
+              // side's 20-over-equivalent total, which the winner alone cannot
+              // supply, so entry goes through the scorecard form below.
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setEnteringCricket((v) => !v)}
+                disabled={busy}
+                className="border-accent/30 bg-accent/10 text-accent"
+              >
+                {enteringCricket ? 'Close' : 'Enter result'}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onSetResult(game.id, 'home')}
+                  disabled={busy}
+                  className="border-success/30 bg-success/10 text-success"
+                >
+                  Home won
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onSetResult(game.id, 'away')}
+                  disabled={busy}
+                  className="border-success/30 bg-success/10 text-success"
+                >
+                  Away won
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onSetResult(game.id, 'draw')}
+                  disabled={busy}
+                  className="border-warning/30 bg-warning/10 text-warning"
+                >
+                  Draw
+                </Button>
+              </>
+            )}
             <Button
               size="sm"
               variant="secondary"
@@ -190,6 +221,19 @@ function GameRow({ game, leagueName, onSave, onSetResult, onDelete, busy }) {
           </div>
         </div>
       )}
+      {!editing && isCricket && enteringCricket ? (
+        <div className="mt-3 border-t border-default pt-3">
+          <CricketResultForm
+            game={game}
+            busy={busy}
+            onCancel={() => setEnteringCricket(false)}
+            onSubmit={async (payload) => {
+              await onSetCricketResult(game.id, payload);
+              setEnteringCricket(false);
+            }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -313,6 +357,13 @@ function GameManager() {
     setForm((prev) => (prev.leagueId ? prev : { ...prev, leagueId: fallback.id }));
   }, [leagues, form.leagueId]);
 
+  // Tier 34 — probabilities are meaningless for cricket (the winner leg is a
+  // flat +50, so nothing reads them), but games.{home,draw,away}Probability are
+  // NOT NULL. Hide the inputs and post the 0.5/0/0.5 sentinel instead of
+  // asking an operator to invent numbers that will never be used.
+  const selectedLeagueSport = leagues.find((l) => l.id === form.leagueId)?.sport ?? FOOTBALL;
+  const creatingCricket = selectedLeagueSport === CRICKET;
+
   const handleCreate = async (event) => {
     event.preventDefault();
     if (!form.leagueId) {
@@ -327,9 +378,9 @@ function GameManager() {
           homeTeam: form.homeTeam.trim(),
           awayTeam: form.awayTeam.trim(),
           date: toIsoUtc(form.date),
-          homeProbability: parseFloat(form.homeProbability),
-          drawProbability: parseFloat(form.drawProbability),
-          awayProbability: parseFloat(form.awayProbability),
+          homeProbability: creatingCricket ? 0.5 : parseFloat(form.homeProbability),
+          drawProbability: creatingCricket ? 0 : parseFloat(form.drawProbability),
+          awayProbability: creatingCricket ? 0.5 : parseFloat(form.awayProbability),
           leagueId: form.leagueId,
         }),
       });
@@ -369,6 +420,26 @@ function GameManager() {
       await load();
       onAfterChange?.();
       onSuccess?.(result ? 'Result set' : 'Result cleared');
+    } catch (error) {
+      onError?.(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Tier 34 — posts the full scorecard to the cricket-only admin route.
+  // Mirrors handleSetResult's refresh + toast behaviour so the two entry
+  // paths feel identical from the operator's side.
+  const handleSetCricketResult = async (id, payload) => {
+    setBusy(true);
+    try {
+      await request(`/api/admin/games/${id}/cricket-result`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      await load();
+      onAfterChange?.();
+      onSuccess?.(payload.result ? 'Result set' : 'Recorded as no result');
     } catch (error) {
       onError?.(error.message);
     } finally {
@@ -485,7 +556,14 @@ function GameManager() {
               required
             />
           </div>
+          {creatingCricket ? (
+            <div className="rounded-xl border border-default bg-overlay/40 px-3 py-2 text-xs text-fg-muted sm:col-span-2">
+              Cricket scoring does not use probabilities — the winner is a flat +50 and each runs
+              prediction pays up to +100.
+            </div>
+          ) : null}
           <Input
+            className={creatingCricket ? 'hidden' : undefined}
             type="number"
             step="0.01"
             min="0"
@@ -496,6 +574,7 @@ function GameManager() {
             required
           />
           <Input
+            className={creatingCricket ? 'hidden' : undefined}
             type="number"
             step="0.01"
             min="0"
@@ -505,6 +584,7 @@ function GameManager() {
             onChange={(e) => setForm({ ...form, drawProbability: e.target.value })}
           />
           <Input
+            className={creatingCricket ? 'hidden' : undefined}
             type="number"
             step="0.01"
             min="0"
@@ -603,6 +683,7 @@ function GameManager() {
                   leagueName={leagueNameById[game.leagueId]}
                   onSave={handleUpdate}
                   onSetResult={handleSetResult}
+                  onSetCricketResult={handleSetCricketResult}
                   onDelete={(g) => setPendingDelete(g)}
                   busy={busy}
                 />

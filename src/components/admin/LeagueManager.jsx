@@ -4,6 +4,7 @@
 // (La Liga `PD`, Champions League `CL`, etc.) via the form.
 
 import { useEffect, useState } from 'react';
+import { SPORTS, FOOTBALL, sportLabel, sportIcon } from '../../utils/sports';
 import ConfirmModal from '../ConfirmModal';
 import { Badge, Button, Input } from '../ui';
 import { useRequest } from '../../hooks/useRequest';
@@ -12,6 +13,7 @@ import { useData } from '../../hooks/useData';
 
 const EMPTY_FORM = {
   name: '',
+  sport: FOOTBALL,
   sourceLeagueId: '',
   country: '',
 };
@@ -29,6 +31,9 @@ function LeagueRow({ league, busy, onToggleActive, onSync, onDelete, syncing }) 
             <span className="rounded-full bg-overlay px-2 py-0.5 font-mono text-xs text-fg-muted">
               {league.sourceLeagueId}
             </span>
+            <span className="rounded-full bg-overlay px-2 py-0.5 text-xs text-fg-muted">
+              {sportIcon(league.sport)} {sportLabel(league.sport)}
+            </span>
           </div>
           <p className="mt-1 text-xs text-fg-muted">
             {league.country || 'No country set'} · {league.sourceProvider}
@@ -43,9 +48,16 @@ function LeagueRow({ league, busy, onToggleActive, onSync, onDelete, syncing }) 
           >
             {league.active ? 'Deactivate' : 'Activate'}
           </Button>
-          <Button size="sm" onClick={() => onSync(league)} disabled={busy || syncing}>
-            {syncing ? 'Syncing…' : 'Sync fixtures'}
-          </Button>
+          {league.sport === FOOTBALL ? (
+            <Button size="sm" onClick={() => onSync(league)} disabled={busy || syncing}>
+              {syncing ? 'Syncing…' : 'Sync fixtures'}
+            </Button>
+          ) : (
+            // Only football has an upstream feed. LeagueService.syncFixtures
+            // throws for any other sport, so offering the button would just
+            // hand the operator a guaranteed error.
+            <span className="self-center text-xs text-fg-subtle">Fixtures imported</span>
+          )}
           <Button size="sm" variant="destructive" onClick={() => onDelete(league)} disabled={busy}>
             Delete
           </Button>
@@ -96,7 +108,12 @@ function LeagueManager() {
     try {
       const payload = {
         name: form.name.trim(),
+        sport: form.sport,
         sourceLeagueId: form.sourceLeagueId.trim().toUpperCase(),
+        // Only football has an upstream feed. Anything else is imported from a
+        // schedule file, so it is flagged 'manual' -- which is also what makes
+        // LeagueService.syncFixtures refuse it.
+        sourceProvider: form.sport === FOOTBALL ? 'football-data.org' : 'manual',
       };
       if (form.country.trim()) payload.country = form.country.trim();
       await request('/api/admin/leagues', {
@@ -206,9 +223,32 @@ function LeagueManager() {
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
           />
+          <div>
+            <label
+              htmlFor="new-league-sport"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fg-muted"
+            >
+              Sport
+            </label>
+            <select
+              id="new-league-sport"
+              value={form.sport}
+              onChange={(e) => setForm({ ...form, sport: e.target.value })}
+              className="w-full rounded-xl border border-default bg-elevated/90 px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {SPORTS.map((s) => (
+                <option key={s} value={s}>
+                  {sportLabel(s)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-fg-subtle">
+              Sport cannot be changed later — games record it when they are created.
+            </p>
+          </div>
           <Input
-            label="football-data.org code"
-            placeholder="e.g. PD"
+            label={form.sport === FOOTBALL ? 'football-data.org code' : 'League code'}
+            placeholder={form.sport === FOOTBALL ? 'e.g. PD' : 'e.g. CPL'}
             value={form.sourceLeagueId}
             onChange={(e) => setForm({ ...form, sourceLeagueId: e.target.value })}
             required

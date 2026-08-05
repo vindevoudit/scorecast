@@ -11,6 +11,7 @@ const { optionalAuth } = require('../middleware/optionalAuth');
 const { publicReadLimiter } = require('../middleware/rateLimit');
 const asyncHandler = require('../middleware/asyncHandler');
 const LeaderboardService = require('../services/LeaderboardService');
+const SportLeaderboardService = require('../services/SportLeaderboardService');
 const { leaderboardQuerySchema } = require('../validation/schemas');
 
 const router = express.Router();
@@ -28,9 +29,29 @@ router.get(
         : 'Invalid query parameters';
       return res.status(400).json({ error: summary, issues: parsed.error.issues });
     }
-    const { groupId, orderBy, offset, limit, overallOffset, overallLimit, leagueId, seasonId } =
-      parsed.data;
+    const {
+      groupId,
+      orderBy,
+      offset,
+      limit,
+      overallOffset,
+      overallLimit,
+      leagueId,
+      seasonId,
+      sport,
+    } = parsed.data;
     const filterOpts = { leagueId, seasonId };
+
+    // Tier 34 — sport scoping runs through SportLeaderboardService, a parallel
+    // read path. `sport` is absent on every pre-Tier-34 request, so the
+    // existing branch below is what football and "All sports" still take.
+    //
+    // The split exists because a sport filter resolves to leagueId IN (...),
+    // and the unscoped builders collapse multi-row score matches with
+    // `new Map(rows.map(...))` — last row wins, so a user with points in two
+    // leagues of one sport would silently lose one. The sport path sums in
+    // SQL instead. See the header of SportLeaderboardService for the full note.
+    const bySport = Boolean(sport);
 
     // Tier 24 Chunk 4 — overall block is now slim by default. Returns
     // top-N (default 50) + viewerRow + total, instead of the entire
@@ -39,10 +60,15 @@ router.get(
     // legacy `overall` array shape is preserved for backwards-compat
     // (existing clients consume `data.overall` as a list); we just
     // populate it from `data.overallMeta.rows`.
-    const overallBlock = await LeaderboardService.getOverallSlimForViewer(
-      { ...filterOpts, overallOffset, overallLimit },
-      req.user ?? null,
-    );
+    const overallBlock = bySport
+      ? await SportLeaderboardService.getOverallSlimBySportForViewer(
+          { sport, overallOffset, overallLimit },
+          req.user ?? null,
+        )
+      : await LeaderboardService.getOverallSlimForViewer(
+          { ...filterOpts, overallOffset, overallLimit },
+          req.user ?? null,
+        );
     let groupBlock = {
       rows: [],
       total: 0,
@@ -52,19 +78,28 @@ router.get(
       limit: 20,
     };
     if (groupId) {
-      groupBlock = await LeaderboardService.getForGroupForViewer(
-        groupId,
-        { orderBy, offset, limit, ...filterOpts },
-        req.user ?? null,
-      );
+      groupBlock = bySport
+        ? await SportLeaderboardService.getForGroupBySportForViewer(
+            groupId,
+            { sport, orderBy, offset, limit },
+            req.user ?? null,
+          )
+        : await LeaderboardService.getForGroupForViewer(
+            groupId,
+            { orderBy, offset, limit, ...filterOpts },
+            req.user ?? null,
+          );
     }
 
     // Friends block — the viewer + every accepted friend, scored from the
     // materialized tables so they appear regardless of the overall top-N
     // slice. Anonymous viewers get an empty list.
-    const friendsBlock = req.user
-      ? await LeaderboardService.getForFriendsForViewer(req.user, filterOpts)
-      : { rows: [] };
+    let friendsBlock = { rows: [] };
+    if (req.user) {
+      friendsBlock = bySport
+        ? await SportLeaderboardService.getForFriendsBySportForViewer(req.user, { sport })
+        : await LeaderboardService.getForFriendsForViewer(req.user, filterOpts);
+    }
 
     res.json({
       overall: overallBlock.rows,

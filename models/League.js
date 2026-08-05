@@ -13,6 +13,16 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(120),
         allowNull: false,
       },
+      // Tier 34 — multi-sport axis. 'football' | 'cricket'. Drives which
+      // market a game uses (lib/scoring.js dispatches on games.sport, which is
+      // denormalised from here), which cron jobs may touch the league, and
+      // which leaderboard tab its points land on. Plain VARCHAR not ENUM so a
+      // third sport is a data change. See lib/sports.js for the canonical list.
+      sport: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'football',
+      },
       sourceProvider: {
         type: DataTypes.STRING(40),
         allowNull: false,

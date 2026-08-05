@@ -148,6 +148,47 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING(32),
         allowNull: true,
       },
+      // Tier 34 — multi-sport. DENORMALISED from leagues.sport so that
+      // lib/scoring.js `scorePick(pick, game)` stays a pure function of its
+      // two arguments; ~10 call sites would otherwise each need a league join.
+      // Stamped by GameService.createGame, LeagueService.upsertFixture and
+      // scripts/import-cricket-fixtures.mjs. Never changes after insert.
+      sport: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: 'football',
+      },
+      // T20 innings detail — NULL on every football row. Balls (not overs)
+      // because cricket overs are base-6: "17.2" is 17 overs 2 balls, so you
+      // cannot prorate with it. `allOut` is authoritative for scoring (it
+      // suppresses proration); `wickets` is for display ("165/6"). They are
+      // separate because a side can be all out at 9 down with a batter absent.
+      homeBallsFaced: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      awayBallsFaced: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      homeWickets: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      awayWickets: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      homeAllOut: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      awayAllOut: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
     },
     {
       tableName: 'games',

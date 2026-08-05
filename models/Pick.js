@@ -37,6 +37,19 @@ module.exports = (sequelize) => {
         type: DataTypes.DECIMAL(3, 2),
         allowNull: true,
       },
+      // Tier 34 — optional T20 cricket runs predictions. NULL means "not
+      // predicted" (that leg scores 0), which is distinct from a prediction of
+      // 0 runs. Only written when the target game is cricket; football picks
+      // leave both NULL forever. Scored by lib/scoring.js `runsLeg` against
+      // the side's 20-over-equivalent total.
+      predictedHomeRuns: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      predictedAwayRuns: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
       // Tier 24 — idempotency sentinels for the materialized user_scores
       // table. `appliedResult` records the game.result value last reflected
       // in this pick's contribution; `appliedPoints` records the integer

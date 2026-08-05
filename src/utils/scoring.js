@@ -1,3 +1,5 @@
+import { CRICKET, T20_BALLS } from './sports';
+
 // Client-side scoring preview. MUST stay in sync with lib/scoring.js
 // (server-side authoritative scorer used by the leaderboard).
 //
@@ -15,6 +17,10 @@
 // the locked payout.
 
 export function scorePick(pick, game) {
+  // Tier 34 — market dispatch, mirroring lib/scoring.js. Guarded at the top so
+  // the football body below stays byte-identical.
+  if (game?.sport === CRICKET) return scoreCricketPick(pick, game);
+
   if (!game?.result || !pick) return 0;
 
   const usesSnapshot = pick.pickedHomeProbability != null;
@@ -38,6 +44,15 @@ export function scorePick(pick, game) {
 
 export function pickStatus(pick, game) {
   if (!game) return 'unknown';
+  // Tier 34 — an abandoned cricket match (status='cancelled', result=null)
+  // must not fall through to the wall-clock branch below, which would call it
+  // 'live' forever while useGames buckets it into Completed. Scoped to cricket
+  // on purpose: the same latent bug affects postponed FOOTBALL games, but
+  // fixing that changes existing football behaviour, so it is logged in
+  // TODO.md rather than bundled into the cricket work.
+  if (game.sport === CRICKET && !game.result) {
+    if (game.status === 'cancelled' || game.status === 'postponed') return 'void';
+  }
   if (!game.result) {
     // Finished with result=null = legacy/pre-tier draw (picks are winner-only,
     // so it's a miss). Post-tier draws set result='draw' and hit the branch
@@ -51,6 +66,57 @@ export function pickStatus(pick, game) {
   if (game.result === 'draw') return 'draw';
   return pick.choice === game.result ? 'won' : 'lost';
 }
+
+// ---------------------------------------------------------------------------
+// Tier 34 — T20 cricket market (mirror of lib/scoring.js; keep in sync)
+// ---------------------------------------------------------------------------
+// Winner leg is a flat +50; each optional runs leg pays
+// max(0, 100 - |effective - predicted|). A side that did not face 20 overs has
+// its total scaled to a 20-over equivalent UNLESS it was bowled out.
+
+export function effectiveRuns(game, side) {
+  const runs = side === 'home' ? game.homeScore : game.awayScore;
+  if (runs == null) return null;
+  const allOut = side === 'home' ? game.homeAllOut : game.awayAllOut;
+  if (allOut) return Number(runs);
+  const balls = side === 'home' ? game.homeBallsFaced : game.awayBallsFaced;
+  if (balls == null || Number(balls) >= T20_BALLS) return Number(runs);
+  if (Number(balls) <= 0) return null;
+  return Math.round((Number(runs) * T20_BALLS) / Number(balls));
+}
+
+export function runsLeg(predicted, effective) {
+  if (predicted == null || effective == null) return 0;
+  return Math.max(0, 100 - Math.abs(effective - Number(predicted)));
+}
+
+export function scoreCricketBreakdown(pick, game) {
+  const empty = { winner: 0, homeRuns: 0, awayRuns: 0, total: 0, scored: false };
+  if (!pick || !game || !game.result) return empty;
+  const homeEffective = effectiveRuns(game, 'home');
+  const awayEffective = effectiveRuns(game, 'away');
+  const winner = pick.choice === game.result ? 50 : 0;
+  const homeRuns = runsLeg(pick.predictedHomeRuns, homeEffective);
+  const awayRuns = runsLeg(pick.predictedAwayRuns, awayEffective);
+  return {
+    winner,
+    homeRuns,
+    awayRuns,
+    total: winner + homeRuns + awayRuns,
+    scored: true,
+    homeEffective,
+    awayEffective,
+  };
+}
+
+export function scoreCricketPick(pick, game) {
+  return scoreCricketBreakdown(pick, game).total;
+}
+
+// Points on offer for a cricket pick, for the pre-match panel. The winner leg
+// is flat and knowable; the runs legs are a ceiling, not a forecast.
+export const CRICKET_WINNER_POINTS = 50;
+export const CRICKET_RUNS_LEG_MAX = 100;
 
 export function expectedWinPoints(side, game) {
   const p = side === 'home' ? parseFloat(game.homeProbability) : parseFloat(game.awayProbability);

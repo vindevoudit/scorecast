@@ -54,7 +54,40 @@ const s = new Sequelize(url, opts);
 // is exactly to backfill state that the live scorer produces — if
 // they diverge, the parity log in Chunk 2 catches it before Chunk 3
 // trusts the table.
+//
+// Tier 34: this copy now also carries the cricket market. Without it, a
+// re-run would rescore every cricket pick with football math and silently
+// wipe every runs-prediction point from user_scores.
+const T20_BALLS = 120;
+
+function effectiveRuns(game, side) {
+  const runs = side === 'home' ? game.homeScore : game.awayScore;
+  if (runs == null) return null;
+  const allOut = side === 'home' ? game.homeAllOut : game.awayAllOut;
+  if (allOut) return Number(runs);
+  const balls = side === 'home' ? game.homeBallsFaced : game.awayBallsFaced;
+  if (balls == null || Number(balls) >= T20_BALLS) return Number(runs);
+  if (Number(balls) <= 0) return null;
+  return Math.round((Number(runs) * T20_BALLS) / Number(balls));
+}
+
+function runsLeg(predicted, effective) {
+  if (predicted == null || effective == null) return 0;
+  return Math.max(0, 100 - Math.abs(effective - Number(predicted)));
+}
+
+function scoreCricketPick(pick, game) {
+  if (!pick || !game.result) return 0;
+  const winner = pick.choice === game.result ? 50 : 0;
+  return (
+    winner +
+    runsLeg(pick.predictedHomeRuns, effectiveRuns(game, 'home')) +
+    runsLeg(pick.predictedAwayRuns, effectiveRuns(game, 'away'))
+  );
+}
+
 function scorePick(pick, game) {
+  if (game && game.sport === 'cricket') return scoreCricketPick(pick, game);
   if (!game.result) return 0;
   const usesSnapshot = pick && pick.pickedHomeProbability != null;
   const ph = parseFloat(usesSnapshot ? pick.pickedHomeProbability : game.homeProbability);
@@ -91,12 +124,21 @@ try {
       p."pickedAwayProbability" AS picked_away,
       p."appliedResult" AS applied_result,
       p."appliedPoints" AS applied_points,
+      p."predictedHomeRuns" AS predicted_home_runs,
+      p."predictedAwayRuns" AS predicted_away_runs,
       g.result          AS game_result,
       g."leagueId"      AS league_id,
       g."seasonId"      AS season_id,
       g."homeProbability" AS home_p,
       g."drawProbability" AS draw_p,
-      g."awayProbability" AS away_p
+      g."awayProbability" AS away_p,
+      g."sport"          AS sport,
+      g."homeScore"      AS home_score,
+      g."awayScore"      AS away_score,
+      g."homeBallsFaced" AS home_balls,
+      g."awayBallsFaced" AS away_balls,
+      g."homeAllOut"     AS home_all_out,
+      g."awayAllOut"     AS away_all_out
     FROM picks p
     JOIN games g ON g.id = p."gameId"
   `);
@@ -116,12 +158,21 @@ try {
       pickedHomeProbability: r.picked_home,
       pickedDrawProbability: r.picked_draw,
       pickedAwayProbability: r.picked_away,
+      predictedHomeRuns: r.predicted_home_runs,
+      predictedAwayRuns: r.predicted_away_runs,
     };
     const game = {
       result: r.game_result,
       homeProbability: r.home_p,
       drawProbability: r.draw_p,
       awayProbability: r.away_p,
+      sport: r.sport,
+      homeScore: r.home_score,
+      awayScore: r.away_score,
+      homeBallsFaced: r.home_balls,
+      awayBallsFaced: r.away_balls,
+      homeAllOut: r.home_all_out,
+      awayAllOut: r.away_all_out,
     };
     const points = scorePick(pick, game);
     const scored = r.game_result !== null ? 1 : 0;

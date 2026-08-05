@@ -1445,6 +1445,11 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 | `pickProbabilitiesLockedAt`                               | TIMESTAMPTZ NULLABLE                                                        | Tier 19 Chunk 5. Stamped at the moment every Pick on this game has its three `picked*Probability` snapshots overwritten with the game's then-current probabilities. After this stamp, every pick on the game scores identically for a given choice. Partial index `games_unlocked_scheduled_idx` on `(status, date) WHERE pickProbabilitiesLockedAt IS NULL` keeps the lock cron's hot query cheap. See §8.28 |
 | `stage`                                                   | VARCHAR(32) NULLABLE                                                        | Trophy Cabinet (2026-07-06). football-data.org's per-match tournament round token (`GROUP_STAGE` / `LAST_32` / `LAST_16` / `QUARTER_FINALS` / `SEMI_FINALS` / `THIRD_PLACE` / `FINAL` for the WC). Populated by `normalizeFixture` → `upsertFixture`; NULL for leagues whose upstream omits it + legacy rows. Segments the per-stage cabinet. See §8.35                                                       |
 
+| `sport` | VARCHAR(20) NOT NULL DEFAULT 'football' | Tier 34. **Denormalised from `leagues.sport`** and the switch `lib/scoring.js scorePick` dispatches on. Denormalised so `scorePick(pick, game)` stays a pure function of its two arguments across its ~10 call sites. No FK enforcement, so every writer must stamp it (`GameService.createGame` resolves it from the owning league; `LeagueService.upsertFixture`; the cricket importer). Indexed `games_sport_idx`. **An explicit projection that omits it silently mis-scores cricket** — the game arrives `undefined` and `scorePick` takes the football branch |
+| `homeBallsFaced` / `awayBallsFaced` | INTEGER NULLABLE | Tier 34, cricket only. Balls faced in the innings (0–120 for a full T20). Stored as balls, not overs, because cricket overs are base-6 (`17.2` = 17 overs 2 balls) and cannot be prorated arithmetically. NULL is treated as a full innings by `effectiveRuns` |
+| `homeWickets` / `awayWickets` | INTEGER NULLABLE | Tier 34, cricket only. **Display only** (`165/6`). Kept separate from `allOut` because a side can be all out at 9 down with a batter absent hurt |
+| `homeAllOut` / `awayAllOut` | BOOLEAN NOT NULL DEFAULT false | Tier 34, cricket only. **Authoritative for scoring**: an all-out side is never prorated to a 20-over equivalent. Checked BEFORE the ball count in `effectiveRuns`, since an all-out side has usually faced fewer than 120 balls |
+
 **Result derivation invariant**: `result` is only set automatically (by `applyLiveUpdate` or `upsertFixture`) when `localGame.result === null`. Admin-entered results are never clobbered by upstream updates. See `lib/fixtureStatus.js deriveResultFromFixture` for the upstream → local mapping (prefers `score.winner` over score comparison so penalty-shootout knockouts resolve correctly).
 
 **Tier 17 cascade invariants** (see §8.17 for the full mechanism):
@@ -1452,6 +1457,12 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 - `appliedResult` starts NULL on every fresh `games` row. The cascade's first call stamps it. Idempotent re-saves with the same `result` short-circuit on the equality check.
 - `homeEloPre` + `awayEloPre` snapshot at first apply only — they're the pre-match Elo reference for reverse + reapply, never refreshed from live team Elo.
 - On result clear (NULL): cascade reverses the prior delta against the snapshot, nulls all three columns. A subsequent re-set re-snapshots from then-current live Elo.
+
+**Tier 34 multi-sport invariants** (see CLAUDE.md "Critical considerations" for the full contract):
+
+- `games.sport` is written once at insert and never changes; `leagues.sport` is deliberately not updatable, because flipping it would orphan every existing game on the old market.
+- Cricket games sit on the `(0.50, 0.00, 0.50)` probability sentinel permanently — the winner leg is a flat +50, so nothing reads them. They are populated only because the columns are NOT NULL.
+- The cricket scorecard columns are written **only** by `POST /api/admin/games/:gameId/cricket-result` → `CricketResultService`, which commits them _before_ calling the unmodified `GameService.setResult`. Reversing that order makes `applyPickTransition` take its idempotency short-circuit and silently drop a correction.
 
 #### `groups`
 
@@ -1480,13 +1491,14 @@ Composite primary key `(groupId, userId)`. No additional columns.
 
 #### `picks`
 
-| Column        | Type                         | Notes                            |
-| ------------- | ---------------------------- | -------------------------------- |
-| `id`          | UUID PK                      |                                  |
-| `userId`      | UUID NOT NULL                |                                  |
-| `gameId`      | UUID NOT NULL                |                                  |
-| `choice`      | ENUM('home','away') NOT NULL |                                  |
-| `submittedAt` | TIMESTAMPTZ DEFAULT NOW      | Updated on edit, not just create |
+| Column                                    | Type                         | Notes                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                      | UUID PK                      |                                                                                                                                                                                                                                                                                                                       |
+| `userId`                                  | UUID NOT NULL                |                                                                                                                                                                                                                                                                                                                       |
+| `gameId`                                  | UUID NOT NULL                |                                                                                                                                                                                                                                                                                                                       |
+| `choice`                                  | ENUM('home','away') NOT NULL | Winner-only. Required for cricket too, so this stays NOT NULL and no football path shifts                                                                                                                                                                                                                             |
+| `predictedHomeRuns` / `predictedAwayRuns` | INTEGER NULLABLE             | Tier 34, cricket only. Optional per-side runs prediction, each worth `max(0, 100 - \|effective - predicted\|)`. **NULL means "not predicted" and scores 0** — distinct from a prediction of 0 runs. Written by `PickService.createPick` only when the target game is cricket, so a football pick can never carry them |
+| `submittedAt`                             | TIMESTAMPTZ DEFAULT NOW      | Updated on edit, not just create                                                                                                                                                                                                                                                                                      |
 
 **Unique index**: `picks_user_game_unique (userId, gameId)`. App-level upsert is in `POST /api/picks`.
 

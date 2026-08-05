@@ -18,6 +18,55 @@ in CLAUDE.md — this file is history, not the contract.
 
 ---
 
+## Tier 34 — T20 cricket (Caribbean Premier League) multi-sport expansion (2026-08-05)
+
+**Tier 34** (`f67ac5f`, `c736a5b`, `318a694`, `963a724`, `0b85c33`, `321f927`, `05d8965`, `<docs>`) — added
+T20 cricket alongside football, under a hard constraint that **nothing in the existing football scope may
+change behaviour**. Football is live and mid-season; that constraint, not the cricket features, drove the
+structure.
+
+**The market.** Winner is a flat **+50** (deliberately not odds-weighted — cricket has no probability model,
+and its games sit on the `0.5 / 0 / 0.5` sentinel permanently). Each optional runs prediction pays
+`max(0, 100 - |effective - predicted|)`, so a match is worth up to **250** against football's ~100. A side
+that did not face 20 overs is scaled to a **20-over equivalent unless it was bowled out**. Both causes of a
+short innings prorate — a chase finishing early as well as rain — so 130 off 80 balls counts as 195, and
+predicting the literal score of a successful chase pays 35 rather than 100. Intended, and locked by a test.
+
+**How isolation was achieved.** Four techniques: a guard at the top of `scorePick` (football body
+byte-identical below); wrapping rather than extracting the GameCard market JSX; a parallel
+`SportLeaderboardService` rather than a third condition in the existing read paths; and composing with the
+unmodified `GameService.setResult` rather than extending it. `setResult`, `bulkSetResult`, `applyLiveUpdate`,
+`updateGame`, the football result route and its schema, and the shared E2E fixtures were all left untouched.
+
+**Proof.** The full Playwright suite went from 443 to **457 passed, 1 skipped, 0 failed**, with **no football
+spec modified** — the 14 new tests live in a self-seeding `tests/e2e/api/cricket.spec.js`. 34 new unit tests
+(238 total). An end-to-end check on a real CPL fixture scored 222, then a scorecard correction with the
+result unchanged moved the materialized total by exactly +7 with counters unmoved.
+
+**Bugs found while tracing and fixed here.** `StatsService`'s `Game` projection listed neither `sport` nor
+the score columns, which would have made `scorePick` take the football branch and silently drop both runs
+legs — the stats dashboard disagreeing with the leaderboard forever. `scripts/backfill-user-scores.mjs`
+carries a fifth copy of the scoring formula (CLAUDE.md documented two); a re-run would have wiped every runs
+point from `user_scores`.
+
+**Bugs found and deliberately deferred**, because fixing them changes football behaviour: the
+`LeaderboardService` `new Map(...)` collapse that already truncates points for any league with two seasons;
+`pickStatus` having no void branch, so a postponed football game reads "Live" inside Completed forever; and
+result notifications re-fanning-out on every correction. All three are in TODO.md.
+
+**Data.** The full 39-match CPL 2026 schedule (7 Aug – 20 Sep) is committed as
+[data/cpl-2026-fixtures.json](data/cpl-2026-fixtures.json), sourced from the CPL fixture announcement and
+cross-checked line by line against Wikipedia. Times are stored local-to-venue with an explicit per-fixture
+UTC offset, because every Caribbean venue is UTC-4 year-round **except Sabina Park in Jamaica, which is
+UTC-5** — the one detail most likely to be got wrong.
+
+**Operator steps.** (1) Run the migrations. (2)
+`node scripts/import-cricket-fixtures.mjs data/cpl-2026-fixtures.json` against the production
+`DATABASE_URL` — idempotent, `--dry-run` first. (3) Rename the four playoff placeholder slots through the
+admin game editor once the league table settles. (4) Enter each result through admin → Games → Enter result.
+
+---
+
 ## World Cup Aftermatch — per-user Wrapped-style recap (2026-07-21)
 
 **World Cup Aftermatch — per-user Wrapped-style recap** (2026-07-21). A Spotify-Wrapped-style, **self-only** retrospective of a user's World Cup prediction run — a full-screen tappable **story** (one big animated stat per slide: predictions made, points, accuracy, boldest call, team of the tournament, upsets called, deepest stage run, overall percentile, a templated "prediction personality" archetype) ending on a shareable 1080×1920 image that includes the **boldest upset + the match it came in**. The user-facing name is **Aftermatch**; ALL code identifiers keep the `wrapped` name (service, `/api/me/wrapped` route, view id `'wrapped'`, `src/components/wrapped/*` files) for contract stability — the rename is copy-only. **Backend**: new [services/WrappedService.js](services/WrappedService.js) `getWrappedForUser(userId)` — resolves the WC league (`sourceLeagueId='WC'`), loads all WC games + picks, scores with `scorePick`, reuses TrophyService's exported `rankAmong`/`topPercentOf` + `lib/stages.js` `stageLabel`/`medalFor`; pure helpers `findBoldestCall` (lowest-prob winning pick) / `teamOfTournament` (most-backed nation) / `countUpsets` (correct picks < 0.33) / `buildArchetype` (Oracle/Daredevil/Analyst/Optimist, `<3` scored → Newcomer; axes = win rate + mean `1 − picked-side-prob`) exported for tests; on-the-fly + 5-min cache (`wrapped:<userId>`, skipped in test), NOT materialized; `hasData:false` when no scored WC picks. New `GET /api/me/wrapped` in [routes/me.js](routes/me.js) (auth, scoped to `req.user.id`, **self-only — no per-username surface**, mirrors `/me/stats`). **Frontend**: lazy [src/views/WrappedView.jsx](src/views/WrappedView.jsx) launch tile → [src/components/wrapped/WrappedStory.jsx](src/components/wrapped/WrappedStory.jsx) (config-driven `SLIDES` that auto-skip empty stats, `AnimatePresence` transitions, count-ups via `animate`+`statsCountUp`, segmented progress bars + tap/swipe/arrow nav, **raw** `useReducedMotion` from `motion/react` so motion stays on mobile) → [WrappedShareCard.jsx](src/components/wrapped/WrappedShareCard.jsx) (inline-styled Orbitron, includes the boldest upset + its match) shared via [shareWrapped.jsx](src/components/wrapped/shareWrapped.jsx) (createRoot capture + `document.fonts.load` Orbitron gate + `captureNodeToPng` + `shareBlob`, GameCard `captureAndShare` template). Registered via `ICONS.wrapped` ([src/components/Sidebar.jsx](src/components/Sidebar.jsx)), `{ id: 'wrapped', label: 'Aftermatch' }` + view switch ([src/views/DashboardView.jsx](src/views/DashboardView.jsx)), and `'wrapped'` added to `DEEP_LINK_ALLOWED_VIEWS` ([src/contexts/DataContext.jsx](src/contexts/DataContext.jsx)). **Verification**: `npm run test:unit` 204/204 (+14 new `tests/wrappedService.test.js`), `npm run build` clean (`WrappedView` chunk ~5.4 KB gzip + `WrappedShareCard` split for the capture path), Playwright `api/me.spec.js` 38/38 (+3: anon 401, `hasData:false` shape, `hasData:true` via `createWcCabinetFixture`), lint clean on touched files (pre-existing `marketing/commercial/*` untracked-file errors are unrelated). **Operator post-deploy**: none — additive read-path, no migration; the story populates once a user has settled World Cup picks. Plan file: `C:\Users\vinde\.claude\plans\make-a-plan-for-peppy-orbit.md`.

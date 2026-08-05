@@ -51,6 +51,17 @@ _Last swept: 2026-08-04._
 
 ## 1 — Time-critical
 
+- [ ] **Deploy Tier 34 + import the CPL fixtures — the tournament starts 2026-08-07.**
+      Cricket is built and merged locally but not pushed. After deploying:
+  1. Migrations run automatically via the CD migrate job (three additive migrations).
+  2. `node scripts/import-cricket-fixtures.mjs data/cpl-2026-fixtures.json` against the
+     **production** `DATABASE_URL`. Idempotent — `--dry-run` first. This creates the
+     league (active), the 2026 season, and all 39 fixtures.
+  3. Spot-check a few kickoff times in the admin panel. Jamaica venues are UTC-5, every
+     other Caribbean venue is UTC-4 — that is the one thing worth eyeballing.
+  4. Results are entered by hand per match: admin → Games → **Enter result**.
+  5. Rename the four playoff placeholder slots ("TBD (3rd place)", "Winner of Qualifier 1"
+     …) through the admin game editor once the league table settles, around 13 Sep.
 - [ ] **Reactivate Premier League for 2026/27 — OVERDUE.** PL was set `active=false`
       during the 2026-05-28 beta→launch reset so the off-season cron couldn't resurrect
       deleted games. The 2026/27 season kicks off **mid-August**, so this is the most
@@ -435,6 +446,30 @@ if EU traffic spikes · B-47 verify `minReplicas=1` removed the P1-10 need.
 ---
 
 ## 10 — Known issues — accepted, not scheduled
+
+**Deferred from Tier 34** — all three are real, were found while tracing the cricket work,
+and were left alone because fixing any of them changes live football behaviour. Each wants
+its own change with its own verification.
+
+- [ ] **`LeaderboardService` silently truncates points under a multi-row filter.** All three
+      read sites collapse with `new Map(rows.map((r) => [r.userId, r.points]))`, but
+      `user_scores` has one row per `(userId, leagueId, seasonId)` — so last-row-wins. This
+      already loses points today for any league with two seasons, and `getForGroup` has it
+      three times over so `winRate` breaks too. Verified live: one user holds two rows
+      summing to 310. Fix is `SUM ... GROUP BY "userId"`, exactly as
+      `SportLeaderboardService.sumScoresForSport` already does. Worth pairing with a test
+      that filters a two-season league.
+- [ ] **`pickStatus` has no void branch, so postponed/cancelled football games read "Live"
+      forever inside the Completed list.** `useGames` buckets `cancelled` into completed
+      while `pickStatus` falls through to the wall-clock branch. Tier 34 added a
+      cricket-scoped `'void'` branch; generalising it to football is a one-line change plus
+      a badge, but it alters what existing users see on old postponed fixtures.
+- [ ] **Result notifications re-fan-out on every correction.** `GameService.setResult` fires
+      `pick-scored` for every pick whenever `result` is truthy, with no did-it-change check.
+      Rare for football (an admin re-clicking the same button) but routine for cricket, where
+      a scorecard typo fix re-notifies every picker. Fix is to capture
+      `appliedResult`/`appliedPoints` before the transaction and only notify on a real
+      change, ideally with distinct copy for a points revision.
 
 Documented rather than fixed; listed so they aren't rediscovered.
 

@@ -6,6 +6,10 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 import n from 'eslint-plugin-n';
 
 const browserFileGlobs = ['src/**/*.{js,jsx}'];
+// Standalone browser ESM that is NOT part of the Vite app: served straight off
+// disk, loads its deps from a CDN import-map, imported by nothing under src/.
+// Needs browser globals but none of the React/JSX plumbing.
+const standaloneBrowserFileGlobs = ['marketing/commercial/*.js'];
 const nodeFileGlobs = [
   'server.js',
   'db-config.js',
@@ -94,6 +98,27 @@ export default [
       'jsx-a11y/no-static-element-interactions': 'off',
       'jsx-a11y/no-noninteractive-element-interactions': 'off',
       'jsx-a11y/no-autofocus': 'off',
+    },
+  },
+
+  // Standalone browser ESM (marketing commercial) — browser globals, no React.
+  {
+    files: standaloneBrowserFileGlobs,
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.browser },
+    },
+    rules: {
+      'no-unused-vars': [
+        'warn',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_|^error$',
+        },
+      ],
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
 

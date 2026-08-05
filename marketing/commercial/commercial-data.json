@@ -1,0 +1,381 @@
+{
+  "generatedAt": "2026-07-14T02:01:30.405Z",
+  "source": "live-prod",
+  "nations": 333,
+  "archiveMatches": 49215,
+  "wcParticipants": 48,
+  "wcGames": 104,
+  "wcScheduled": 4,
+  "wcTeamRows": 337,
+  "kMultiplier": 3,
+  "topTeams": [
+    {
+      "rank": 1,
+      "name": "Spain",
+      "elo": 2127,
+      "gamesPlayed": 787,
+      "lastMatch": "2026-07-10"
+    },
+    {
+      "rank": 2,
+      "name": "France",
+      "elo": 2109,
+      "gamesPlayed": 939,
+      "lastMatch": "2026-07-09"
+    },
+    {
+      "rank": 3,
+      "name": "Argentina",
+      "elo": 2104,
+      "gamesPlayed": 1070,
+      "lastMatch": "2026-07-12"
+    },
+    {
+      "rank": 4,
+      "name": "England",
+      "elo": 2047,
+      "gamesPlayed": 1094,
+      "lastMatch": "2026-07-11"
+    },
+    {
+      "rank": 5,
+      "name": "Morocco",
+      "elo": 1976,
+      "gamesPlayed": 620,
+      "lastMatch": "2026-07-09"
+    },
+    {
+      "rank": 6,
+      "name": "Portugal",
+      "elo": 1944,
+      "gamesPlayed": 698,
+      "lastMatch": "2026-07-06"
+    },
+    {
+      "rank": 7,
+      "name": "Brazil",
+      "elo": 1941,
+      "gamesPlayed": 1062,
+      "lastMatch": "2026-07-05"
+    },
+    {
+      "rank": 8,
+      "name": "Mexico",
+      "elo": 1936,
+      "gamesPlayed": 1005,
+      "lastMatch": "2026-07-06"
+    },
+    {
+      "rank": 9,
+      "name": "Norway",
+      "elo": 1926,
+      "gamesPlayed": 876,
+      "lastMatch": "2026-07-11"
+    },
+    {
+      "rank": 10,
+      "name": "Netherlands",
+      "elo": 1923,
+      "gamesPlayed": 881,
+      "lastMatch": "2026-06-30"
+    },
+    {
+      "rank": 11,
+      "name": "Colombia",
+      "elo": 1922,
+      "gamesPlayed": 641,
+      "lastMatch": "2026-07-07"
+    },
+    {
+      "rank": 12,
+      "name": "Switzerland",
+      "elo": 1920,
+      "gamesPlayed": 888,
+      "lastMatch": "2026-07-12"
+    },
+    {
+      "rank": 13,
+      "name": "Belgium",
+      "elo": 1891,
+      "gamesPlayed": 857,
+      "lastMatch": "2026-07-10"
+    },
+    {
+      "rank": 14,
+      "name": "Germany",
+      "elo": 1882,
+      "gamesPlayed": 1033,
+      "lastMatch": "2026-06-29"
+    },
+    {
+      "rank": 15,
+      "name": "Japan",
+      "elo": 1880,
+      "gamesPlayed": 793,
+      "lastMatch": "2026-06-29"
+    },
+    {
+      "rank": 16,
+      "name": "Croatia",
+      "elo": 1878,
+      "gamesPlayed": 398,
+      "lastMatch": "2026-07-02"
+    },
+    {
+      "rank": 17,
+      "name": "Ecuador",
+      "elo": 1867,
+      "gamesPlayed": 593,
+      "lastMatch": "2026-07-01"
+    },
+    {
+      "rank": 18,
+      "name": "Paraguay",
+      "elo": 1863,
+      "gamesPlayed": 787,
+      "lastMatch": "2026-07-04"
+    },
+    {
+      "rank": 19,
+      "name": "Turkey",
+      "elo": 1859,
+      "gamesPlayed": 643,
+      "lastMatch": "2026-06-26"
+    },
+    {
+      "rank": 20,
+      "name": "United States",
+      "elo": 1837,
+      "gamesPlayed": 793,
+      "lastMatch": "2026-07-07"
+    },
+    {
+      "rank": 21,
+      "name": "Uruguay",
+      "elo": 1823,
+      "gamesPlayed": 971,
+      "lastMatch": "2026-06-27"
+    },
+    {
+      "rank": 22,
+      "name": "Egypt",
+      "elo": 1821,
+      "gamesPlayed": 759,
+      "lastMatch": "2026-07-07"
+    },
+    {
+      "rank": 23,
+      "name": "Iran",
+      "elo": 1815,
+      "gamesPlayed": 613,
+      "lastMatch": "2026-06-27"
+    },
+    {
+      "rank": 24,
+      "name": "Senegal",
+      "elo": 1808,
+      "gamesPlayed": 640,
+      "lastMatch": "2026-07-01"
+    },
+    {
+      "rank": 25,
+      "name": "Australia",
+      "elo": 1806,
+      "gamesPlayed": 583,
+      "lastMatch": "2026-07-03"
+    },
+    {
+      "rank": 26,
+      "name": "Austria",
+      "elo": 1799,
+      "gamesPlayed": 863,
+      "lastMatch": "2026-07-02"
+    },
+    {
+      "rank": 27,
+      "name": "Canada",
+      "elo": 1794,
+      "gamesPlayed": 472,
+      "lastMatch": "2026-07-04"
+    },
+    {
+      "rank": 28,
+      "name": "Algeria",
+      "elo": 1781,
+      "gamesPlayed": 619,
+      "lastMatch": "2026-07-03"
+    },
+    {
+      "rank": 29,
+      "name": "South Korea",
+      "elo": 1779,
+      "gamesPlayed": 1008,
+      "lastMatch": "2026-06-25"
+    },
+    {
+      "rank": 30,
+      "name": "Ivory Coast",
+      "elo": 1771,
+      "gamesPlayed": 639,
+      "lastMatch": "2026-06-30"
+    },
+    {
+      "rank": 31,
+      "name": "Scotland",
+      "elo": 1756,
+      "gamesPlayed": 852,
+      "lastMatch": "2026-06-24"
+    },
+    {
+      "rank": 32,
+      "name": "Sweden",
+      "elo": 1747,
+      "gamesPlayed": 1103,
+      "lastMatch": "2026-06-30"
+    },
+    {
+      "rank": 33,
+      "name": "Congo DR",
+      "elo": 1744,
+      "gamesPlayed": 526,
+      "lastMatch": "2026-07-01"
+    },
+    {
+      "rank": 34,
+      "name": "Uzbekistan",
+      "elo": 1723,
+      "gamesPlayed": 355,
+      "lastMatch": "2026-06-27"
+    },
+    {
+      "rank": 35,
+      "name": "Panama",
+      "elo": 1709,
+      "gamesPlayed": 538,
+      "lastMatch": "2026-06-27"
+    },
+    {
+      "rank": 36,
+      "name": "Iraq",
+      "elo": 1689,
+      "gamesPlayed": 655,
+      "lastMatch": "2026-06-26"
+    },
+    {
+      "rank": 37,
+      "name": "Czechia",
+      "elo": 1688,
+      "gamesPlayed": 361,
+      "lastMatch": "2026-06-25"
+    },
+    {
+      "rank": 38,
+      "name": "Saudi Arabia",
+      "elo": 1686,
+      "gamesPlayed": 741,
+      "lastMatch": "2026-06-27"
+    },
+    {
+      "rank": 39,
+      "name": "New Zealand",
+      "elo": 1672,
+      "gamesPlayed": 417,
+      "lastMatch": "2026-06-27"
+    },
+    {
+      "rank": 40,
+      "name": "Cape Verde Islands",
+      "elo": 1669,
+      "gamesPlayed": 237,
+      "lastMatch": "2026-07-03"
+    },
+    {
+      "rank": 41,
+      "name": "Jordan",
+      "elo": 1658,
+      "gamesPlayed": 482,
+      "lastMatch": "2026-06-28"
+    },
+    {
+      "rank": 42,
+      "name": "South Africa",
+      "elo": 1657,
+      "gamesPlayed": 481,
+      "lastMatch": "2026-06-28"
+    },
+    {
+      "rank": 43,
+      "name": "Bosnia-Herzegovina",
+      "elo": 1653,
+      "gamesPlayed": 285,
+      "lastMatch": "2026-07-02"
+    },
+    {
+      "rank": 44,
+      "name": "Tunisia",
+      "elo": 1645,
+      "gamesPlayed": 679,
+      "lastMatch": "2026-06-25"
+    },
+    {
+      "rank": 45,
+      "name": "Ghana",
+      "elo": 1641,
+      "gamesPlayed": 673,
+      "lastMatch": "2026-07-04"
+    },
+    {
+      "rank": 46,
+      "name": "Qatar",
+      "elo": 1613,
+      "gamesPlayed": 636,
+      "lastMatch": "2026-06-24"
+    },
+    {
+      "rank": 47,
+      "name": "Haiti",
+      "elo": 1594,
+      "gamesPlayed": 511,
+      "lastMatch": "2026-06-24"
+    },
+    {
+      "rank": 48,
+      "name": "Curaçao",
+      "elo": 1576,
+      "gamesPlayed": 386,
+      "lastMatch": "2026-06-25"
+    }
+  ],
+  "featuredFixture": {
+    "home": "France",
+    "away": "Spain",
+    "homeP": 0.31,
+    "drawP": 0.38,
+    "awayP": 0.31,
+    "neutral": true,
+    "kMultiplier": 3,
+    "date": "2026-07-14"
+  },
+  "fixtures": [
+    {
+      "home": "France",
+      "away": "Spain",
+      "homeP": 0.31,
+      "drawP": 0.38,
+      "awayP": 0.31,
+      "neutral": true,
+      "kMultiplier": 3,
+      "date": "2026-07-14"
+    },
+    {
+      "home": "England",
+      "away": "Argentina",
+      "homeP": 0.31,
+      "drawP": 0.38,
+      "awayP": 0.31,
+      "neutral": true,
+      "kMultiplier": 3,
+      "date": "2026-07-15"
+    }
+  ]
+}

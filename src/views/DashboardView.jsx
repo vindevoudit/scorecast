@@ -43,14 +43,22 @@ function LazyFallback({ label = 'Loading…' }) {
 // Matches → Picks → Leaderboards → Friends → Groups → Profile → Admin.
 // Phase 1 follow-up — kickers dropped; each entry renders a single
 // label. View ids stay stable so deep-link contracts hold.
+//
+// Trophy Cabinet and Aftermatch were removed from the sidebar (2026-08-06).
+// Both are World Cup retrospectives with nothing to show outside a tournament,
+// so they were occupying two of eight permanent slots to display an empty
+// state most of the year. The VIEWS are intact and still render — the ids stay
+// in DEEP_LINK_ALLOWED_VIEWS and the switch below still handles them, so
+// `/?view=trophy` and `/?view=wrapped` work and any in-flight notification
+// link still resolves. Trophy Cabinet also keeps a real entry point as the
+// Cabinet sub-tab on Profile. Aftermatch currently has NO in-app entry point;
+// restoring one is a single line here.
 const BASE_TABS = [
   { id: 'games', label: 'Matches' },
   { id: 'mypicks', label: 'Picks' },
   { id: 'leaderboard', label: 'Leaderboards' },
   { id: 'friends', label: 'Friends' },
   { id: 'groups', label: 'Groups' },
-  { id: 'trophy', label: 'Trophy Cabinet' },
-  { id: 'wrapped', label: 'Aftermatch' },
   { id: 'profile', label: 'Profile' },
 ];
 const ADMIN_TAB = { id: 'admin', label: 'Admin' };

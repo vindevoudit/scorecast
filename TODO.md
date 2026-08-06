@@ -416,6 +416,34 @@ notification" button · B-15 "what would you have scored" overlay · B-16 per-gr
 emoji · B-17 bulk import friends from contacts · B-18 GDPR account data download ·
 B-19 account soft-delete grace period · B-20 "Change my pick" microcopy.
 
+**B-48 — sign in with email as well as username.** Users who registered months ago remember
+their email and not their handle; today `POST /api/login` only resolves a username, so they
+are pushed into password reset for what is a lookup problem. Groundwork is already in place:
+
+- `users_email_lower_unique` is a **partial unique index on `lower(email)` WHERE email IS NOT
+  NULL**, so case-insensitive email lookup is already collision-free at the DB level. No
+  migration needed.
+- `users_username_key` is unique, and usernames are profanity-filtered and cannot contain `@`
+  — so "does this identifier contain an `@`" is a safe way to branch the lookup, with no
+  ambiguity between the two namespaces.
+
+Three things that must not be broken:
+
+1. **`users.email` is nullable and 3 of 57 current users have none** — including the `vo123`
+   demo admin. Email login has to be an additional path, never a replacement.
+2. **The no-enumeration contract.** `routes/auth.js` deliberately runs `bcrypt.compare`
+   against `LOGIN_DUMMY_HASH` when the user is missing, so response time is constant and
+   wrong-password / unknown-user / locked all return an identical 401. An email lookup must
+   go through the same constant-time path, or it becomes an oracle for "is this address
+   registered" — worse than the username oracle, because addresses are guessable.
+3. **Lockout counts against the account, not the identifier.** Five failed attempts must lock
+   the user whether they were typed as a username or an email, otherwise the limit doubles.
+
+Scope is roughly: rename the field to "Username or email" in `LoginForm`, relax
+`loginSchema`, and swap `getUserByUsername` for a resolver that branches on `@`. Worth pairing
+with `POST /api/auth/forgot-password`, which already takes an email and could stop being the
+de-facto recovery route for a forgotten handle.
+
 **Capability expansion (needs its own planning):** B-21 NFL/MLB/NBA/NHL/Rugby (XL) ·
 B-22 nested comment threading · B-23 group seasons with weekly reset · B-24 embeddable group
 leaderboard widget · B-25 player watchlist · B-26 verified accounts · B-27 public read-only

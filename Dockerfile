@@ -3,7 +3,7 @@
 # ============================================================================
 # Stage 1 — build: install all deps and produce dist/
 # ============================================================================
-FROM node:20-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 
 # HUSKY=0 skips the `prepare: husky` script during install (the dev hook
@@ -22,7 +22,7 @@ RUN npm run build
 # ============================================================================
 # Stage 2 — runtime: prod-only deps + dist + minimal source surface
 # ============================================================================
-FROM node:20-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \

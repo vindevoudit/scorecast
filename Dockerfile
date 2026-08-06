@@ -71,6 +71,14 @@ COPY scripts ./scripts
 COPY marketing/lib ./marketing/lib
 COPY marketing/fonts ./marketing/fonts
 COPY data.json ./data.json
+# Committed fixture schedules for sports with no upstream feed (Tier 34 —
+# cricket). scripts/import-cricket-fixtures.mjs takes one of these as its
+# argument, so without this COPY the documented operator step
+#   az containerapp exec --command "node scripts/import-cricket-fixtures.mjs data/cpl-2026-fixtures.json"
+# fails with "Schedule file not found". The importer is idempotent and gets
+# re-run whenever the schedule changes (e.g. to fill in the CPL playoff slots
+# once the league table settles), so the data has to live with the script.
+COPY data ./data
 # International model dataset — read once by the international Elo bootstrap
 # seeder (seeders/20260528000003-seed-teams-from-intl-elo-history.js). Same
 # operator runbook as Tier 24's backfill: invoked via `az containerapp exec

@@ -45,23 +45,37 @@ them is a hygiene item in §7.
 9. [Backlog registers](#9--backlog-registers-tier-33-tracks-a-b-c)
 10. [Known issues](#10--known-issues--accepted-not-scheduled)
 
-_Last swept: 2026-08-04._
+_Last swept: 2026-08-06 (CPL deployed + imported)._
 
 ---
 
 ## 1 — Time-critical
 
-- [ ] **Deploy Tier 34 + import the CPL fixtures — the tournament starts 2026-08-07.**
-      Cricket is built and merged locally but not pushed. After deploying:
-  1. Migrations run automatically via the CD migrate job (three additive migrations).
-  2. `node scripts/import-cricket-fixtures.mjs data/cpl-2026-fixtures.json` against the
-     **production** `DATABASE_URL`. Idempotent — `--dry-run` first. This creates the
-     league (active), the 2026 season, and all 39 fixtures.
-  3. Spot-check a few kickoff times in the admin panel. Jamaica venues are UTC-5, every
-     other Caribbean venue is UTC-4 — that is the one thing worth eyeballing.
-  4. Results are entered by hand per match: admin → Games → **Enter result**.
-  5. Rename the four playoff placeholder slots ("TBD (3rd place)", "Winner of Qualifier 1"
-     …) through the admin game editor once the league table settles, around 13 Sep.
+- [x] **Deploy Tier 34 + import the CPL fixtures — DONE 2026-08-06.** Live on revision
+      `scorecast-app--0000174` (image `4f4c6a4`). Migrations applied; the importer created
+      the league (`c16123e2`, active, sport=cricket), the 2026 season (`b59abf7c`) and all
+      39 fixtures. Verified from the public API: 143 games = 104 football + 39 cricket,
+      every cricket row `scheduled` with a `seasonId` and a unique `sourceId`, sentinel
+      probabilities throughout, window 2026-08-07 → 2026-09-20. Re-ran the importer to
+      prove idempotency: `Created 0, updated 39`, no duplicates.
+      **Two things worth knowing for next time:**
+  - GitHub Actions was in a **major outage** during the deploy (incident 15:22Z) — the CD
+    run failed on `Failed to fetch federated token from GitHub` at the OIDC step and then
+    stalled with no runner. The run was cancelled and the last two jobs (migrate + roll
+    out) were completed by hand with the identical `az` commands against the image CD had
+    already built and pushed. Cancel the stuck run **before** starting a manual migrate —
+    a recovering runner firing a second `scorecast-migrate` concurrently is not safe.
+  - The Dockerfile copied `scripts/` but not `data/`, so the documented
+    `az containerapp exec` import would have failed with "Schedule file not found". Fixed
+    in `4f4c6a4`; the data now ships with the importer.
+- [ ] **CPL in-tournament operator duties.**
+  1. Results are entered by hand per match: admin → Games → **Enter result**.
+  2. Rename the four playoff placeholder slots ("TBD (3rd place)", "Winner of Qualifier 1"
+     …) once the league table settles, around 13 Sep. Either edit them in the admin game
+     editor, or update `data/cpl-2026-fixtures.json` and re-run the importer — it upserts
+     on `(leagueId, sourceId)` and updates team names, so the picks already on those
+     fixtures are preserved. Until they are renamed, `isPlaceholderTeam` gates picks on
+     all four with "Picks open once both teams advance" (verified against the live data).
 - [ ] **Reactivate Premier League for 2026/27 — OVERDUE.** PL was set `active=false`
       during the 2026-05-28 beta→launch reset so the off-season cron couldn't resurrect
       deleted games. The 2026/27 season kicks off **mid-August**, so this is the most
@@ -74,11 +88,8 @@ _Last swept: 2026-08-04._
      delete + re-seed PL `teams` rows if you deliberately want a reset.
      - Promoted sides enter at `min(elo)` automatically (`LeagueService.ensureTeamExists`).
 
-- [ ] **Push the 3 local commits.** `main` is **3 ahead of `origin/main`**; pushing triggers
-      CD (build → migrate → roll out → `/healthz` smoke). No migrations in this batch.
-  - `ad53bc2` feat(marketing): Three.js commercial + eslint wiring + NUL-byte fix
-  - `101a8c1` feat(scripts): campaign broadcast mailer
-  - `6cff095` docs: this file
+- [x] ~~Push the 3 local commits~~ — stale as written; `ad53bc2` / `101a8c1` / `6cff095`
+      were already in `origin/main`. `main` and `origin/main` are level as of 2026-08-06.
 
 - [ ] **Merge `fix/seed-empty-db-not-null`** (local branch, commit `e1d4e42`). Held until
       after the World Cup, which ended 2026-07-19, so the hold is expired. Inert in prod —

@@ -132,8 +132,8 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
       <div className="rounded-2xl border border-default bg-overlay/40 p-3">
         <p className="text-xs font-semibold text-fg">Pick a winner and predict the runs</p>
         <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
-          Back the winner for <span className="text-fg">+{CRICKET_WINNER_POINTS}</span>. Each runs
-          prediction scores{' '}
+          Back the winner for <span className="text-fg">{CRICKET_WINNER_POINTS} points</span>. Each
+          runs prediction scores{' '}
           <span className="text-fg">
             {CRICKET_RUNS_LEG_MAX} minus however many runs you are out by
           </span>

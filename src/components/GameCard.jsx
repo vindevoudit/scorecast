@@ -9,6 +9,7 @@ import {
 import { displayTeamName, isPlaceholderGame } from '../utils/teamNames';
 import { CRICKET, formatCricketScore, ballsToOvers } from '../utils/sports';
 import CricketMarketPanel from './CricketMarketPanel';
+import CricketScoreCard from './CricketScoreCard';
 import { useCountdown, useMatchMinute } from '../utils/time';
 import CommentThread from './CommentThread';
 import FriendPicksPanel from './FriendPicksPanel';
@@ -785,7 +786,14 @@ function GameCard({ game }) {
         </>
       ) : null}
 
-      {(live || finished) && !isHalted ? (
+      {/* Tier 34 — the full per-leg breakdown replaces the single-number chip
+          once a cricket match is settled. Three legs and a 250 ceiling mean
+          "+222 pts" alone hides which leg carried you and which you blew. */}
+      {finished && !isHalted && isCricket && existingPick ? (
+        <CricketScoreCard game={game} pick={existingPick} />
+      ) : null}
+
+      {(live || finished) && !isHalted && !(isCricket && finished && existingPick) ? (
         <LockedPickChip
           live={live}
           pickedTeam={pickedTeam}

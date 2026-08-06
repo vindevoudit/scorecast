@@ -609,7 +609,14 @@ export function DataProvider({ children }) {
   // runs and replaces the temp pick with the real one (matching gameId);
   // on server error we restore the snapshot.
   const submitPick = useCallback(
-    async (gameId, choice, extras = {}) => {
+    async (gameId, choice, extras = {}, options = {}) => {
+      // Tier 34 — `silent` is for the cricket runs autosave, which fires on a
+      // typing pause. Without it every debounce tick would pop the "Pick
+      // saved successfully" toast and refetch games + leaderboard. Neither
+      // changes when runs are edited on an upcoming fixture (the game is
+      // untouched and nothing is scored yet), so the silent path refreshes
+      // picks alone. Defaults preserve the football behaviour exactly.
+      const { silent = false } = options;
       const snapshot = picks;
       const previous = picks.find((p) => p.gameId === gameId) || null;
       const optimistic = {
@@ -633,11 +640,23 @@ export function DataProvider({ children }) {
           // on a cricket game does not clear previously saved runs.
           body: JSON.stringify({ gameId, choice, ...extras }),
         });
-        await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
-        await showStatus('Pick saved successfully');
+        if (silent) {
+          await refreshPicks();
+        } else {
+          await Promise.all([refreshGames(), refreshPicks(), refreshLeaderboard()]);
+          await showStatus('Pick saved successfully');
+        }
+        // Tier 34 — report success so the cricket autosave can show its own
+        // saved/failed state. Deliberately a RETURN VALUE and not a rethrow:
+        // the football pick buttons call this without a catch, so throwing
+        // would surface as an unhandled rejection, fire clientErrorReporter
+        // and clobber the real message with the generic "Something went
+        // wrong" toast — the documented Tier 5.5b race.
+        return true;
       } catch (error) {
         setPicks(snapshot);
         if (error.message !== 'Session expired') showStatus(error.message);
+        return false;
       }
     },
     [picks, user?.id, request, refreshGames, refreshPicks, refreshLeaderboard, showStatus],

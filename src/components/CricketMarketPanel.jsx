@@ -5,8 +5,10 @@
 //
 //   Winner — a flat +50, one tap, posted immediately. Same one-tap feel as
 //     football so getting on the board stays frictionless.
-//   Runs   — optional, up to +100 per side, with an explicit Save. Typing two
-//     numbers is not a tap, so it should not fire a request per keystroke.
+//   Runs   — optional, up to +100 per side, autosaved on a typing pause. No
+//     Save button: a number field the user has already filled in should not
+//     need confirming, and the commonest way to lose a prediction is to type
+//     it and navigate away. Debounced so a 3-digit total is one write.
 //
 // The proration explainer is NOT decoration. Runs are scored against a side's
 // 20-over equivalent, so a chase won with overs to spare inflates: 130 off 80
@@ -31,7 +33,9 @@ function pickButtonClass(active) {
   ].join(' ');
 }
 
-function RunsField({ id, label, value, onChange, disabled }) {
+// Never disabled — autosave fires while the user may still be typing, and
+// locking the field mid-flight would swallow keystrokes.
+function RunsField({ id, label, value, onChange }) {
   return (
     <div>
       <label htmlFor={id} className="mb-1 block truncate text-[11px] text-fg-muted">
@@ -46,8 +50,11 @@ function RunsField({ id, label, value, onChange, disabled }) {
         placeholder="—"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="font-led w-full rounded-xl border border-default bg-elevated/90 px-3 py-2 text-center text-base tabular-nums text-fg outline-none transition focus:border-accent focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
+        // Spinners off. Runs are typed, not nudged — a 3-digit total is
+        // nowhere near the arrows, and on a touch target they are just two
+        // mis-tap zones inside the field. type=number is kept for the mobile
+        // numeric keypad and the min/max semantics.
+        className="font-led w-full appearance-none rounded-xl border border-default bg-elevated/90 px-3 py-2 text-center text-base tabular-nums text-fg outline-none transition [appearance:textfield] focus:border-accent focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
     </div>
   );
@@ -59,8 +66,8 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
 
   const [homeRuns, setHomeRuns] = useState('');
   const [awayRuns, setAwayRuns] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  // 'idle' | 'saving' | 'saved' | 'error'
+  const [status, setStatus] = useState('idle');
 
   // Rehydrate from the server copy whenever it changes — covers the first
   // load, a refreshPicks after saving, and switching between cards.
@@ -71,7 +78,6 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
     setAwayRuns(
       existingPick?.predictedAwayRuns != null ? String(existingPick.predictedAwayRuns) : '',
     );
-    setSaved(false);
   }, [existingPick?.predictedHomeRuns, existingPick?.predictedAwayRuns, existingPick?.id]);
 
   const parse = (raw) => {
@@ -85,22 +91,40 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
     parse(homeRuns) !== (existingPick?.predictedHomeRuns ?? null) ||
     parse(awayRuns) !== (existingPick?.predictedAwayRuns ?? null);
 
-  async function saveRuns() {
-    if (!gate('predict the runs')) return;
-    // The runs legs ride on the same pick row as the winner, and choice is
-    // NOT NULL, so there is nothing to attach them to until a side is backed.
-    if (!choice) return;
-    setSaving(true);
-    try {
-      await onSubmit(game.id, choice, {
-        predictedHomeRuns: parse(homeRuns),
-        predictedAwayRuns: parse(awayRuns),
-      });
-      setSaved(true);
-    } finally {
-      setSaving(false);
-    }
-  }
+  // The client always sends the FULL desired state, matching the server's
+  // upsert contract. Load-bearing on the winner buttons: a user who types runs
+  // before backing a side would otherwise have them dropped by the POST, and
+  // the hydration effect above would then wipe the fields from the server copy.
+  const currentRuns = () => ({
+    predictedHomeRuns: parse(homeRuns),
+    predictedAwayRuns: parse(awayRuns),
+  });
+
+  // Autosave on a typing pause. 700ms is long enough that "1" -> "17" -> "178"
+  // is one write rather than three, and short enough that a user who types a
+  // number and immediately closes the app still has it saved.
+  //
+  // This cannot loop: a successful save triggers refreshPicks, the hydration
+  // effect above rewrites the fields from the server copy, `dirty` goes false,
+  // and the effect returns early. Clearing a field parses to null, which is a
+  // real edit — it removes that leg.
+  useEffect(() => {
+    if (!choice || !dirty) return undefined;
+    const handle = setTimeout(async () => {
+      setStatus('saving');
+      const ok = await onSubmit(
+        game.id,
+        choice,
+        currentRuns(),
+        // Silent: no toast and no games/leaderboard refetch. Editing runs on
+        // an upcoming fixture changes neither.
+        { silent: true },
+      );
+      setStatus(ok ? 'saved' : 'error');
+    }, 700);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [homeRuns, awayRuns, choice, dirty]);
 
   return (
     <div className="mt-5 space-y-4">
@@ -110,7 +134,7 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
           className={pickButtonClass(choice === 'home')}
           onClick={() => {
             if (!gate('make a pick')) return;
-            onSubmit(game.id, 'home');
+            onSubmit(game.id, 'home', currentRuns());
           }}
           aria-label={`Pick ${displayTeamName(game.homeTeam)} to win`}
         >
@@ -121,7 +145,7 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
           className={pickButtonClass(choice === 'away')}
           onClick={() => {
             if (!gate('make a pick')) return;
-            onSubmit(game.id, 'away');
+            onSubmit(game.id, 'away', currentRuns());
           }}
           aria-label={`Pick ${displayTeamName(game.awayTeam)} to win`}
         >
@@ -147,35 +171,34 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
             label={displayTeamName(game.homeTeam)}
             value={homeRuns}
             onChange={setHomeRuns}
-            disabled={saving}
           />
           <RunsField
             id={`runs-away-${game.id}`}
             label={displayTeamName(game.awayTeam)}
             value={awayRuns}
             onChange={setAwayRuns}
-            disabled={saving}
           />
         </div>
 
+        {/* No Save button — runs write themselves on a typing pause. The
+            status line is deliberately quiet and reserves its own height, so
+            it never reflows the card as it cycles. */}
         {choice ? (
-          <div className="mt-3 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={saveRuns}
-              disabled={saving || !dirty}
-              className="rounded-xl border border-accent/40 bg-accent/10 px-4 py-2 text-xs font-semibold text-accent transition hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40"
-            >
-              {saving ? 'Saving…' : 'Save runs'}
-            </button>
-            {saved && !dirty ? (
-              <span className="text-[11px] text-success">Saved</span>
-            ) : dirty ? (
-              <span className="text-[11px] text-fg-muted">Unsaved changes</span>
-            ) : null}
-          </div>
+          <p className="mt-2 h-4 text-[11px] text-fg-muted" role="status" aria-live="polite">
+            {status === 'saving'
+              ? 'Saving…'
+              : status === 'error'
+                ? 'Could not save — check your connection'
+                : dirty
+                  ? 'Saving shortly…'
+                  : status === 'saved'
+                    ? 'Saved'
+                    : ''}
+          </p>
         ) : (
-          <p className="mt-3 text-[11px] text-fg-muted">Back a winner first to save your runs.</p>
+          <p className="mt-2 text-[11px] text-fg-muted">
+            Back a winner above and your runs will save automatically.
+          </p>
         )}
       </div>
     </div>

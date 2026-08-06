@@ -20,6 +20,7 @@ import SubTabs from './SubTabs';
 import { CRICKET } from '../utils/sports';
 import { Badge } from './ui';
 import LeaderboardFiltersBar from './LeaderboardFiltersBar';
+import SportSwitcher from './SportSwitcher';
 import { useData } from '../hooks/useData';
 import { pickStatus, scorePick } from '../utils/scoring';
 import { displayTeamName } from '../utils/teamNames';
@@ -96,12 +97,18 @@ function comparePicksByPendingThenRecent(a, b) {
 // both panels so the filtering math stays in one place.
 function applyFilters(rows, { statusFilter, leaderboardFilters }) {
   const scoped =
-    leaderboardFilters.leagueId || leaderboardFilters.seasonId
+    leaderboardFilters.leagueId || leaderboardFilters.seasonId || leaderboardFilters.sport
       ? rows.filter((r) => {
           if (leaderboardFilters.leagueId && r.game.leagueId !== leaderboardFilters.leagueId) {
             return false;
           }
           if (leaderboardFilters.seasonId && r.game.seasonId !== leaderboardFilters.seasonId) {
+            return false;
+          }
+          // Tier 34 — sport scoping. Client-side like the other two: My Picks
+          // holds every row in memory already, so there is no server filter to
+          // add. `game.sport` is denormalised onto the row, so no join.
+          if (leaderboardFilters.sport && r.game.sport !== leaderboardFilters.sport) {
             return false;
           }
           return true;
@@ -156,7 +163,9 @@ function PickRow({ entry }) {
 
 function MinePicksPanel({ picks, games, statusFilter, leaderboardFilters }) {
   const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
-  const isScoped = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
+  const isScoped = Boolean(
+    leaderboardFilters.leagueId || leaderboardFilters.seasonId || leaderboardFilters.sport,
+  );
 
   const baseRows = useMemo(() => {
     const gameById = new Map(games.map((g) => [g.id, g]));
@@ -209,7 +218,9 @@ function MinePicksPanel({ picks, games, statusFilter, leaderboardFilters }) {
 function FriendsPicksPanel({ friendsPicks, games, statusFilter, leaderboardFilters }) {
   const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' });
   const [friendFilter, setFriendFilter] = useState('all');
-  const isScoped = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
+  const isScoped = Boolean(
+    leaderboardFilters.leagueId || leaderboardFilters.seasonId || leaderboardFilters.sport,
+  );
 
   const baseRows = useMemo(() => {
     const gameById = new Map(games.map((g) => [g.id, g]));
@@ -312,7 +323,9 @@ function FriendsPicksPanel({ friendsPicks, games, statusFilter, leaderboardFilte
 function PicksHistory({ picks, games }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const { leaderboardFilters, friendsPicks } = useData();
-  const isScoped = Boolean(leaderboardFilters.leagueId || leaderboardFilters.seasonId);
+  const isScoped = Boolean(
+    leaderboardFilters.leagueId || leaderboardFilters.seasonId || leaderboardFilters.sport,
+  );
 
   const tabs = [
     {
@@ -395,6 +408,7 @@ function PicksHistory({ picks, games }) {
             ))}
           </select>
         </label>
+        <SportSwitcher surface="leaderboard" />
         <LeaderboardFiltersBar label="Filter by" />
       </div>
 

@@ -64,6 +64,18 @@ export function DataProvider({ children }) {
   const [leaderboardFilters, setLeaderboardFiltersState] = useState({
     leagueId: '',
     seasonId: '',
+    // Tier 34 — sport axis, '' meaning "all", same convention as the other two.
+    //
+    // Defaults to All sports. This slot is SHARED with My Picks (the same
+    // one-filter-two-surfaces arrangement league/season already use), and My
+    // Picks is a personal archive — a football default would open it with a
+    // cricket user's own picks hidden, which reads as a bug. Being outranked
+    // on a combined board does not.
+    //
+    // The apples-to-oranges concern is real (cricket tops out at 250 a match
+    // against football's ~100) but it is a ranking-presentation problem, and
+    // the Football pill sits directly above the board.
+    sport: '',
   });
   const [games, setGames] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -504,7 +516,7 @@ export function DataProvider({ children }) {
     setFriends(emptyFriends);
     setOwnProfile(null);
     setGameFiltersState({ leagueId: '', seasonId: '', sport: '' });
-    setLeaderboardFiltersState({ leagueId: '', seasonId: '', sport: 'football' });
+    setLeaderboardFiltersState({ leagueId: '', seasonId: '', sport: '' });
   }, [user]);
 
   // Profile (own profile view) refetch when picks/games change.

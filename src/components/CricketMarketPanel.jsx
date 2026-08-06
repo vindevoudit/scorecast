@@ -104,32 +104,6 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
 
   return (
     <div className="mt-5 space-y-4">
-      <div className="overflow-hidden rounded-2xl border border-default bg-divider">
-        <div className="grid grid-cols-3 gap-px">
-          <div className="bg-overlay/70 px-3 py-2.5 text-center">
-            <p className="font-led text-base tabular-nums text-fg sm:text-lg">
-              +{CRICKET_WINNER_POINTS}
-            </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-fg-muted">Winner</p>
-          </div>
-          <div className="bg-overlay/70 px-3 py-2.5 text-center">
-            <p className="font-led text-base tabular-nums text-fg sm:text-lg">
-              +{CRICKET_RUNS_LEG_MAX}
-            </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-fg-muted">Per runs</p>
-          </div>
-          <div className="bg-overlay/70 px-3 py-2.5 text-center">
-            <p className="font-led text-base tabular-nums text-accent sm:text-lg">
-              +{CRICKET_WINNER_POINTS + CRICKET_RUNS_LEG_MAX * 2}
-            </p>
-            <p className="mt-0.5 text-[10px] uppercase tracking-[0.18em] text-fg-muted">Max</p>
-          </div>
-        </div>
-        <p className="bg-overlay/40 px-3 py-2 text-center text-[10px] font-medium text-fg-muted">
-          Predictions lock at the first ball.
-        </p>
-      </div>
-
       <div className="grid gap-3 sm:grid-cols-2">
         <button
           type="button"
@@ -156,13 +130,15 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
       </div>
 
       <div className="rounded-2xl border border-default bg-overlay/40 p-3">
-        <p className="text-xs font-semibold text-fg">
-          Predict the runs <span className="font-normal text-fg-muted">— optional</span>
-        </p>
+        <p className="text-xs font-semibold text-fg">Pick a winner and predict the runs</p>
         <p className="mt-1 text-[11px] leading-relaxed text-fg-muted">
-          Score <span className="text-fg">100 minus however many runs you are out by</span>, per
-          side. Totals are compared to a <strong className="text-fg">20-over equivalent</strong>: a
-          side that bats fewer overs is scaled up, unless it is bowled out.
+          Back the winner for <span className="text-fg">+{CRICKET_WINNER_POINTS}</span>. Each runs
+          prediction scores{' '}
+          <span className="text-fg">
+            {CRICKET_RUNS_LEG_MAX} minus however many runs you are out by
+          </span>
+          . Totals are compared to a <strong className="text-fg">20-over equivalent</strong>: a side
+          that bats fewer overs is scaled up, unless it is bowled out.
         </p>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

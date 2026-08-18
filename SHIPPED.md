@@ -60,6 +60,41 @@ the pick panel states the rule before the user types; and the post-match scoreca
 branch) and 25 cricket E2E (3 new: a real DLS shape voiding to 50, an admin un-void restoring the
 legs, and a rain delay correctly _not_ voiding).
 
+## CPL auto-results — production rollout (2026-08-18)
+
+Both cricket batches went live on CD run `32088441572` (commits `2727d89` + `86622f4`). Sequence, and
+what each step proved:
+
+1. **Push → CD green.** Build, migrate job and rollout all succeeded; both migrations applied. First
+   confirmation came from the public API: M01 came back `resultSource: "admin"`, i.e. the
+   `20260810000001` backfill correctly froze the one hand-entered result out of the automation.
+2. **Key Vault + env.** `cricapi-api-key` seeded (via `--file` so the value never hit a command line),
+   then wired as a KV-referenced Container App secret plus `CRICAPI_SERIES_ID`. All five pre-existing
+   secrets survived the `secret set`. `CRICKET_RESULT_WRITE_ENABLED` deliberately left unset.
+3. **Two temporary overrides, still in shadow.** No CPL match fell inside the 12h eligibility window
+   that day and `providerMatchId` was null everywhere, so nothing would have been observable. Setting
+   `CRICKET_MATCH_RESOLVE_CRON='*/5 * * * *'` and `CRICKET_CAPTURE_LOOKBACK_HOURS=720` made the whole
+   backlog visible _without_ enabling writes — which turned the rollout's riskiest moment into a
+   readable dry run over the exact rows about to be touched.
+4. **Resolver: 35/35 stamped**, 0 unresolved, 4 playoff placeholders, 0 `needsManualEntry`, 0
+   `stranded` — identical to the local run.
+5. **Prod shadow review.** Seven payloads logged in full. Every "won by N runs" margin matched the run
+   difference exactly; both DLS matches (M02, M07) were correctly inverted against their run totals and
+   flagged `rainAffected`; both malformed-label matches (M03, M05) recorded
+   `malformed-inning-label-resolved-by-elimination`. One match (M09) refused with `no-innings` because
+   the job had exhausted its own 10/min burst budget on `match_info` calls — it degraded exactly as
+   designed, logging and deferring rather than writing a partial scorecard.
+6. **Writes enabled** (with `CRICAPI_RATE_LIMIT=30` for the catch-up). Next tick: **8 written, 0
+   refused, 0 shadowed, 0 unmapped**, budget 66/100. All nine played matches now carry results — 8
+   `auto`, 1 `admin`, 3 rain-voided.
+7. **Overrides removed**, steady state verified: resolver back on `20 6 * * *` reporting all-clean, and
+   the results job ticking in ~77 ms with no output, i.e. the cost gate closed as intended.
+
+**Operational note for the next backlog.** Each capture costs 1 `series_info` + 1 `match_info`, against
+a default 10/min burst budget. Clearing 8 at once trips it and the tail defers a tick (self-healing, so
+harmless). Raise `CRICAPI_RATE_LIMIT` for the run if you want it in one pass. Steady state — one match a
+day — never comes close.
+
 ## CPL auto-results — automatic T20 result capture from CricketData.org (2026-08-10)
 
 Tier 34 shipped cricket with no feed at all: fixtures from a committed JSON file, and **every result typed

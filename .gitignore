@@ -139,3 +139,16 @@ body.json
 # which tells the operator to `rm marketing/out/picks-vs-model-*` before a run).
 # The templates themselves (fulltime/halftime/countdown/etc.) stay tracked.
 marketing/out/picks-vs-model-*
+
+# HyperFrames promo videos + their notes. Marketing source, not app source: the
+# compositions are standalone HTML with vendored copies of three.js/matter.js, so
+# committing them would add ~15 MB and ~639 ESLint errors to a repo whose lint
+# gate is a CI blocker. Rendered MP4s, snapshots and the headless-Chrome capture
+# push the working tree past 120 MB on top of that. The whole tree stays local;
+# `npx hyperframes render` rebuilds any of it from the compositions.
+videos/
+HYPERFRAMES_PROMO_VIDEOS.md
+
+# Stray shell-paste artefacts. An unquoted `node -e "...process.exit(0))"` pasted
+# into PowerShell redirects into a file named after the tail of the command.
+process.exit*

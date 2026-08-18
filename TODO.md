@@ -45,7 +45,7 @@ them is a hygiene item in §7.
 9. [Backlog registers](#9--backlog-registers-tier-33-tracks-a-b-c)
 10. [Known issues](#10--known-issues--accepted-not-scheduled)
 
-_Last swept: 2026-08-06 (CPL deployed + imported)._
+_Last swept: 2026-08-18 (CPL auto-results live in production)._
 
 ---
 

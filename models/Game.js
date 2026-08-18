@@ -189,6 +189,28 @@ module.exports = (sequelize) => {
         allowNull: false,
         defaultValue: false,
       },
+      // CPL auto-results — the join onto the cricket provider's match id.
+      // Cricket fixtures come from a committed JSON file, so `sourceId` is
+      // synthetic and the provider has never heard of it; this holds the
+      // resolved link. Stamped ONCE by lib/jobs/resolveCricketMatchIds.js and
+      // treated as immutable afterwards. Null on every football row.
+      providerMatchId: {
+        type: DataTypes.STRING(64),
+        allowNull: true,
+      },
+      providerMatchResolvedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      // Who wrote the result: null = nobody (the only claimable state),
+      // 'auto' = the cricket result cron, 'admin' = a human. An 'admin' value
+      // permanently locks the automation out of the game — the exclusion is
+      // enforced in the claim UPDATE's WHERE clause, not in JS, so the
+      // admin-vs-cron race is settled by the database.
+      resultSource: {
+        type: DataTypes.STRING(16),
+        allowNull: true,
+      },
     },
     {
       tableName: 'games',

@@ -18,6 +18,84 @@ in CLAUDE.md — this file is history, not the contract.
 
 ---
 
+## CPL auto-results — automatic T20 result capture from CricketData.org (2026-08-10)
+
+Tier 34 shipped cricket with no feed at all: fixtures from a committed JSON file, and **every result typed
+into an admin form by hand** — eight numbers plus a winner, 39 times a season. This removes the typing.
+Fixtures stay on the committed file; only results are automated.
+
+**Choosing a provider was the hard part, and it eliminated most of the market.** Against one requirement —
+CPL coverage at hobby-app price — **Sportmonks does not carry CPL at all** despite 140+ cricket leagues, and
+neither does AllSportsAPI. **Sportradar Cricket v2 is the official CPL data partner** but is an enterprise
+contract. Roanuz is ~$200/mo, EntitySport $250/mo for domestic T20, Goalserve $125/mo. That left
+**CricketData.org (CricAPI)** — free 100 hits/day, $5.99/mo for 2,000 — as the only viable option, and its
+payload happens to fit exactly: `score: [{r, w, o, inning}]` where `o` is already the `18.4` over-notation
+`lib/sports.js oversToBalls` parses. Its CPL coverage is not documented publicly, so **Step 0 of the rollout
+is a signup plus one `GET /v1/series?search=Caribbean`**; fallbacks if that comes back empty are a Sportradar
+trial or Cricsheet's free post-match files (~24h lag).
+
+**Shape.** Five new modules, one migration, two cron jobs, one committed alias file, one operator script.
+`lib/scoring.js`, `GameService`, `LeagueService`, `validation/schemas.js` and every football job are
+untouched. The automatic path terminates in the **unmodified** `CricketResultService.setCricketResult`, so it
+inherits that service's load-bearing "scorecard first, then `GameService.setResult`" ordering — and with it
+the Tier 24 dual-writer, notifications, badges, streaks and leaderboard invalidation — rather than
+reimplementing a write.
+
+**Every judgement is a pure function.** `lib/cricketResult.js` has no DB and no network, so the four genuinely
+hard derivations are unit-testable like `lib/scoring.js`: the two-signal winner (run totals _and_ the status
+string, because **DLS breaks run-total comparison** — a rain-reduced chase wins on a revised target with fewer
+runs), sides-assigned-by-name (batting order is toss-dependent, so `score[0]` is not the home side), the
+`allOut` matrix (9 down in a short first innings is genuinely undecidable and refuses the whole match), and
+match resolution. The governing rule throughout is **refuse rather than guess** — the admin form still works,
+so a match needing manual entry is a minor annoyance while a match scored backwards is a leaderboard nobody
+trusts.
+
+**Safety is three layers.** `games.resultSource` (`NULL` / `'auto'` / `'admin'`) makes the claim a conditional
+`UPDATE ... WHERE resultSource IS NULL`, settling the admin-vs-cron race in the database rather than in JS; the
+`'admin'` default on `setCricketResult` means the existing admin route locks the automation out of any
+corrected game without a line changing. The derived payload is validated against the **same `cricketResultSchema`**
+the admin form obeys. And `CRICKET_RESULT_WRITE_ENABLED` defaults to **shadow mode**, logging the exact payload
+it would write while touching nothing.
+
+**Verification.** 72 new unit tests (`cricketTeamNames`, `cricketResult`, `cricketMatchResolution`) — full unit
+suite 310/310. 8 new E2E tests in `tests/e2e/api/cricket.spec.js` covering auto-capture end-to-end with real
+point movement, idempotency, the admin-override lock, abandonment, refusal on an unmappable name, refusal on a
+tie, and shadow mode — cricket spec 22/22, full Playwright suite 464 passed (one unrelated admin-panel flake
+that passes in isolation). The migration was exercised against a `sequelize.sync()`-first schema, which is the
+CI-parity check.
+
+**Live validation, same day.** The provider gate passed: CricAPI carries CPL as
+`Caribbean Premier League 2026` (`929c36f6-…`), 39 matches, 2026-08-07 → Sep 20, an exact match for the
+committed fixture file. A full local shadow run then resolved **35/35 non-playoff fixtures** with zero
+ambiguity (the other 4 are the playoff placeholders, correctly refused) and derived **9/9 finished matches**
+cleanly — 7 `agreed`, 2 `dls`, all schema-valid, zero refusals. **Zero alias entries turned out to be needed**;
+the normaliser reconciles every 2026 side on its own, and the three pre-seeded rebrand entries never fire.
+
+Three things the live feed corrected, all folded back into the code and its invariants:
+
+- **`series_info` never carries `score[]`** (9 ended matches, 0 with innings), so the `match_info` fallback is
+  the scorecard path, not an edge case — one extra hit per capture.
+- **`dateTimeGMT` is skewed** — uniformly +4 h for most fixtures, up to 20 h for the eight recorded as a 20:00
+  local start. The resolution window moved 14 h → **24 h**; a 20 h window already gave exactly one candidate
+  for all 35 fixtures and stays unambiguous to 48 h, so 24 h sits mid-band.
+- **A malformed innings label** — both team names concatenated
+  (`"Antigua and Barbuda Falcons,Saint Lucia Kings Inning 1"`) on 2 of the first 9 matches. Now resolved by
+  **elimination**: a T20 side bats exactly once, so with two innings and one cleanly mapped, the other is
+  determined. Kept narrow (exactly 2 innings, exactly 1 clean mapping, and the bad label must mention the side
+  being assigned), and a mis-elimination is still caught downstream by the winner cross-check.
+
+**The DLS design earned its keep immediately.** Two of the first nine matches — M02 (`won by 19 runs (DLS
+Method)`, 109 vs 94) and M07 (`2nd innings reduced to 8 overs due to rain, DLS target 52`, 54 vs 98) — would
+have been scored **backwards** by naive run-total comparison, inverting the flat +50 for everyone. A ~22%
+incidence in week one.
+
+**Operator steps.** (1) Seed Key Vault `cricapi-api-key` **before** the Bicep reapply; set
+`CRICAPI_SERIES_ID=929c36f6-9ed6-4cec-a2ad-910a2ee4f701`. (2) Deploy + `npm run db:migrate`, leaving
+`CRICKET_RESULT_WRITE_ENABLED` unset so prod starts in shadow. (3) Confirm one shadow tick, then flip the flag.
+(4) **Clear the backlog**: the gate only reaches 12 h back, so set `CRICKET_CAPTURE_LOOKBACK_HOURS=720`, let one
+tick run, then remove it. (5) **Rename the four playoff rows** in the admin game editor once seeding is known —
+they cannot auto-capture while they read "Winner of Qualifier 1".
+
 ## Tier 34 — T20 cricket (Caribbean Premier League) multi-sport expansion (2026-08-05)
 
 **Tier 34** (`f67ac5f`, `c736a5b`, `318a694`, `963a724`, `0b85c33`, `321f927`, `05d8965`, `<docs>`) — added

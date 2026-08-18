@@ -62,8 +62,16 @@ function inningsColumns(prefix, innings) {
  * @param {'home'|'away'|null} payload.result null = abandoned / no result
  * @param {object} payload.home {runs, wickets, overs, allOut}
  * @param {object} payload.away {runs, wickets, overs, allOut}
+ * @param {object} [options]
+ * @param {'admin'|'auto'} [options.source='admin'] who is writing. Stamped onto
+ *   games.resultSource in step 1's transaction. The 'admin' DEFAULT is what
+ *   makes the admin route protective without changing a line of it: any human
+ *   correction marks the game 'admin', and CricketProviderService's claim
+ *   (`UPDATE ... WHERE resultSource IS NULL`) then excludes it from automatic
+ *   capture permanently. Passing 'auto' is the cron's opt-in to being
+ *   overridable.
  */
-async function setCricketResult(gameId, { result, home, away }) {
+async function setCricketResult(gameId, { result, home, away }, { source = 'admin' } = {}) {
   const game = await Game.findByPk(gameId);
   if (!game) throw errors.notFound('Game not found');
   if (game.sport !== CRICKET) {
@@ -72,7 +80,11 @@ async function setCricketResult(gameId, { result, home, away }) {
     );
   }
 
-  const columns = { ...inningsColumns('home', home), ...inningsColumns('away', away) };
+  const columns = {
+    ...inningsColumns('home', home),
+    ...inningsColumns('away', away),
+    resultSource: source,
+  };
 
   // Step 1 — the scorecard, committed BEFORE setResult so its FOR UPDATE
   // re-read observes it. See the ordering note above.

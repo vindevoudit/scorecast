@@ -68,14 +68,49 @@ _Last swept: 2026-08-06 (CPL deployed + imported)._
   - The Dockerfile copied `scripts/` but not `data/`, so the documented
     `az containerapp exec` import would have failed with "Schedule file not found". Fixed
     in `4f4c6a4`; the data now ships with the importer.
+- [ ] **CPL auto-results — bring the provider online (built 2026-08-10, NOT yet configured).**
+      Code is merged and inert: without `CRICAPI_API_KEY` both cricket jobs return
+      `{skipped:'unconfigured'}`, and even with a key the write is gated behind
+      `CRICKET_RESULT_WRITE_ENABLED` (unset = shadow mode). Full narrative in
+      [SHIPPED.md](SHIPPED.md); invariants in CLAUDE.md "Critical considerations".
+  - [x] **GATE PASSED 2026-08-10.** CricAPI carries CPL. Series
+        `Caribbean Premier League 2026` = `929c36f6-9ed6-4cec-a2ad-910a2ee4f701`, 39 matches,
+        2026-08-07 → Sep 20 — an exact match for `data/cpl-2026-fixtures.json`. (The Women's
+        CPL is a separate series; don't pick it.) Key is in local `.env`.
+  - [x] **Local shadow review PASSED 2026-08-10.** `scripts/cricket-provider-report.mjs`
+        over the live feed: **35/35 non-playoff fixtures resolved**, 0 unresolved, 4 awaiting
+        playoff seeding (expected). **9/9 finished matches derived cleanly** — 7 `agreed`,
+        2 `dls` — all schema-VALID, zero refusals. Zero alias entries needed. Three live
+        findings were folded back into the code (resolution window 14h→24h, `series_info`
+        never carries `score[]`, and a malformed both-names innings label now resolved by
+        elimination) — see CLAUDE.md "Critical considerations".
+  1. Seed Key Vault `cricapi-api-key` **before** the next Bicep reapply — an unpopulated
+     `secretRef` fails the deploy. Set `CRICAPI_SERIES_ID=929c36f6-9ed6-4cec-a2ad-910a2ee4f701`.
+  2. Deploy + `npm run db:migrate` (migration `20260810000001`). Leave
+     `CRICKET_RESULT_WRITE_ENABLED` unset so prod starts in shadow mode.
+  3. Confirm one prod shadow tick logs `syncCricketResults: SHADOW would write` with a
+     sane payload, then set `CRICKET_RESULT_WRITE_ENABLED=true`. Verify on the next match:
+     `cricket result recorded` in the logs, a `cricket.result.auto` row in admin → Audit Log,
+     and the scorecard on the game card.
+  4. **Clear the backlog.** The eligibility gate only reaches 12h back from kickoff, so
+     every already-played CPL match is out of range and would otherwise stay manual. Set
+     `CRICKET_CAPTURE_LOOKBACK_HOURS=720`, let ONE tick run, confirm the captures, then
+     **remove the var** — left set it holds the cost gate open permanently.
+  5. Ongoing: watch the daily `resolveCricketMatchIds` summary for `unresolved`,
+     `placeholders`, `needsManualEntry` and `stranded`.
 - [ ] **CPL in-tournament operator duties.**
-  1. Results are entered by hand per match: admin → Games → **Enter result**.
+  1. Results are entered by hand per match (admin → Games → **Enter result**) **until the
+     provider above is switched on**. The admin form remains the correction path afterwards,
+     and any manual entry permanently locks that game against the automation
+     (`games.resultSource = 'admin'`).
   2. Rename the four playoff placeholder slots ("TBD (3rd place)", "Winner of Qualifier 1"
      …) once the league table settles, around 13 Sep. Either edit them in the admin game
      editor, or update `data/cpl-2026-fixtures.json` and re-run the importer — it upserts
      on `(leagueId, sourceId)` and updates team names, so the picks already on those
      fixtures are preserved. Until they are renamed, `isPlaceholderTeam` gates picks on
      all four with "Picks open once both teams advance" (verified against the live data).
+     **This is now doubly required**: automatic capture also refuses a placeholder row, so
+     those four matches stay manual until renamed. The daily job warns inside 7 days.
 - [ ] **Reactivate Premier League for 2026/27 — OVERDUE.** PL was set `active=false`
       during the 2026-05-28 beta→launch reset so the off-season cron couldn't resurrect
       deleted games. The 2026/27 season kicks off **mid-August**, so this is the most

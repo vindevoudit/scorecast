@@ -61,6 +61,12 @@ param marketingAutomationEnabled string = ''
 @description('Tier 31 — recipient inbox for the matchday graphics emails. Required when marketingAutomationEnabled is set.')
 param marketingEmailTo string = ''
 
+@description('CPL auto-results — CricketData.org series uuid for the current cricket season. Discover with scripts/cricket-provider-report.mjs --find-series. Empty = both cricket jobs skip.')
+param cricapiSeriesId string = ''
+
+@description('CPL auto-results — set to "true" to let the cricket job actually write results. Empty (default) = SHADOW MODE: it derives and logs the payload but touches no rows.')
+param cricketResultWriteEnabled string = ''
+
 // Stable suffix derived from the resource group id so naming is idempotent
 // across deployments but globally unique across Azure.
 var nameSuffix = toLower(uniqueString(resourceGroup().id))
@@ -145,6 +151,8 @@ module app 'modules/app.bicep' = {
     vapidSubject: vapidSubject
     marketingAutomationEnabled: marketingAutomationEnabled
     marketingEmailTo: marketingEmailTo
+    cricapiSeriesId: cricapiSeriesId
+    cricketResultWriteEnabled: cricketResultWriteEnabled
   }
 }
 

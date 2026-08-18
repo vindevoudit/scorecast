@@ -1449,6 +1449,9 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 | `homeBallsFaced` / `awayBallsFaced` | INTEGER NULLABLE | Tier 34, cricket only. Balls faced in the innings (0–120 for a full T20). Stored as balls, not overs, because cricket overs are base-6 (`17.2` = 17 overs 2 balls) and cannot be prorated arithmetically. NULL is treated as a full innings by `effectiveRuns` |
 | `homeWickets` / `awayWickets` | INTEGER NULLABLE | Tier 34, cricket only. **Display only** (`165/6`). Kept separate from `allOut` because a side can be all out at 9 down with a batter absent hurt |
 | `homeAllOut` / `awayAllOut` | BOOLEAN NOT NULL DEFAULT false | Tier 34, cricket only. **Authoritative for scoring**: an all-out side is never prorated to a 20-over equivalent. Checked BEFORE the ball count in `effectiveRuns`, since an all-out side has usually faced fewer than 120 balls |
+| `providerMatchId` | VARCHAR(64) NULLABLE | CPL auto-results, cricket only. The cricket provider's match id. Exists because cricket fixtures come from a committed JSON file, so `sourceId` is synthetic (`CPL2026-M01`) and the provider has never seen it. Stamped **once** by `resolveCricketMatchIds` and treated as immutable. Partial unique index `games_league_provider_match_unique ON (leagueId, providerMatchId) WHERE providerMatchId IS NOT NULL` — the last line of defence against two local games binding to one provider match |
+| `providerMatchResolvedAt` | TIMESTAMPTZ NULLABLE | CPL auto-results. When the id above was stamped. Audit only |
+| `resultSource` | VARCHAR(16) NULLABLE | CPL auto-results. `NULL` = nobody has written a result (**the only claimable state**), `'auto'` = the cron captured it, `'admin'` = a human wrote or corrected it and the automation is **permanently locked out**. The exclusion is enforced in the claim's SQL `WHERE`, not in JS, so the admin-vs-cron race is settled by the database. Indexed `games_result_source_idx WHERE sport = 'cricket'`. Migration `20260810000001` back-stamps `'admin'` on every already-played cricket game — **not optional**, the season was underway when this shipped |
 
 **Result derivation invariant**: `result` is only set automatically (by `applyLiveUpdate` or `upsertFixture`) when `localGame.result === null`. Admin-entered results are never clobbered by upstream updates. See `lib/fixtureStatus.js deriveResultFromFixture` for the upstream → local mapping (prefers `score.winner` over score comparison so penalty-shootout knockouts resolve correctly).
 
@@ -4633,6 +4636,135 @@ picks; the story populates once a user has settled World Cup picks.
 
 ---
 
+### 8.37 CPL Auto-Results — automatic T20 result capture (2026-08-10)
+
+Tier 34 shipped cricket with no feed: fixtures from a committed JSON file, **results typed by
+hand**. This automates results only. Fixtures stay manual, and
+`LeagueService.syncFixtures` keeps its football-only throw.
+
+**Provider choice.** CPL coverage is scarce at hobby-app price. Sportmonks (140+ cricket
+leagues) and AllSportsAPI **do not carry CPL**; Sportradar Cricket v2 is the official CPL
+partner but enterprise-contract; Roanuz ≈$200/mo, EntitySport $250/mo, Goalserve $125/mo.
+**CricketData.org (CricAPI)** — free 100 hits/day, $5.99/mo for 2,000 — was the only viable
+option, and its payload fits natively: `score: [{r, w, o, inning}]` with `o` already in the
+`18.4` base-6 notation `lib/sports.js oversToBalls` validates.
+
+**Module map.**
+
+| File                                                                                                                  | Role                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [lib/cricketApi.js](lib/cricketApi.js)                                                                                | Provider client. Mirrors `footballApi` (sliding-window budget, 10 s AbortController, TTL cache, AppError vocabulary) |
+| [lib/cricketTeamNames.js](lib/cricketTeamNames.js) + [data/cricket-team-aliases.json](data/cricket-team-aliases.json) | Name normaliser + committed alias map (the `seeders/reconcileMap.json` precedent)                                    |
+| [lib/cricketResult.js](lib/cricketResult.js)                                                                          | **Every judgement, as pure functions.** No DB, no network                                                            |
+| [services/CricketProviderService.js](services/CricketProviderService.js)                                              | The DB half: resolve, claim, apply, release                                                                          |
+| [lib/jobs/syncCricketResults.js](lib/jobs/syncCricketResults.js)                                                      | 10-min windowed poll that writes results                                                                             |
+| [lib/jobs/resolveCricketMatchIds.js](lib/jobs/resolveCricketMatchIds.js)                                              | Daily, 1 API hit: stamps `providerMatchId` + raises the operator alarms                                              |
+| [scripts/cricket-provider-report.mjs](scripts/cricket-provider-report.mjs)                                            | Read-only dry run (ASCII-only stdout for `az containerapp exec`)                                                     |
+
+**Why it composes rather than extends.** The automatic path terminates in the _unmodified_
+`CricketResultService.setCricketResult`, inheriting its load-bearing "scorecard committed
+first, then `GameService.setResult`" ordering — and with it the Tier 24 dual-writer,
+notifications, badges, streaks and cache invalidation. The single change to that file is a
+`{source = 'admin'}` option stamping `games.resultSource` inside step 1's transaction. The
+`'admin'` **default** is what makes the existing admin route protective with no edit.
+`GameService.applyLiveUpdate` is deliberately never called — it knows nothing of
+`*BallsFaced` / `*AllOut`, so routing cricket through it would silently mis-score both runs
+legs.
+
+**The four derivations that carry real risk.**
+
+1. **Winner needs two agreeing signals.** Run totals alone are wrong under DLS: a
+   rain-reduced chase wins on a _revised_ target with fewer runs, so comparing totals hands
+   the win to the loser and inverts the flat +50 for everyone. `deriveWinner` computes from
+   run totals _and_ from the provider's status string, writes only on agreement, and lets
+   the string win **only** where arithmetic provably cannot answer (a DLS or Super Over
+   marker). Unexplained disagreement refuses; a tie with no Super Over refuses (`'draw'` is
+   rejected for cricket and `null` would wrongly void the match).
+2. **Sides by name, order by position.** Batting order is toss-dependent, so `score[0]` is
+   not the home side — an unmappable name refuses outright rather than falling back to
+   position. Position _is_ used, legitimately, for batting **order** (the scorecard is
+   chronological), which is what tells `deriveAllOut` who was chasing.
+3. **`allOut` at 9 wickets.** Ten is always all out. Nine in the chase, short of the target
+   with balls left, is a dismissal. Nine in a short **first** innings is genuinely
+   undecidable from this payload — bowled out with a batter absent, or rain-truncated? — and
+   **refuses the whole match**, because `effectiveRuns` proration would rewrite both runs
+   legs for everyone. (`match_scorecard` would settle it via the batting card at +1 hit per
+   match; documented as the escalation, not built.)
+4. **Over quota is asserted at 120 unless the status carries a rain marker.** Inferring it
+   from the longest innings is circular when both innings end early — a chase finishing in
+   15 overs would "prove" a 15-over quota — which would let a genuinely bowled-out side read
+   as having batted its full allocation.
+
+A Super Over's extra entries are discarded by taking the larger ball count per side; folding
+them into the total would corrupt every user's runs legs.
+
+**Resolution.** `resolveMatches` joins on (kickoff within 14 h) + (the unordered canonical
+team pair), which also makes doubleheaders safe since same-day matches are different pairs.
+It is all-or-nothing: exactly one unclaimed candidate stamps; 0 / ≥2 / already-claimed each
+refuse with a distinct reason. **Playoff placeholders refuse outright** — even a date-singleton
+Final would leave `homeTeam = "Winner of Qualifier 1"`, making the innings→side mapping
+impossible — so a human must rename those four rows; the daily job warns inside 7 days of
+kickoff.
+
+**Safety layers.** (a) The claim is a conditional
+`UPDATE ... SET resultSource='auto' WHERE id=? AND resultSource IS NULL AND result IS NULL`,
+settling the admin-vs-cron race in the database; `affected === 0` ⇒ `already-captured`. A
+write failure **releases** the claim so a transient error can't lock the game out of retry.
+(b) The derived payload is validated against the **same `cricketResultSchema`** the admin
+form obeys — the cheapest guarantee the two entry points can't drift. (c)
+`CRICKET_RESULT_WRITE_ENABLED` defaults to shadow mode.
+
+**Cost.** Both jobs gate before any outbound call (`unconfigured` / `no-series-id` /
+`no-active-leagues` / `no-finishing-games`) and filter
+`League.findAll({where: {active: true, sport: CRICKET}})`, symmetric to the three football
+jobs. One `series_info` call covers all 39 fixtures, so a match day is ≈13 hits and the
+daily reconciliation is 1.
+
+**Two CricAPI-specific hazards** (see the `lib/cricketApi.js` header): the key travels in the
+query string, so no log site may emit a raw URL; and failures arrive as
+`200 {status:'failure', reason:'Hits limit reached'}`, so an `response.ok`-only check would
+read quota exhaustion as a valid empty payload and the job would look healthy while capturing
+nothing all day.
+
+**Measured against the live feed (2026-08-10), not assumed.** Running the report script over
+the real CPL 2026 series produced three corrections: `series_info` **never** carries `score[]`
+(9 ended matches, 0 with innings), so the `match_info` fallback is the scorecard path rather
+than an edge case; CricAPI's `dateTimeGMT` is skewed **+4 h** for most fixtures and up to
+**20 h** for the eight our schedule records as a 20:00 local start, so the resolution window
+moved 14 h → **24 h** (a 20 h window already resolved all 35 non-playoff fixtures to exactly
+one candidate with zero ambiguity, and it stays unambiguous to 48 h, so 24 h is mid-band); and
+CricAPI emits a **malformed innings label** on a minority of matches — both team names
+concatenated, e.g. `"Antigua and Barbuda Falcons,Saint Lucia Kings Inning 1"`, on 2 of the
+first 9 — which `mapInningsToSides` now resolves by elimination. Elimination is deduction, not
+a guess (a T20 side bats exactly once), and is kept narrow: exactly two innings, exactly one
+clean mapping, and the malformed label must _mention_ the side being assigned. A Super Over or
+two malformed labels still refuse, and a mis-elimination is caught downstream because swapping
+the innings flips `byRuns` into disagreement with the status string.
+
+**The two-signal winner already earned its keep.** Two of those first nine matches — M02
+(`"won by 19 runs (DLS Method)"`, 109 vs 94) and M07 (`"2nd innings reduced to 8 overs due to
+rain, DLS target 52"`, 54 vs 98) — would have been scored **backwards** by a run comparison,
+inverting the flat +50 for every user on the match. Both derive correctly as `basis=dls`. That
+is a ~22% incidence in week one; do not simplify `deriveWinner` into a totals check.
+
+**Alarms** from the daily job: `unresolved` (add an alias), `placeholders` (rename the row),
+`needsManualEntry` (kickoff >12 h ago, uncaptured), `stranded`
+(`resultSource='auto' AND result IS NULL AND homeScore IS NOT NULL` — a crash in
+`CricketResultService`'s documented two-transaction seam, previously only reachable mid-click
+by a human and now reachable from a cron tick).
+
+**Tests.** 72 unit cases across `tests/cricketTeamNames.test.js`, `tests/cricketResult.test.js`
+and `tests/cricketMatchResolution.test.js`; 8 E2E in `tests/e2e/api/cricket.spec.js` driving
+`applyProviderResult` directly (auto-capture with real point movement, idempotency, the
+admin-override lock, abandonment, refusal on an unmappable name, refusal on a tie, shadow
+mode, unfinished-skip).
+
+**Operator post-deploy**: migration `20260810000001`, then the Step-0 coverage check, Key
+Vault `cricapi-api-key`, a shadow match day, then the write flag. Full sequence in
+[TODO.md](TODO.md) §1 and [SHIPPED.md](SHIPPED.md).
+
+---
+
 ## 11. Operational Notes
 
 ### 11.1 Environment Variables
@@ -4656,6 +4788,12 @@ See [.env.example](.env.example):
 - **`FOOTBALL_DATA_RATE_LIMIT`** — (Tier 18) integer override for the in-process rate-limit budget. Defaults to `20` (TIER_ONE plan). Set to `10` if reverting to the free tier; bump if upgrading further. The client always reserves 1 slot for ad-hoc admin syncs regardless of budget.
 - **`FIXTURE_SYNC_CRON` / `LIVE_SCORE_SYNC_CRON` / `IN_PROGRESS_RECONCILE_CRON`** — (Tier 4b + 2026-05-19 + Tier 18) cron expression overrides for the three football-data jobs. Defaults: `'0 3 * * *'` daily, `'*/30 * * * * *'` every 30 s (Tier 18 — was `'* * * * *'` every minute), `'*/3 * * * *'` every 3 min (Tier 18 — was `'*/5 * * * *'`). Use `node-cron` 6-field syntax (with leading seconds field) for sub-minute cadence. Useful for dev rapid iteration, falling back to free-tier cadence, or incident-response bumps.
 - **`KICKOFF_REMINDER_CRON`** — (PWA Chunk 6) cron expression for the kickoff-reminder fan-out job. Default `'*/15 * * * *'`. DB-only; no API calls.
+- **`CRICAPI_API_KEY`** — (CPL auto-results) CricketData.org / CricAPI v1 key. Both cricket jobs ([syncCricketResults](lib/jobs/syncCricketResults.js), [resolveCricketMatchIds](lib/jobs/resolveCricketMatchIds.js)) return `{skipped:'unconfigured'}` when unset, mirroring the `lib/email.js` graceful-no-op convention. Sent as a `?apikey=` **query parameter**, which is why [lib/cricketApi.js](lib/cricketApi.js) never logs a raw URL.
+- **`CRICAPI_SERIES_ID`** — (CPL auto-results) the provider's series uuid for the current cricket season. Discover once with `node scripts/cricket-provider-report.mjs --find-series "Caribbean Premier League"`. Unset ⇒ both jobs skip with `'no-series-id'`.
+- **`CRICAPI_API_HOST` / `CRICAPI_RATE_LIMIT` / `CRICAPI_DAILY_BUDGET`** — (CPL auto-results) host override (default `api.cricapi.com`), per-minute burst window (default 10) and local per-UTC-day cap (default 80, under the free tier's 100). The provider's own `info.hitsToday` is the primary budget signal since it survives restarts and multi-replica; these are the fallback.
+- **`CRICKET_RESULT_WRITE_ENABLED`** — (CPL auto-results) **the safety gate. Unset (default) is SHADOW MODE**: the job resolves, derives, schema-validates and logs `syncCricketResults: SHADOW would write` with the exact payload, touching no rows. Set to `'1'`/`'true'` only after diffing a real match day's shadow output against the official scorecard.
+- **`CRICKET_CAPTURE_LOOKBACK_HOURS`** — (CPL auto-results) **one-off catch-up only.** How far back a kickoff may be and still be eligible for automatic capture; default 12. Switching the provider on mid-season leaves every already-played match outside that window and therefore permanently manual, so set this wide (e.g. `720`), let ONE tick run, then remove it — left in place it holds the cost gate open continuously. Every safety layer still applies during a catch-up run.
+- **`CRICKET_RESULT_SYNC_CRON` / `CRICKET_MATCH_RESOLVE_CRON`** — (CPL auto-results) defaults `'*/10 * * * *'` and `'20 6 * * *'`. The results poll is cost-gated to a window 2–12 h after a cricket kickoff, so outside that it is one COUNT and no API call. Keep the daily reconciliation well ahead of kickoff: its two failure modes (a missing team alias, a playoff row still named "Winner of Qualifier 1") both need human action to clear.
 
 ### 11.2 Local Setup
 

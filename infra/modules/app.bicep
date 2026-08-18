@@ -61,6 +61,12 @@ param marketingAutomationEnabled string = ''
 @description('Tier 31 — recipient inbox for the matchday graphics emails. Required when marketingAutomationEnabled is set.')
 param marketingEmailTo string = ''
 
+@description('CPL auto-results — CricketData.org series uuid for the current cricket season. Discover with scripts/cricket-provider-report.mjs --find-series. Empty = both cricket jobs skip.')
+param cricapiSeriesId string = ''
+
+@description('CPL auto-results — set to "true" to let the cricket job actually write results. Empty (default) = SHADOW MODE: it derives and logs the payload but touches no rows.')
+param cricketResultWriteEnabled string = ''
+
 var environmentName = '${appName}-env-${nameSuffix}'
 var containerAppName = '${appName}-app'
 
@@ -190,6 +196,16 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/vapid-private-key'
           identity: 'system'
         }
+        // CPL auto-results — CricketData.org (CricAPI) key for automatic T20
+        // result capture. SEED THE KV ENTRY BEFORE THE FIRST REAPPLY that picks
+        // this up, same as jwt-secret / football-data-api-key: an unpopulated
+        // secretRef fails the deploy. Without the runtime value, both cricket
+        // jobs return {skipped:'unconfigured'} and results stay manual.
+        {
+          name: 'cricapi-api-key'
+          keyVaultUrl: 'https://${keyVaultName}${az.environment().suffixes.keyvaultDns}/secrets/cricapi-api-key'
+          identity: 'system'
+        }
       ]
     }
     template: {
@@ -222,6 +238,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'VAPID_PUBLIC_KEY', value: vapidPublicKey }
             { name: 'VAPID_PRIVATE_KEY', secretRef: 'vapid-private-key' }
             { name: 'VAPID_SUBJECT', value: vapidSubject }
+            { name: 'CRICAPI_API_KEY', secretRef: 'cricapi-api-key' }
+            { name: 'CRICAPI_SERIES_ID', value: cricapiSeriesId }
+            // Empty (the default) means SHADOW MODE: the job derives and logs
+            // the payload it would write but touches no rows. Flip to 'true'
+            // only after reviewing a real match day's shadow output.
+            { name: 'CRICKET_RESULT_WRITE_ENABLED', value: cricketResultWriteEnabled }
             { name: 'MIGRATE_ON_BOOT', value: 'false' }
           ]
           probes: [

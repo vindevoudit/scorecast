@@ -1,0 +1,12 @@
+{
+  "_note": "CPL auto-results — maps cricket-provider team names to the canonical names in the committed fixture files (= games.homeTeam / games.awayTeam). Keyed by leagues.sourceLeagueId. Alias KEYS must be written in NORMALISED form: lowercase, '&' expanded to 'and', 'St' expanded to 'saint', punctuation and accents stripped (see lib/cricketTeamNames.js normalizeTeamName). VALUES are the exact canonical fixture-file spelling. Because the normaliser already folds case, punctuation, accents, &/and and St/Saint, entries for those differences are UNNECESSARY — this file should only ever carry genuine synonyms and rebrands. A missing entry is loud, not silent: lib/jobs/resolveCricketMatchIds.js warns naming both sides and the game simply never auto-captures, so the admin form remains the fallback.",
+  "_last_reviewed": "2026-08-10",
+  "CPL": {
+    "_note": "The 2026 season carries two rebrands that aggregators are likely to lag. The Barbados franchise reverted from 'Barbados Royals' (its name 2021-2025) to the original 'Barbados Tridents'. Jamaica returned after a two-year absence as a NEW franchise, 'Jamaica Kingsmen', where feeds may still carry the retired 'Jamaica Tallawahs'. 'Saint Lucia Zouks' is the pre-2021 name of the Saint Lucia side. Confirm the provider's exact spellings with scripts/cricket-provider-report.mjs and prune or extend this list accordingly — an alias that never fires is harmless, but a missing one costs a match.",
+    "aliases": {
+      "barbados royals": "Barbados Tridents",
+      "jamaica tallawahs": "Jamaica Kingsmen",
+      "saint lucia zouks": "Saint Lucia Kings"
+    }
+  }
+}

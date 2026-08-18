@@ -108,6 +108,12 @@ async function resetGame(gameId) {
       homeAllOut: false,
       awayAllOut: false,
       appliedResult: null,
+      // CPL auto-results — without clearing these, the claim in
+      // CricketProviderService.applyProviderResult would refuse every test
+      // after the first with 'already-captured'.
+      resultSource: null,
+      providerMatchId: null,
+      providerMatchResolvedAt: null,
     },
     { where: { id: gameId } },
   );
@@ -332,5 +338,224 @@ test.describe('cricket market', () => {
     // Without this guard the league's sourceLeagueId would be sent to
     // football-data.org as a competition code.
     expect(res.status()).toBe(400);
+  });
+
+  // -------------------------------------------------------------------------
+  // CPL auto-results — automatic capture from the cricket provider.
+  //
+  // These drive CricketProviderService.applyProviderResult DIRECTLY rather
+  // than running the cron job. The job's own logic is a cost gate plus a fetch;
+  // everything that could corrupt a scorecard lives in the service and in
+  // lib/cricketResult.js. Driving the service means no HTTP stub, no scheduler
+  // (disabled under NODE_ENV=test anyway), and a real end-to-end assertion that
+  // points actually move.
+  // -------------------------------------------------------------------------
+  test.describe('automatic result capture', () => {
+    const PROVIDER_MATCH_ID = 'provider-match-e2e-1';
+
+    function providerService() {
+      return require('../../../services/CricketProviderService');
+    }
+
+    // A finished provider match for GAME_ID. Home 178/5 off 20; away 130 all
+    // out in 16.4, so the away runs leg is NOT prorated up to 156.
+    function finishedMatch(overrides = {}) {
+      return {
+        providerMatchId: PROVIDER_MATCH_ID,
+        matchType: 't20',
+        matchEnded: true,
+        dateTimeGMT: new Date().toISOString(),
+        teams: ['E2E Kings', 'E2E Warriors'],
+        statusText: 'E2E Kings won by 48 runs',
+        innings: [
+          { teamName: 'E2E Kings', inningNumber: 1, runs: 178, wickets: 5, oversText: '20' },
+          { teamName: 'E2E Warriors', inningNumber: 1, runs: 130, wickets: 10, oversText: '16.4' },
+        ],
+        ...overrides,
+      };
+    }
+
+    async function apply(providerMatch) {
+      const { Game } = models();
+      const game = await Game.findByPk(GAME_ID);
+      return providerService().applyProviderResult({
+        game,
+        providerMatch,
+        leagueCode: 'E2ECPL',
+      });
+    }
+
+    // writeEnabled() reads process.env on every call, and the service runs
+    // in-process here, so the flag can be flipped per test.
+    test.beforeEach(() => {
+      process.env.CRICKET_RESULT_WRITE_ENABLED = 'true';
+    });
+    test.afterEach(() => {
+      delete process.env.CRICKET_RESULT_WRITE_ENABLED;
+    });
+
+    test('captures a finished match end to end and scores the picks', async () => {
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 170, predictedAwayRuns: 150 },
+      });
+
+      const outcome = await apply(finishedMatch());
+      expect(outcome.written).toBeTruthy();
+
+      const { Game } = models();
+      const game = await Game.findByPk(GAME_ID);
+      expect(game.result).toBe('home');
+      expect(game.status).toBe('finished');
+      expect(game.resultSource).toBe('auto');
+      // All eight innings columns, because a projection that misses any of them
+      // silently mis-scores the runs legs.
+      expect(game.homeScore).toBe(178);
+      expect(game.homeWickets).toBe(5);
+      expect(game.homeBallsFaced).toBe(120);
+      expect(game.homeAllOut).toBe(false);
+      expect(game.awayScore).toBe(130);
+      expect(game.awayWickets).toBe(10);
+      expect(game.awayBallsFaced).toBe(100);
+      expect(game.awayAllOut).toBe(true);
+
+      // 50 winner + (100 - |178-170|) + (100 - |130-150|) = 50 + 92 + 80.
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(222);
+    });
+
+    test('is idempotent — a second apply refuses and points do not move', async () => {
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 170, predictedAwayRuns: 150 },
+      });
+      await apply(finishedMatch());
+
+      const second = await apply(finishedMatch());
+      expect(second.written).toBeFalsy();
+      expect(second.reason).toBe('already-captured');
+
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(222);
+    });
+
+    test('an admin correction moves the points AND locks the automation out', async () => {
+      // The regression test for CricketResultService's ordering invariant under
+      // the new source stamping: the result is unchanged, only the scorecard
+      // moves, so if the scorecard were written after setResult the
+      // oldPoints === newPoints short-circuit would silently drop the fix.
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 170, predictedAwayRuns: 150 },
+      });
+      await apply(finishedMatch());
+
+      const corrected = await admin.post(`/api/admin/games/${GAME_ID}/cricket-result`, {
+        data: {
+          result: 'home',
+          home: innings(190, 5, '20.0'),
+          away: innings(130, 10, '16.4', true),
+        },
+      });
+      expect(corrected.ok()).toBeTruthy();
+
+      const { Game } = models();
+      expect((await Game.findByPk(GAME_ID)).resultSource).toBe('admin');
+
+      // 50 + (100 - |190-170|) + (100 - |130-150|) = 50 + 80 + 80.
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(210);
+
+      // And the provider can never take it back.
+      const reapplied = await apply(finishedMatch());
+      expect(reapplied.reason).toBe('already-captured');
+      const after = await Game.findByPk(GAME_ID);
+      expect(after.homeScore).toBe(190);
+      expect(after.resultSource).toBe('admin');
+    });
+
+    test('an abandoned match voids the game and scores nothing', async () => {
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 170, predictedAwayRuns: 150 },
+      });
+
+      const outcome = await apply(
+        finishedMatch({ statusText: 'No result (abandoned due to rain)', innings: [] }),
+      );
+      expect(outcome.written).toBeTruthy();
+
+      const { Game } = models();
+      const game = await Game.findByPk(GAME_ID);
+      expect(game.result).toBeNull();
+      // Not 'scheduled' — a rained-off T20 has happened and must not reappear
+      // as an upcoming fixture.
+      expect(game.status).toBe('cancelled');
+
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(0);
+    });
+
+    test('refuses an unmappable team name and leaves the game untouched', async () => {
+      const outcome = await apply(
+        finishedMatch({
+          statusText: 'Nobody XI won by 48 runs',
+          innings: [
+            { teamName: 'Nobody XI', inningNumber: 1, runs: 178, wickets: 5, oversText: '20' },
+            {
+              teamName: 'E2E Warriors',
+              inningNumber: 1,
+              runs: 130,
+              wickets: 10,
+              oversText: '16.4',
+            },
+          ],
+        }),
+      );
+      expect(outcome.written).toBeFalsy();
+      expect(outcome.reason).toBe('unmapped-inning-team');
+
+      const { Game } = models();
+      const game = await Game.findByPk(GAME_ID);
+      expect(game.result).toBeNull();
+      expect(game.resultSource).toBeNull();
+      expect(game.homeScore).toBeNull();
+    });
+
+    test('refuses a tie with no Super Over rather than guessing', async () => {
+      const outcome = await apply(
+        finishedMatch({
+          statusText: 'Match tied',
+          innings: [
+            { teamName: 'E2E Kings', inningNumber: 1, runs: 160, wickets: 6, oversText: '20' },
+            { teamName: 'E2E Warriors', inningNumber: 1, runs: 160, wickets: 7, oversText: '20' },
+          ],
+        }),
+      );
+      expect(outcome.written).toBeFalsy();
+      expect(outcome.reason).toBe('tie-no-super-over');
+      expect((await models().Game.findByPk(GAME_ID)).resultSource).toBeNull();
+    });
+
+    test('shadow mode derives the payload but writes nothing', async () => {
+      delete process.env.CRICKET_RESULT_WRITE_ENABLED;
+
+      const outcome = await apply(finishedMatch());
+      expect(outcome.written).toBeFalsy();
+      expect(outcome.reason).toBe('shadow');
+      // It still produced exactly what it would have written — that is what
+      // makes a shadow run reviewable.
+      expect(outcome.payload.result).toBe('home');
+      expect(outcome.payload.away.allOut).toBe(true);
+
+      const game = await models().Game.findByPk(GAME_ID);
+      expect(game.result).toBeNull();
+      expect(game.resultSource).toBeNull();
+      expect(game.homeScore).toBeNull();
+    });
+
+    test('an unfinished match is skipped quietly', async () => {
+      const outcome = await apply(
+        finishedMatch({ matchEnded: false, statusText: 'E2E Kings elected to bat', innings: [] }),
+      );
+      expect(outcome.written).toBeFalsy();
+      expect(outcome.reason).toBe('not-finished');
+    });
   });
 });

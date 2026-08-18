@@ -58,14 +58,19 @@ function CricketScoreCard({ game, pick }) {
   // arrow reliably signals "this was scaled".
   const runsDetail = (predicted, effective, rawScore) => {
     if (predicted == null) return null;
+    // A voided leg must not show a 20-over equivalent — that number played no
+    // part in the score, and showing it invites "why did I get 0 for being
+    // close?". Show what they predicted and say plainly that it was voided.
+    if (b.rainVoided) return `you ${predicted} · voided (rain)`;
     if (effective == null) return `you ${predicted} · no result`;
     const scaled = rawScore != null && Number(rawScore) !== effective;
     return `you ${predicted} · ${scaled ? `${rawScore} → ${effective}` : effective}`;
   };
 
   const anyProrated =
-    (pick.predictedHomeRuns != null && Number(game.homeScore) !== b.homeEffective) ||
-    (pick.predictedAwayRuns != null && Number(game.awayScore) !== b.awayEffective);
+    !b.rainVoided &&
+    ((pick.predictedHomeRuns != null && Number(game.homeScore) !== b.homeEffective) ||
+      (pick.predictedAwayRuns != null && Number(game.awayScore) !== b.awayEffective));
 
   return (
     <div className="mt-5 overflow-hidden rounded-2xl border border-default bg-divider">
@@ -99,6 +104,12 @@ function CricketScoreCard({ game, pick }) {
           <p className="font-led shrink-0 text-lg tabular-nums text-accent">+{b.total}</p>
         </div>
       </div>
+      {b.rainVoided ? (
+        <p className="bg-overlay/40 px-3 py-2 text-center text-[10px] font-medium text-fg-muted">
+          Weather cut this match short, so both runs predictions were voided — nobody scored them.
+          Your pick was settled on the winner alone.
+        </p>
+      ) : null}
       {anyProrated ? (
         <p className="bg-overlay/40 px-3 py-2 text-center text-[10px] font-medium text-fg-muted">
           → is the 20-over equivalent. A side that batted fewer overs is scaled up, unless it was

@@ -71,7 +71,11 @@ function inningsColumns(prefix, innings) {
  *   capture permanently. Passing 'auto' is the cron's opt-in to being
  *   overridable.
  */
-async function setCricketResult(gameId, { result, home, away }, { source = 'admin' } = {}) {
+async function setCricketResult(
+  gameId,
+  { result, home, away, rainAffected = false },
+  { source = 'admin' } = {},
+) {
   const game = await Game.findByPk(gameId);
   if (!game) throw errors.notFound('Game not found');
   if (game.sport !== CRICKET) {
@@ -83,6 +87,12 @@ async function setCricketResult(gameId, { result, home, away }, { source = 'admi
   const columns = {
     ...inningsColumns('home', home),
     ...inningsColumns('away', away),
+    // Must be written in step 1 alongside the scorecard, for the same reason
+    // the innings columns are: setResult's FOR UPDATE re-read has to observe it
+    // before applyPickTransition recomputes points, or a match toggled to
+    // rain-affected would recompute the SAME points and hit the idempotency
+    // short-circuit, silently dropping the void.
+    rainAffected,
     resultSource: source,
   };
 

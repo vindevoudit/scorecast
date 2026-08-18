@@ -114,6 +114,7 @@ async function resetGame(gameId) {
       resultSource: null,
       providerMatchId: null,
       providerMatchResolvedAt: null,
+      rainAffected: false,
     },
     { where: { id: gameId } },
   );
@@ -548,6 +549,100 @@ test.describe('cricket market', () => {
       expect(game.result).toBeNull();
       expect(game.resultSource).toBeNull();
       expect(game.homeScore).toBeNull();
+    });
+
+    test('a rain-shortened match voids both runs legs but still pays the winner', async () => {
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 170, predictedAwayRuns: 150 },
+      });
+
+      // The real CPL 2026 M07 shape: a DLS chase over a reduced allocation.
+      const outcome = await apply(
+        finishedMatch({
+          statusText:
+            'E2E Kings won by 3 wkts (2nd innings reduced to 8 overs due to rain, DLS target 52)',
+          innings: [
+            { teamName: 'E2E Warriors', inningNumber: 1, runs: 98, wickets: 9, oversText: '19' },
+            { teamName: 'E2E Kings', inningNumber: 1, runs: 54, wickets: 7, oversText: '7.4' },
+          ],
+        }),
+      );
+      expect(outcome.written).toBeTruthy();
+
+      const { Game } = models();
+      const game = await Game.findByPk(GAME_ID);
+      expect(game.rainAffected).toBe(true);
+      expect(game.result).toBe('home'); // status wins over run totals under DLS
+
+      // Winner only: 50. Without the void this would have been 50 + 71 + 24.
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(50);
+    });
+
+    test('an admin can un-void a match the cron flagged as rain-affected', async () => {
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 178 },
+      });
+      await apply(
+        finishedMatch({
+          statusText: 'E2E Kings won by 48 runs - 18 overs game due to rain',
+          innings: [
+            { teamName: 'E2E Kings', inningNumber: 1, runs: 178, wickets: 5, oversText: '18' },
+            {
+              teamName: 'E2E Warriors',
+              inningNumber: 1,
+              runs: 130,
+              wickets: 10,
+              oversText: '16.4',
+            },
+          ],
+        }),
+      );
+      const { Game } = models();
+      expect((await Game.findByPk(GAME_ID)).rainAffected).toBe(true);
+
+      // Admin input is authoritative: omitting the flag clears it and the runs
+      // legs come back, which is the whole point of the correction path.
+      const corrected = await admin.post(`/api/admin/games/${GAME_ID}/cricket-result`, {
+        data: {
+          result: 'home',
+          home: innings(178, 5, '20.0'),
+          away: innings(130, 10, '16.4', true),
+          rainAffected: false,
+        },
+      });
+      expect(corrected.ok()).toBeTruthy();
+      expect((await Game.findByPk(GAME_ID)).rainAffected).toBe(false);
+
+      // 50 + (100 - |178-178|) = 150.
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(150);
+    });
+
+    test('a rain DELAY that played full overs is NOT voided', async () => {
+      await alice.post('/api/picks', {
+        data: { gameId: GAME_ID, choice: 'home', predictedHomeRuns: 178 },
+      });
+      const outcome = await apply(
+        finishedMatch({
+          statusText: 'E2E Kings won by 48 runs after a rain delay',
+          innings: [
+            { teamName: 'E2E Kings', inningNumber: 1, runs: 178, wickets: 5, oversText: '20' },
+            {
+              teamName: 'E2E Warriors',
+              inningNumber: 1,
+              runs: 130,
+              wickets: 10,
+              oversText: '16.4',
+            },
+          ],
+        }),
+      );
+      expect(outcome.written).toBeTruthy();
+      // Nothing was truncated, so voiding here would confiscate real points.
+      expect((await models().Game.findByPk(GAME_ID)).rainAffected).toBe(false);
+      const board = await (await alice.get('/api/leaderboard?sport=cricket')).json();
+      expect(board.overall.find((r) => r.userId === aliceId).points).toBe(150);
     });
 
     test('an unfinished match is skipped quietly', async () => {

@@ -37,6 +37,56 @@ function pick(overrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// rainAffected — weather-shortened matches pay the winner alone
+// ---------------------------------------------------------------------------
+
+test('rainAffected: both runs legs void, the winner leg still pays', () => {
+  // A pre-match runs prediction is on a 20-over scale, and a DLS total cannot
+  // fairly be measured against it, so neither leg scores.
+  const g = cricketGame({
+    result: 'home',
+    rainAffected: true,
+    homeScore: 54,
+    homeBallsFaced: 46,
+    awayScore: 98,
+    awayBallsFaced: 114,
+  });
+  const p = pick({ choice: 'home', predictedHomeRuns: 54, predictedAwayRuns: 98 });
+  const b = scoreCricketBreakdown(p, g);
+  assert.equal(b.winner, 50);
+  assert.equal(b.homeRuns, 0);
+  assert.equal(b.awayRuns, 0);
+  assert.equal(b.total, 50);
+  assert.equal(b.rainVoided, true);
+});
+
+test('rainAffected: a wrong winner on a rain match scores nothing at all', () => {
+  const g = cricketGame({ result: 'away', rainAffected: true, homeScore: 54, homeBallsFaced: 46 });
+  assert.equal(scoreCricketPick(pick({ choice: 'home', predictedHomeRuns: 54 }), g), 0);
+});
+
+test('rainAffected: the same scorecard without the flag scores the runs legs normally', () => {
+  // Guards the default: every pre-existing row has rainAffected false, so this
+  // change rescores nothing retroactively.
+  const g = cricketGame({
+    result: 'home',
+    homeScore: 54,
+    homeBallsFaced: 46,
+    awayScore: 98,
+    awayBallsFaced: 114,
+  });
+  const b = scoreCricketBreakdown(pick({ choice: 'home', predictedHomeRuns: 141 }), g);
+  assert.equal(b.rainVoided, false);
+  assert.equal(b.homeRuns, 100); // 54 off 46 balls -> 141 at 20 overs
+  assert.equal(b.total, 150);
+});
+
+test('rainAffected: an abandoned match is still 0 regardless of the flag', () => {
+  const g = cricketGame({ result: null, rainAffected: true, homeScore: 45, homeBallsFaced: 48 });
+  assert.equal(scoreCricketPick(pick({ predictedHomeRuns: 45 }), g), 0);
+});
+
+// ---------------------------------------------------------------------------
 // effectiveRuns — the proration rule
 // ---------------------------------------------------------------------------
 

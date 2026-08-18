@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   classifyStatus,
   mapInningsToSides,
+  isRainShortened,
   deriveAllOut,
   deriveWinner,
   buildCricketResultPayload,
@@ -337,6 +338,91 @@ test('deriveAllOut: fewer than nine wickets is never all out', () => {
 });
 
 // ---------------------------------------------------------------------------
+// isRainShortened — the flag that voids both runs legs
+// ---------------------------------------------------------------------------
+
+const side = (balls, allOut = false) => ({ balls, allOut });
+
+test('isRainShortened: a DLS match with a truncated innings is rain-shortened', () => {
+  const out = isRainShortened({
+    statusInfo: classifyStatus(`${AWAY} won by 4 wickets (D/L method)`),
+    home: side(120),
+    away: side(46),
+  });
+  assert.equal(out, true);
+});
+
+test('isRainShortened: a rain DELAY that still played full overs is NOT', () => {
+  // Nothing was truncated, so normal scoring is correct — voiding here would
+  // silently confiscate points from a match that played out in full.
+  const out = isRainShortened({
+    statusInfo: classifyStatus(`${AWAY} won by 4 wickets after a rain delay`),
+    home: side(120),
+    away: side(120),
+  });
+  assert.equal(out, false);
+});
+
+test('isRainShortened: an ordinary chase won with overs to spare is NOT', () => {
+  // No weather marker. This is the run-rate market working as designed.
+  const out = isRainShortened({
+    statusInfo: classifyStatus(`${AWAY} won by 6 wickets`),
+    home: side(120),
+    away: side(90),
+  });
+  assert.equal(out, false);
+});
+
+test('isRainShortened: a side bowled out early does not count as truncated', () => {
+  // Dismissal, not weather. Even with a rain marker in the status, an all-out
+  // innings is a complete innings.
+  const out = isRainShortened({
+    statusInfo: classifyStatus(`${HOME} won by 30 runs after a rain delay`),
+    home: side(120),
+    away: side(90, true),
+  });
+  assert.equal(out, false);
+});
+
+test('isRainShortened: every DLS spelling triggers the marker', () => {
+  for (const text of [
+    `${AWAY} won by 3 wickets (D/L method)`,
+    `${AWAY} won by 3 wickets (DLS Method)`,
+    `${AWAY} won by 9 runs - 18 overs game due to rain`,
+    `${AWAY} won by 3 wkts (2nd innings reduced to 8 overs due to rain, DLS target 52)`,
+  ]) {
+    assert.equal(
+      isRainShortened({ statusInfo: classifyStatus(text), home: side(120), away: side(46) }),
+      true,
+      text,
+    );
+  }
+});
+
+test('buildCricketResultPayload: stamps rainAffected on a real DLS match', () => {
+  // The real CPL 2026 M07 scorecard.
+  const out = build(
+    providerMatch({
+      statusText: `${AWAY} won by 3 wkts (2nd innings reduced to 8 overs due to rain, DLS target 52)`,
+      innings: [inn(HOME, 98, 9, '19'), inn(AWAY, 54, 7, '7.4')],
+    }),
+  );
+  assert.equal(out.ok, true);
+  assert.equal(out.payload.rainAffected, true);
+  assert.equal(cricketResultSchema.safeParse(out.payload).success, true);
+});
+
+test('buildCricketResultPayload: a dry match is not stamped rainAffected', () => {
+  const out = build(
+    providerMatch({
+      statusText: `${AWAY} won by 6 wickets`,
+      innings: [inn(HOME, 180, 6, '20'), inn(AWAY, 181, 4, '15')],
+    }),
+  );
+  assert.equal(out.payload.rainAffected, false);
+});
+
+// ---------------------------------------------------------------------------
 // deriveWinner — two signals that must agree
 // ---------------------------------------------------------------------------
 
@@ -436,6 +522,7 @@ test('buildCricketResultPayload: a clean chase produces a schema-valid payload',
     result: 'away',
     home: { runs: 180, wickets: 6, overs: '20.0', allOut: false },
     away: { runs: 181, wickets: 4, overs: '19.2', allOut: false },
+    rainAffected: false,
   });
   // The cross-module invariant: the automatic path is held to exactly the
   // rules the admin form obeys, so the two entry points cannot drift.

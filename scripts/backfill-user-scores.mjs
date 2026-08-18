@@ -79,6 +79,11 @@ function runsLeg(predicted, effective) {
 function scoreCricketPick(pick, game) {
   if (!pick || !game.result) return 0;
   const winner = pick.choice === game.result ? 50 : 0;
+  // Rain voids both runs legs — see lib/scoring.js. This copy is load-bearing:
+  // a re-run of this backfill without the branch would silently restore runs
+  // points on every rain-affected match and drift user_scores away from the
+  // live scorer.
+  if (game.rainAffected) return winner;
   return (
     winner +
     runsLeg(pick.predictedHomeRuns, effectiveRuns(game, 'home')) +
@@ -138,7 +143,8 @@ try {
       g."homeBallsFaced" AS home_balls,
       g."awayBallsFaced" AS away_balls,
       g."homeAllOut"     AS home_all_out,
-      g."awayAllOut"     AS away_all_out
+      g."awayAllOut"     AS away_all_out,
+      g."rainAffected"   AS rain_affected
     FROM picks p
     JOIN games g ON g.id = p."gameId"
   `);
@@ -173,6 +179,7 @@ try {
       awayBallsFaced: r.away_balls,
       homeAllOut: r.home_all_out,
       awayAllOut: r.away_all_out,
+      rainAffected: r.rain_affected,
     };
     const points = scorePick(pick, game);
     const scored = r.game_result !== null ? 1 : 0;

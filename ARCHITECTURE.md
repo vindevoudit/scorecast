@@ -1449,6 +1449,7 @@ UUIDs are the universal primary-key type. All `id` columns are `UUID` with `defa
 | `homeBallsFaced` / `awayBallsFaced` | INTEGER NULLABLE | Tier 34, cricket only. Balls faced in the innings (0–120 for a full T20). Stored as balls, not overs, because cricket overs are base-6 (`17.2` = 17 overs 2 balls) and cannot be prorated arithmetically. NULL is treated as a full innings by `effectiveRuns` |
 | `homeWickets` / `awayWickets` | INTEGER NULLABLE | Tier 34, cricket only. **Display only** (`165/6`). Kept separate from `allOut` because a side can be all out at 9 down with a batter absent hurt |
 | `homeAllOut` / `awayAllOut` | BOOLEAN NOT NULL DEFAULT false | Tier 34, cricket only. **Authoritative for scoring**: an all-out side is never prorated to a 20-over equivalent. Checked BEFORE the ball count in `effectiveRuns`, since an all-out side has usually faced fewer than 120 balls |
+| `rainAffected` | BOOLEAN NOT NULL DEFAULT false | Cricket only. True when weather genuinely cut an innings short (DLS / reduced overs), which **voids both runs legs** in `scoreCricketBreakdown` — the match pays the flat +50 winner alone. Stored rather than derived because `scorePick` is a pure function of `(pick, game)` and never sees the provider status string that carries the marker. Set at capture by `lib/cricketResult.js isRainShortened`, which requires a weather marker **and** an innings short of 120 balls that was not all out, so a rain _delay_ played out in full scores normally. `DEFAULT false` is what makes it non-retroactive — no pre-existing row is rescored |
 | `providerMatchId` | VARCHAR(64) NULLABLE | CPL auto-results, cricket only. The cricket provider's match id. Exists because cricket fixtures come from a committed JSON file, so `sourceId` is synthetic (`CPL2026-M01`) and the provider has never seen it. Stamped **once** by `resolveCricketMatchIds` and treated as immutable. Partial unique index `games_league_provider_match_unique ON (leagueId, providerMatchId) WHERE providerMatchId IS NOT NULL` — the last line of defence against two local games binding to one provider match |
 | `providerMatchResolvedAt` | TIMESTAMPTZ NULLABLE | CPL auto-results. When the id above was stamped. Audit only |
 | `resultSource` | VARCHAR(16) NULLABLE | CPL auto-results. `NULL` = nobody has written a result (**the only claimable state**), `'auto'` = the cron captured it, `'admin'` = a human wrote or corrected it and the automation is **permanently locked out**. The exclusion is enforced in the claim's SQL `WHERE`, not in JS, so the admin-vs-cron race is settled by the database. Indexed `games_result_source_idx WHERE sport = 'cricket'`. Migration `20260810000001` back-stamps `'admin'` on every already-played cricket game — **not optional**, the season was underway when this shipped |
@@ -4746,6 +4747,19 @@ the innings flips `byRuns` into disagreement with the status string.
 rain, DLS target 52"`, 54 vs 98) — would have been scored **backwards** by a run comparison,
 inverting the flat +50 for every user on the match. Both derive correctly as `basis=dls`. That
 is a ~22% incidence in week one; do not simplify `deriveWinner` into a totals check.
+
+**Rain voids the runs legs.** A pre-match runs prediction is inherently on a 20-over scale, and
+`effectiveRuns` normalises every innings to that scale so the comparison stays like-for-like. That
+works for a chase won early; it breaks under DLS, where a side chasing a revised target over a
+reduced allocation produces a total no 20-over projection can fairly be measured against — CPL M07's
+54 off 46 balls extrapolates to 141 from a sample the batting side never tried to maximise. Scaling
+to the _actual_ allocation is not the fix: it yields the literal truncated score nobody could have
+forecast, it is harsher on a normal pre-match prediction than the status quo, and the feed publishes
+no per-side allocation to scale by (the two innings genuinely differ under DLS, and the only mention
+is prose in the status string). So `games.rainAffected` voids both legs and the match pays the flat
++50 winner alone — neutral, since nobody is rewarded for landing near an extrapolated number and
+nobody is punished for a forecast the weather invalidated. `isRainShortened` requires a weather
+marker **and** a genuinely truncated innings, so a rain delay played out in full is unaffected.
 
 **Alarms** from the daily job: `unresolved` (add an alias), `placeholders` (rename the row),
 `needsManualEntry` (kickoff >12 h ago, uncaptured), `stranded`

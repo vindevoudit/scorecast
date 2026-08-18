@@ -276,6 +276,14 @@ const cricketResultSchema = z
     result: z.union([z.enum(['home', 'away']), z.null()]),
     home: cricketInnings,
     away: cricketInnings,
+    // True when weather cut an innings short (DLS / reduced overs), which
+    // VOIDS both runs legs — a pre-match runs prediction is on a 20-over scale
+    // and a DLS total cannot fairly be compared against it. Optional and
+    // defaulting to false so the pre-existing admin wire format still
+    // validates; the admin form now sends it explicitly, and because the
+    // default is false an admin correcting a rain match must re-tick the box
+    // (admin input stays authoritative over anything the cron derived).
+    rainAffected: z.boolean().optional().default(false),
   })
   // Ten wickets IS all out — a side has eleven players. The reverse is not
   // enforced, because a side can legitimately be all out at 9 down with a

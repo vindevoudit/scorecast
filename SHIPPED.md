@@ -18,6 +18,48 @@ in CLAUDE.md — this file is history, not the contract.
 
 ---
 
+## Rain-shortened cricket matches void their runs legs (2026-08-10)
+
+Immediate follow-on from CPL auto-results. Capturing real DLS matches exposed that the runs legs
+score badly on weather-shortened games, so `games.rainAffected` now voids both legs and the match
+pays the flat **+50 winner alone**.
+
+**Why voiding rather than better scaling.** A runs prediction is made pre-match and is therefore on a
+20-over scale; `effectiveRuns` normalises every innings to that scale so the comparison stays
+like-for-like. That works for a chase won early. It breaks under DLS, where a side chasing a _revised_
+target over a _reduced_ allocation produces a total no 20-over projection can fairly be measured
+against — CPL M07's 54 off 46 balls extrapolates to 141 from a sample the batting side never tried to
+maximise. The obvious alternative, scaling to the actual allocation, was investigated and rejected on
+three counts: it yields the literal truncated score nobody could have forecast; it is _harsher_ than
+the status quo on a normal pre-match prediction (on M07, a 170/175 forecast drops from 99 runs-leg
+points to 23); and it is unimplementable anyway, because the feed publishes no per-side allocation —
+the two innings genuinely differ under DLS and the only mention is prose inside the status string.
+Voiding is the neutral answer: nobody is rewarded for landing near an extrapolated number, nobody is
+punished for a forecast the weather invalidated.
+
+**The predicate is narrow on purpose.** `isRainShortened` requires **both** a weather/DLS marker in
+the status **and** an innings genuinely cut short — under 120 balls and not all out, i.e. exactly the
+case where proration would have fired for a non-dismissal reason. So a rain _delay_ that still played
+its full twenty overs each scores normally (voiding there would confiscate real points), and an
+ordinary chase won with overs to spare is untouched (that is the run-rate market working as designed).
+
+**Non-retroactive by construction.** `DEFAULT FALSE` means every pre-existing row keeps normal
+scoring, so no settled pick was rescored. Only matches captured or corrected after the migration can
+carry the flag.
+
+**Surfaces.** Written in step 1's transaction alongside the innings columns (same reason: `setResult`'s
+FOR UPDATE re-read must observe it before `applyPickTransition` recomputes, or toggling the flag would
+recompute identical points and hit the idempotency short-circuit). Mirrored into `src/utils/scoring.js`
+and `scripts/backfill-user-scores.mjs`, and both the backfill's raw SQL projection and `StatsService`'s
+`attributes` list gained the column — the same trap `games.sport` documents. The admin form gains a
+checkbox seeded from the game, so correcting an auto-captured rain match does not silently un-void it;
+the pick panel states the rule before the user types; and the post-match scorecard shows
+`voided (rain)` instead of a 20-over equivalent that played no part in the score.
+
+**Verification.** 326 unit tests (11 new across `isRainShortened`, payload stamping, and the scoring
+branch) and 25 cricket E2E (3 new: a real DLS shape voiding to 50, an admin un-void restoring the
+legs, and a rain delay correctly _not_ voiding).
+
 ## CPL auto-results — automatic T20 result capture from CricketData.org (2026-08-10)
 
 Tier 34 shipped cricket with no feed at all: fixtures from a committed JSON file, and **every result typed

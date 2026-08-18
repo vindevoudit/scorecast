@@ -162,7 +162,9 @@ function CricketMarketPanel({ game, existingPick, onSubmit }) {
             {CRICKET_RUNS_LEG_MAX} minus however many runs you are out by
           </span>
           . Totals are compared to a <strong className="text-fg">20-over equivalent</strong>: a side
-          that bats fewer overs is scaled up, unless it is bowled out.
+          that bats fewer overs is scaled up, unless it is bowled out. If{' '}
+          <strong className="text-fg">weather cuts an innings short</strong>, both runs predictions
+          are voided and the match pays the winner alone.
         </p>
 
         <div className="mt-3 grid grid-cols-2 gap-3">

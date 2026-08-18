@@ -189,6 +189,18 @@ module.exports = (sequelize) => {
         allowNull: false,
         defaultValue: false,
       },
+      // True when weather cut an innings short (DLS / reduced overs). Cricket
+      // only. Voids BOTH runs legs in lib/scoring.js: a runs prediction is made
+      // pre-match on a 20-over scale, and a DLS innings produces a total that no
+      // 20-over projection can fairly be compared against. The match still pays
+      // the flat +50 winner. Stored rather than derived because scorePick is a
+      // pure function of (pick, game) and never sees the provider status string
+      // that carries the rain marker.
+      rainAffected: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
       // CPL auto-results — the join onto the cricket provider's match id.
       // Cricket fixtures come from a committed JSON file, so `sourceId` is
       // synthetic and the provider has never heard of it; this holds the

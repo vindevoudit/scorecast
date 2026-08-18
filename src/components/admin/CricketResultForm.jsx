@@ -104,6 +104,10 @@ function CricketResultForm({ game, onSubmit, onCancel, busy }) {
   const [result, setResult] = useState(game.result ?? 'home');
   const [home, setHome] = useState(EMPTY_INNINGS);
   const [away, setAway] = useState(EMPTY_INNINGS);
+  // Seeded from the game so correcting an auto-captured rain match does not
+  // silently un-void it. The server defaults this to false when absent, so
+  // whatever is ticked here is authoritative.
+  const [rainAffected, setRainAffected] = useState(Boolean(game.rainAffected));
   const [error, setError] = useState('');
 
   const validate = () => {
@@ -136,7 +140,12 @@ function CricketResultForm({ game, onSubmit, onCancel, busy }) {
       overs: String(v.overs).trim(),
       allOut: Boolean(v.allOut),
     });
-    onSubmit({ result: result === 'none' ? null : result, home: pack(home), away: pack(away) });
+    onSubmit({
+      result: result === 'none' ? null : result,
+      home: pack(home),
+      away: pack(away),
+      rainAffected: Boolean(rainAffected),
+    });
   };
 
   return (
@@ -157,6 +166,24 @@ function CricketResultForm({ game, onSubmit, onCancel, busy }) {
           disabled={busy}
         />
       </div>
+
+      <label className="flex items-start gap-2 rounded-xl border border-default bg-overlay/40 p-3 text-sm text-fg">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={rainAffected}
+          onChange={(e) => setRainAffected(e.target.checked)}
+          disabled={busy}
+        />
+        <span>
+          Weather cut an innings short (DLS / reduced overs)
+          <span className="mt-0.5 block text-[11px] leading-relaxed text-fg-subtle">
+            Voids both runs legs — the match pays the winner only. Tick this when overs were lost,
+            not for a rain delay that still played its full twenty each. A runs prediction is made
+            pre-match on a 20-over scale, and a DLS total cannot be fairly measured against it.
+          </span>
+        </span>
+      </label>
 
       <fieldset className="flex flex-wrap items-center gap-3">
         <legend className="sr-only">Match result</legend>

@@ -285,6 +285,9 @@ async function getStatsForUser(userId, { window = '30d', now = new Date() } = {}
       'awayBallsFaced',
       'homeAllOut',
       'awayAllOut',
+      // Same trap: omitting it makes every rain-voided match score its runs
+      // legs here but not on the leaderboard.
+      'rainAffected',
     ],
   });
   const gameById = new Map(games.map((g) => [g.id, g]));

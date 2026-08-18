@@ -96,8 +96,12 @@ export function scoreCricketBreakdown(pick, game) {
   const homeEffective = effectiveRuns(game, 'home');
   const awayEffective = effectiveRuns(game, 'away');
   const winner = pick.choice === game.result ? 50 : 0;
-  const homeRuns = runsLeg(pick.predictedHomeRuns, homeEffective);
-  const awayRuns = runsLeg(pick.predictedAwayRuns, awayEffective);
+  // Rain voids both runs legs — see the long note in lib/scoring.js. Mirrored
+  // here because this file IS the client copy of that formula and the two must
+  // never disagree about what a pick is worth.
+  const rainVoided = Boolean(game.rainAffected);
+  const homeRuns = rainVoided ? 0 : runsLeg(pick.predictedHomeRuns, homeEffective);
+  const awayRuns = rainVoided ? 0 : runsLeg(pick.predictedAwayRuns, awayEffective);
   return {
     winner,
     homeRuns,
@@ -106,6 +110,7 @@ export function scoreCricketBreakdown(pick, game) {
     scored: true,
     homeEffective,
     awayEffective,
+    rainVoided,
   };
 }
 
